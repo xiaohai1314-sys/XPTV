@@ -1,119 +1,126 @@
+
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (AppleTV; CPU OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-	ver: 1,
-	title: '观影网',
-	site: 'https://www.gying.org',
-	tabs: [
-		{ name: '电影', ext: { id: '/mv/------' } },
-		{ name: '剧集', ext: { id: '/tv/------' } },
-		{ name: '动漫', ext: { id: '/ac/------' } },
-	],
+  ver: 2,
+  title: '观影网 (新版)',
+  site: 'https://www.gying.org',
+  tabs: [
+    { name: '电影', ext: { id: '/mv/------' } },
+    { name: '剧集', ext: { id: '/tv/------' } },
+    { name: '动漫', ext: { id: '/ac/------' } },
+  ],
 }
 
 async function getConfig() {
-	return jsonify(appConfig)
+  return jsonify(appConfig)
 }
 
 async function getCards(ext) {
-	ext = argsify(ext)
-	let cards = []
-	let { page = 1, id } = ext
-	const url = appConfig.site + id + page
+  ext = argsify(ext)
+  let cards = []
+  let { page = 1, id } = ext
+  const url = appConfig.site + id + page
 
-	const { data } = await $fetch.get(url, {
-		headers: { "User-Agent": UA },
-	})
+  const { data } = await $fetch.get(url, {
+    headers: { "User-Agent": UA },
+  })
 
-	const $ = cheerio.load(data)
+  const $ = cheerio.load(data)
 
-	$('.vbox, .vlist').each((i, el) => {
-		const a = $(el).find('a')
-		const name = $(el).find('b').text().trim()
-		const remarks = $(el).find('p').text().trim()
-		const pic = $(el).find('img').attr('data-src') || $(el).find('img').attr('src')
-		const href = a.attr('href')
+  $('.swiper-slide a').each((i, el) => {
+    const name = $(el).attr('title') || '未知'
+    const href = $(el).attr('href')
+    const pic = $(el).find('img').attr('data-src')
 
-		if (href) {
-			cards.push({
-				vod_id: href,
-				vod_name: name,
-				vod_pic: pic?.startsWith('http') ? pic : `${appConfig.site}${pic}`,
-				vod_remarks: remarks,
-				ext: {
-					url: `${appConfig.site}/res/downurl${href}`,
-				},
-			})
-		}
-	})
+    if (href && name) {
+      cards.push({
+        vod_id: href,
+        vod_name: name,
+        vod_pic: pic?.startsWith('http') ? pic : `${pic}`,
+        vod_remarks: '',
+        ext: {
+          url: appConfig.site + href,
+        },
+      })
+    }
+  })
 
-	return jsonify({ list: cards })
+  return jsonify({ list: cards })
 }
 
 async function getTracks(ext) {
-	ext = argsify(ext)
-	let url = ext.url
-	const { data } = await $fetch.get(url, { headers: { "User-Agent": UA } })
-	const respstr = JSON.parse(data)
+  ext = argsify(ext)
+  const url = ext.url
+  const { data } = await $fetch.get(url, {
+    headers: { "User-Agent": UA },
+  })
 
-	let tracks = []
+  const $ = cheerio.load(data)
+  let tracks = []
 
-	if (respstr.hasOwnProperty('panlist')) {
-		respstr.panlist.url.forEach(item => {
-			tracks.push({
-				name: '网盘',
-				pan: item,
-				ext: { url: '' },
-			})
-		})
-	} else if (respstr.hasOwnProperty('file')) {
-		$utils.toastError('网盘验证掉签')
-	} else {
-		$utils.toastError('没有网盘资源')
-	}
+  $('#sBox .player-all a').each((i, el) => {
+    const name = $(el).text().trim()
+    const href = $(el).attr('href')
+    if (href && name) {
+      tracks.push({
+        name,
+        url: appConfig.site + href,
+        ext: { url: appConfig.site + href }
+      })
+    }
+  })
 
-	return jsonify({
-		list: [
-			{
-				title: '默认分组',
-				tracks,
-			},
-		],
-	})
+  if (tracks.length === 0) {
+    $utils.toastError("未找到播放资源")
+  }
+
+  return jsonify({
+    list: [
+      {
+        title: '播放线路',
+        tracks,
+      },
+    ],
+  })
 }
 
 async function getPlayinfo(ext) {
-	ext = argsify(ext)
-	return jsonify({ urls: [ext.url] })
+  ext = argsify(ext)
+  return jsonify({ urls: [ext.url] })
 }
 
 async function search(ext) {
-	ext = argsify(ext)
-	let text = encodeURIComponent(ext.text)
-	let page = ext.page || 1
-	let url = `${appConfig.site}/s/1---${page}/${text}`
-	const { data } = await $fetch.get(url, { headers: { "User-Agent": UA } })
+  ext = argsify(ext)
+  const text = encodeURIComponent(ext.text)
+  const page = ext.page || 1
+  const url = `${appConfig.site}/s/1---${page}/${text}`
 
-	const $ = cheerio.load(data)
-	let cards = []
+  const { data } = await $fetch.get(url, {
+    headers: { "User-Agent": UA },
+  })
 
-	$('.v5d').each((_, element) => {
-		const name = $(element).find('b').text().trim() || 'N/A'
-		const imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || 'N/A'
-		const additionalInfo = $(element).find('p').text().trim() || 'N/A'
-		const pathMatch = $(element).find('a').attr('href') || 'N/A'
+  const $ = cheerio.load(data)
+  let cards = []
 
-		cards.push({
-			vod_id: pathMatch,
-			vod_name: name,
-			vod_pic: imgUrl,
-			vod_remarks: additionalInfo,
-			ext: {
-				url: `${appConfig.site}/res/downurl${pathMatch}`,
-			},
-		})
-	})
+  $('.swiper-slide a').each((i, el) => {
+    const name = $(el).attr('title') || '未知'
+    const href = $(el).attr('href')
+    const pic = $(el).find('img').attr('data-src')
 
-	return jsonify({ list: cards })
+    if (href && name) {
+      cards.push({
+        vod_id: href,
+        vod_name: name,
+        vod_pic: pic?.startsWith('http') ? pic : `${pic}`,
+        vod_remarks: '',
+        ext: {
+          url: appConfig.site + href,
+        },
+      })
+    }
+  })
+
+  return jsonify({ list: cards })
 }
