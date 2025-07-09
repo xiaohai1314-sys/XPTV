@@ -21,41 +21,31 @@ async function getCards(ext) {
 	let cards = []
 	let { page = 1, id } = ext
 	const url = appConfig.site + id + page
-	const { data } = await $fetch.get(url, { headers: { "User-Agent": UA } })
+
+	const { data } = await $fetch.get(url, {
+		headers: { "User-Agent": UA },
+	})
 
 	const $ = cheerio.load(data)
 
-	if ($('p.error').length > 0) {
-		$utils.toastError("页面加载失败，可能被拦截")
-		return jsonify({ list: [] })
-	}
+	$('.vbox, .vlist').each((i, el) => {
+		const a = $(el).find('a')
+		const name = $(el).find('b').text().trim()
+		const remarks = $(el).find('p').text().trim()
+		const pic = $(el).find('img').attr('data-src') || $(el).find('img').attr('src')
+		const href = a.attr('href')
 
-	const scriptContent = $('script').filter((_, script) => {
-		return $(script).html()?.includes('_obj.header')
-	}).html()
-
-	if (!scriptContent) {
-		$utils.toastError("未找到视频数据脚本")
-		return jsonify({ list: [] })
-	}
-
-	const jsonMatch = scriptContent.match(/_obj\.inlist=({.*});/)
-	if (!jsonMatch) {
-		$utils.toastError("未找到 _obj.inlist 数据")
-		return jsonify({ list: [] })
-	}
-
-	const inlistData = JSON.parse(jsonMatch[1])
-	inlistData["i"].forEach((item, index) => {
-		cards.push({
-			vod_id: item,
-			vod_name: inlistData["t"][index],
-			vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
-			vod_remarks: inlistData["g"][index],
-			ext: {
-				url: `https://www.gyg.la/res/downurl/${inlistData["ty"]}/${item}`,
-			},
-		})
+		if (href) {
+			cards.push({
+				vod_id: href,
+				vod_name: name,
+				vod_pic: pic?.startsWith('http') ? pic : `${appConfig.site}${pic}`,
+				vod_remarks: remarks,
+				ext: {
+					url: `${appConfig.site}/res/downurl${href}`,
+				},
+			})
+		}
 	})
 
 	return jsonify({ list: cards })
