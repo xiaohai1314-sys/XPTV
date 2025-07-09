@@ -473,7 +473,7 @@
       "name": "观影 | PAN",
       "type": 3,
       "api": "csp_guanying",
-      "ext": "https://ghp.xptvhelper.link/https://raw.githubusercontent.com/kingreevice/my_xptv/refs/heads/main/js/GYING_2025_2.js"
+      "ext": "https://raw.githubusercontent.com/xiaohai1314-sys/XPTV/refs/heads/main/js/guanying.js"
     },
     {
       "name": "TG搜 | PAN",
