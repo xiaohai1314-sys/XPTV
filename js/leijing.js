@@ -95,29 +95,55 @@ async function getTracks(ext) {
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   
-  // 简化提取逻辑 - 直接从整个页面文本提取
-  const pageText = $('body').text()
+  // 1. 首先尝试从.content区域提取
+  let contentText = $('.content').text()
   
-  // 提取所有网盘链接
-  const panMatches = pageText.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+  // 2. 如果没找到内容，使用整个页面
+  if (!contentText || contentText.length < 100) {
+    contentText = $('body').text()
+  }
   
-  // 提取所有访问码
-  const accessCodeMatches = pageText.match(/(?:访问码|访问密码|提取码)[:：]?\s*(\w{4,6})/gi) || []
-  const accessCodes = accessCodeMatches.map(code => 
-    code.replace(/(?:访问码|访问密码|提取码)[:：]?\s*/i, '')
-  )
+  // 增强型提取逻辑 - 专门处理您提供的格式
+  const resourceBlocks = contentText.split(/\n\s*\n/) // 按空行分割文本块
   
-  // 将链接和访问码配对
-  panMatches.forEach((panUrl, index) => {
-    // 使用第一个访问码作为默认值
-    const accessCode = accessCodes[index] || accessCodes[0] || ''
+  resourceBlocks.forEach(block => {
+    // 跳过无关内容块
+    if (!block.includes('cloud.189.cn')) return
     
-    tracks.push({
-      name: title,
-      pan: panUrl,
-      ext: { accessCode }
+    // 提取当前块内的所有链接
+    const panMatches = block.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+    
+    // 在当前块内查找访问码
+    let accessCode = ''
+    const codeMatch = block.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
+    if (codeMatch) {
+      accessCode = codeMatch[1]
+    }
+    
+    // 添加找到的链接
+    panMatches.forEach(panUrl => {
+      tracks.push({
+        name: title,
+        pan: panUrl,
+        ext: { accessCode }
+      })
     })
   })
+  
+  // 如果上面没找到，使用全文本扫描作为后备
+  if (tracks.length === 0) {
+    const panMatches = contentText.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+    const codeMatch = contentText.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
+    const accessCode = codeMatch ? codeMatch[1] : ''
+    
+    panMatches.forEach(panUrl => {
+      tracks.push({
+        name: title,
+        pan: panUrl,
+        ext: { accessCode }
+      })
+    })
+  }
   
   return jsonify({ list: [{
     title: "资源列表",
