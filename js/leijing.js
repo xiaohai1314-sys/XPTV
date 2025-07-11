@@ -66,9 +66,10 @@ async function getCards(ext) {
 async function getTracks(ext) {
   ext = argsify(ext)
   const tracks = []
-  const pans = new Set()
-  const urlRegex = /(https?:\/\/[^\s（）\(\)]+\.cloud\.189\.cn\/[^\s（）\(\)]+)/gi
-  const codeRegexGlobal = /(提取码|密码|访问码)[：:\s]*([a-zA-Z0-9]{4,6})/gi
+  let link = ''
+  let code = ''
+  const codeRegex = /(提取码|访问码|密码)[：:\s]*([a-zA-Z0-9]{4,6})/
+  const linkRegex = /https?:\/\/cloud\.189\.cn\/\S+/
 
   const { data } = await $fetch.get(ext.url, {
     headers: {
@@ -78,33 +79,26 @@ async function getTracks(ext) {
   })
 
   const $ = cheerio.load(data)
+  const lines = $('body').text().split(/\n|<br\s*\/?>/)
 
-  $('div, p, a, span').each((_, el) => {
-    const text = $(el).text().trim()
-
-    // 提取访问码（支持多个）
-    const codes = []
-    let match
-    while ((match = codeRegexGlobal.exec(text)) !== null) {
-      codes.push(match[2])
+  for (let line of lines) {
+    if (!link) {
+      const m = line.match(linkRegex)
+      if (m) link = m[0].replace(/[　-〿（）]/g, '').trim()
     }
+    if (!code) {
+      const cm = line.match(codeRegex)
+      if (cm) code = cm[2].trim()
+    }
+  }
 
-    // 提取链接（文本或href中）
-    const allText = [text, $(el).attr('href') ?? ''].join('\n')
-    const urls = [...allText.matchAll(urlRegex)].map(m => m[1])
-
-    urls.forEach(link => {
-      const normalized = link.replace('http://', 'https://')
-      if (!pans.has(normalized)) {
-        pans.add(normalized)
-        tracks.push({
-          name: codes.length > 0 ? `网盘(码:${codes[0]})` : '网盘',
-          pan: normalized,
-          ext: codes.length > 0 ? { code: codes[0] } : {}
-        })
-      }
+  if (link) {
+    tracks.push({
+      name: code ? `网盘(码:${code})` : '网盘',
+      pan: link,
+      ext: code ? { code } : {}
     })
-  })
+  }
 
   return jsonify({
     list: [{
