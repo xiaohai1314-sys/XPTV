@@ -111,6 +111,8 @@ async function getTracks(ext) {
   const title = $('h1').text().trim() || "网盘资源"
   const pageHtml = $.html()
 
+  print(pageHtml)  // 打印页面HTML，以确认是否加载正确
+
   const validResources = extractValidResources(pageHtml)
 
   print(`✅ 抓取到资源数量: ${validResources.length}`)
@@ -139,11 +141,9 @@ function extractValidResources(html) {
     const text = $(el).text()
     const href = $(el).attr('href') || ''
 
-    // 检查是否有天翼网盘的链接
-    if (text.includes('cloud.189.cn')) print(`📌 命中内容: ${text}`)
-
-    // 处理包含验证码的网盘链接
-    if (isValidPanUrl(href)) {
+    // 强化匹配天翼网盘链接
+    if (href && href.includes('cloud.189.cn')) {
+      print(`📌 命中链接: ${href}`)
       const accessCode = extractAccessCode(text, $(el).parent().text())
       const fullUrlWithCode = href + (accessCode ? ` （访问码：${accessCode}）` : '')
       addResource(resources, fullUrlWithCode, accessCode)
@@ -172,10 +172,6 @@ function extractValidResources(html) {
   return resources
 }
 
-function isValidPanUrl(url) {
-  return !!url && /https?:\/\/cloud\.189\.cn\/(t|web\/share)\//.test(url)
-}
-
 function addResource(resources, url, accessCode = '') {
   const cleanUrl = url.replace(/[\s\)）]+$/, '')
   const exists = resources.some(r => r.url === cleanUrl)
@@ -188,7 +184,7 @@ function extractAccessCode(...texts) {
   for (const text of texts) {
     if (!text) continue
 
-    // 尝试匹配包含验证码的文本
+    // 强化匹配访问码
     let match = text.match(/（?\s*(?:访问码|密码|提取码)\s*[:：]?\s*([a-zA-Z0-9]{4,6})\s*）?/i)
     if (match) return match[1]
 
@@ -204,51 +200,4 @@ function getTextContext(text, targetUrl, radius = 200) {
   const start = Math.max(0, idx - radius)
   const end = Math.min(text.length, idx + targetUrl.length + radius)
   return text.substring(start, end)
-}
-
-async function getPlayinfo(ext) {
-  return jsonify({ urls: [] })
-}
-
-async function search(ext) {
-  ext = argsify(ext)
-  let cards = []
-  let text = encodeURIComponent(ext.text)
-  let page = ext.page || 1
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
-
-  const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA },
-  })
-
-  const $ = cheerio.load(data)
-
-  $('.topicItem').each((index, each) => {
-    if ($(each).find('.cms-lock-solid').length > 0) return
-
-    const href = $(each).find('h2 a').attr('href')
-    const title = $(each).find('h2 a').text()
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/
-    const match = title.match(regex)
-    const dramaName = match ? match[1] : title
-    const r = $(each).find('.summary').text()
-    const tag = $(each).find('.tag').text()
-
-    if (/content/.test(r) && !/cloud/.test(r)) return
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return
-
-    cards.push({
-      vod_id: href,
-      vod_name: dramaName,
-      vod_pic: '',
-      vod_remarks: '',
-      ext: {
-        url: `https://www.leijing.xyz/${href}`,
-      },
-    })
-  })
-
-  return jsonify({
-    list: cards,
-  })
 }
