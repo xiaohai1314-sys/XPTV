@@ -8,39 +8,27 @@ const appConfig = {
   tabs: [
     {
       name: '剧集',
-      ext: {
-        id: '?tagId=42204684250355',
-      },
+      ext: { id: '?tagId=42204684250355' },
     },
     {
       name: '电影',
-      ext: {
-        id: '?tagId=42204681950354',
-      },
+      ext: { id: '?tagId=42204681950354' },
     },
     {
       name: '动漫',
-      ext: {
-        id: '?tagId=42204792950357',
-      },
+      ext: { id: '?tagId=42204792950357' },
     },
     {
       name: '纪录片',
-      ext: {
-        id: '?tagId=42204697150356',
-      },
+      ext: { id: '?tagId=42204697150356' },
     },
     {
       name: '综艺',
-      ext: {
-        id: '?tagId=42210356650363',
-      },
+      ext: { id: '?tagId=42210356650363' },
     },
     {
       name: '影视原盘',
-      ext: {
-        id: '?tagId=42212287587456',
-      },
+      ext: { id: '?tagId=42212287587456' },
     },
   ],
 }
@@ -56,12 +44,23 @@ async function getCards(ext) {
 
   const url = appConfig.site + `/${id}&page=${page}`
 
-  const { data } = await $fetch.get(url, {
+  // 打印请求的URL，确认是否正确请求数据
+  console.log(`请求链接：${url}`)
+
+  const { data, status } = await $fetch.get(url, {
     headers: {
       'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
+
+  // 检查返回状态码和数据
+  console.log(`状态码：${status}`)
+  console.log(`返回内容：${data.slice(0, 500)}`)  // 打印前500个字符查看响应
+
+  if (status !== 200) {
+    throw new Error('请求失败，状态码: ' + status)
+  }
 
   const $ = cheerio.load(data)
 
@@ -100,18 +99,27 @@ async function getTracks(ext) {
   const tracks = []
   const url = ext.url
 
-  const { data } = await $fetch.get(url, {
+  console.log(`请求网盘资源链接：${url}`)
+
+  const { data, status } = await $fetch.get(url, {
     headers: {
       'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
 
+  // 检查返回状态码和数据
+  console.log(`状态码：${status}`)
+  console.log(`返回内容：${data.slice(0, 500)}`)  // 打印前500个字符查看响应
+
+  if (status !== 200) {
+    throw new Error('请求失败，状态码: ' + status)
+  }
+
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   const pageHtml = $.html()
 
-  // 提取有效的网盘资源
   const validResources = extractValidResources(pageHtml)
 
   validResources.forEach((res, i) => {
@@ -135,7 +143,6 @@ function extractValidResources(html) {
   const $ = cheerio.load(html)
   const resources = []
 
-  // 查找所有有效的天翼云盘链接
   $('a').each((i, el) => {
     const href = $(el).attr('href') || ''
     const text = $(el).text()
@@ -179,9 +186,17 @@ async function search(ext) {
   let page = ext.page || 1
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
 
-  const { data } = await $fetch.get(url, {
+  const { data, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
   })
+
+  // 检查返回状态码和数据
+  console.log(`状态码：${status}`)
+  console.log(`返回内容：${data.slice(0, 500)}`)  // 打印前500个字符查看响应
+
+  if (status !== 200) {
+    throw new Error('请求失败，状态码: ' + status)
+  }
 
   const $ = cheerio.load(data)
 
