@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 7, // 版本号更新
+  ver: 9, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -97,6 +97,7 @@ async function getTracks(ext) {
   ext = argsify(ext)
   const tracks = []
   const url = ext.url
+  const uniqueLinks = new Set() // 用于跟踪已添加的链接
 
   try {
     console.log(`正在加载资源页面: ${url}`)
@@ -134,27 +135,36 @@ async function getTracks(ext) {
       console.log(`全局访问码: ${globalAccessCode}`)
     }
     
-    // 2. 提取所有有效云盘链接（增强格式支持）
-    const panMatches = []
+    // 2. 提取所有有效云盘链接（增强格式支持），使用Set去重
+    const panSet = new Set()
     
     // 格式1: 标准URL格式
     const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
     let match
     while ((match = urlPattern.exec(textContent)) !== null) {
-      panMatches.push(match[0])
+      panSet.add(match[0])
     }
     
     // 格式2: 无协议简写格式 (cloud.189.cn/...)
     const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
     while ((match = shortPattern.exec(textContent)) !== null) {
-      panMatches.push('https://' + match[0])
+      panSet.add('https://' + match[0])
     }
     
-    console.log(`找到 ${panMatches.length} 个云盘链接`)
+    const panMatches = Array.from(panSet)
+    console.log(`找到 ${panMatches.length} 个云盘链接（去重后）`)
     
     // 3. 为每个链接提取专属访问码
     panMatches.forEach(panUrl => {
       if (!isValidPanUrl(panUrl)) return
+      
+      // 标准化URL以去除重复
+      const normalizedUrl = normalizePanUrl(panUrl)
+      if (uniqueLinks.has(normalizedUrl)) {
+        console.log(`跳过重复链接: ${panUrl}`)
+        return
+      }
+      uniqueLinks.add(normalizedUrl)
       
       let accessCode = globalAccessCode
       const index = textContent.indexOf(panUrl)
@@ -194,21 +204,35 @@ async function getTracks(ext) {
     if (tracks.length === 0) {
       console.log("常规方法未找到资源，启动深度扫描...")
       const fullText = $('body').text()
+      const deepSet = new Set()
       
       // 深度扫描所有可能的URL格式
       const deepPattern = /(https?:\/\/)?cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
       while ((match = deepPattern.exec(fullText)) !== null) {
         const panUrl = match[0].startsWith('http') ? match[0] : 'https://' + match[0]
-        
-        if (isValidPanUrl(panUrl) && !tracks.some(t => t.pan === panUrl)) {
-          tracks.push({
-            name: title,
-            pan: panUrl,
-            ext: { accessCode: globalAccessCode }
-          })
-        }
+        deepSet.add(panUrl)
       }
-      console.log(`深度扫描找到 ${tracks.length} 个资源`)
+      
+      // 去重后添加
+      const deepPanMatches = Array.from(deepSet)
+      deepPanMatches.forEach(panUrl => {
+        if (!isValidPanUrl(panUrl)) return
+        
+        // 标准化URL以去除重复
+        const normalizedUrl = normalizePanUrl(panUrl)
+        if (uniqueLinks.has(normalizedUrl)) {
+          console.log(`跳过深度扫描重复链接: ${panUrl}`)
+          return
+        }
+        uniqueLinks.add(normalizedUrl)
+        
+        tracks.push({
+          name: title,
+          pan: panUrl,
+          ext: { accessCode: globalAccessCode }
+        })
+      })
+      console.log(`深度扫描找到 ${deepPanMatches.length} 个资源`)
     }
     
     console.log(`共找到 ${tracks.length} 个资源`)
@@ -270,6 +294,14 @@ function extractAccessCode(text) {
 function isValidPanUrl(url) {
   if (!url) return false
   return /https?:\/\/cloud\.189\.cn\/(t|web\/share)\//i.test(url)
+}
+
+// 标准化URL以去除重复
+function normalizePanUrl(url) {
+  // 移除URL中的查询参数
+  const cleanUrl = url.replace(/\?.*$/, '')
+  // 转换为小写
+  return cleanUrl.toLowerCase()
 }
 
 async function getPlayinfo(ext) {
