@@ -1,3 +1,4 @@
+
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 const cheerio = createCheerio()
 
@@ -64,56 +65,51 @@ async function getCards(ext) {
 
 async function getTracks(ext) {
   ext = argsify(ext)
-  var tracks = []
-  let url = ext.url
+  const tracks = []
+  const pans = new Set()
+  const urlRegex = /(https?:\/\/[^\s（）\(\)]+\.cloud\.189\.cn\/[^\s（）\(\)]+)/gi
+  const codeRegexGlobal = /(提取码|密码|访问码)[：:\s]*([a-zA-Z0-9]{4,6})/gi
 
-  const { data } = await $fetch.get(url, {
+  const { data } = await $fetch.get(ext.url, {
     headers: {
-      'Referer': appConfig.site + '/',
+      'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
-  });
+  })
 
   const $ = cheerio.load(data)
-  const pans = new Set()
-  const urlRegex = /(https?:\/\/[^\s（]+)/g
-  const codeRegex = /(提取码|密码)[:：]?\s*([a-zA-Z0-9]{4})/i
 
-  $('div, p, a').each((index, each) => {
-    const text = $(each).text().trim()
-    const codeMatch = text.match(codeRegex)
-    const code = codeMatch ? codeMatch[2] : ''
+  $('div, p, a, span').each((_, el) => {
+    const text = $(el).text().trim()
 
-    const href = ($(each).attr('href') ?? "").replace('http://', 'https://')
-    if (href.startsWith('https://cloud.189.cn/') && !pans.has(href)) {
-      pans.add(href)
-      tracks.push({
-        name: code ? `网盘(码:${code})` : "网盘",
-        pan: href,
-        ext: code ? { code } : {}
-      })
+    // 提取访问码（支持多个）
+    const codes = []
+    let match
+    while ((match = codeRegexGlobal.exec(text)) !== null) {
+      codes.push(match[2])
     }
 
-    const urls = text.match(urlRegex)
-    if (urls) {
-      urls.forEach(link => {
-        link = link.replace('http://', 'https://')
-        if (link.startsWith('https://cloud.189.cn/') && !pans.has(link)) {
-          pans.add(link)
-          tracks.push({
-            name: code ? `网盘(码:${code})` : "网盘",
-            pan: link,
-            ext: code ? { code } : {}
-          })
-        }
-      })
-    }
+    // 提取链接（文本或href中）
+    const allText = [text, $(el).attr('href') ?? ''].join('\n')
+    const urls = [...allText.matchAll(urlRegex)].map(m => m[1])
+
+    urls.forEach(link => {
+      const normalized = link.replace('http://', 'https://')
+      if (!pans.has(normalized)) {
+        pans.add(normalized)
+        tracks.push({
+          name: codes.length > 0 ? `网盘(码:${codes[0]})` : '网盘',
+          pan: normalized,
+          ext: codes.length > 0 ? { code: codes[0] } : {}
+        })
+      }
+    })
   })
 
   return jsonify({
     list: [{
       title: "默认分组",
-      tracks,
+      tracks
     }]
   })
 }
