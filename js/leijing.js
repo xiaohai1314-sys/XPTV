@@ -25,14 +25,14 @@ async function getCards(ext) {
   let { page = 1, id } = ext
   const url = appConfig.site + `/${id}&page=${page}`
 
-  const { data } = await $fetch.get(url, {
+  const html = request(url, {
     headers: {
-      'Referer': appConfig.site + '/',
+      'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
 
-  const $ = cheerio.load(data)
+  const $ = cheerio.load(html)
 
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return
@@ -53,7 +53,7 @@ async function getCards(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: appConfig.site + href,
+        url: `https://www.leijing.xyz/${href}`,
       },
     })
   })
@@ -66,14 +66,14 @@ async function getTracks(ext) {
   const tracks = []
   const url = ext.url
 
-  const { data } = await $fetch.get(url, {
+  const html = request(url, {
     headers: {
-      'Referer': appConfig.site + '/',
+      'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
 
-  const $ = cheerio.load(data)
+  const $ = cheerio.load(html)
   const title = $('h1').text().trim() || "网盘资源"
   const pageHtml = $.html()
   const validResources = extractValidResources(pageHtml, title)
@@ -94,34 +94,26 @@ async function getTracks(ext) {
 function extractValidResources(html, title) {
   const $ = cheerio.load(html)
   const resources = []
-  const downloadSection = findDownloadSection($)
 
-  if (downloadSection) {
-    extractResourcesFromSection($, downloadSection, resources)
-  }
+  $('body').find('*').each((i, el) => {
+    const text = $(el).text()
+    const href = $(el).attr('href') || ''
 
-  if (resources.length === 0) {
-    $('body').find('*').each((i, el) => {
-      const text = $(el).text()
-      const href = $(el).attr('href') || ''
+    if (isValidPanUrl(href)) {
+      const accessCode = extractAccessCode(text, $(el).parent().text())
+      addResource(resources, href, accessCode)
+    }
 
-      if (isValidPanUrl(href)) {
-        const accessCode = extractAccessCode(text, $(el).parent().text())
-        addResource(resources, href, accessCode)
-      }
-
-      const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<\)）\]、，,】]+/g) || []
-      panMatches.forEach(url => {
-        const accessCode = extractAccessCode(text)
-        addResource(resources, url, accessCode)
-      })
+    const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<\)）\]、，,】]+/g) || []
+    panMatches.forEach(url => {
+      const accessCode = extractAccessCode(text)
+      addResource(resources, url, accessCode)
     })
-  }
+  })
 
   if (resources.length === 0) {
     const text = $('body').text()
     const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<\)）\]、，,】]+/g) || []
-
     panMatches.forEach(url => {
       const context = getTextContext(text, url)
       const accessCode = extractAccessCode(context)
@@ -144,39 +136,6 @@ function addResource(resources, url, accessCode = '') {
   }
 }
 
-function findDownloadSection($) {
-  const downloadHeaders = $('p, div, h3, h4, section, span').filter((i, el) => {
-    const text = $(el).text().trim()
-    return /下载地址|网盘链接|资源下载|下载链接|分享地址|领取地址/i.test(text)
-  })
-
-  if (downloadHeaders.length > 0) {
-    return downloadHeaders.first().parent()
-  }
-  return null
-}
-
-function extractResourcesFromSection($, section, resources) {
-  section.find('a').each((i, el) => {
-    const href = $(el).attr('href')
-    if (isValidPanUrl(href)) {
-      const text = $(el).text()
-      const parentText = $(el).parent().text()
-      const accessCode = extractAccessCode(text, parentText)
-      addResource(resources, href, accessCode)
-    }
-  })
-
-  section.find('p, div, span').each((i, el) => {
-    const text = $(el).text()
-    const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<\)）\]、，,】]+/g) || []
-    panMatches.forEach(url => {
-      const accessCode = extractAccessCode(text)
-      addResource(resources, url, accessCode)
-    })
-  })
-}
-
 function getTextContext(fullText, targetUrl, radius = 200) {
   const index = fullText.indexOf(targetUrl)
   if (index === -1) return ''
@@ -185,18 +144,22 @@ function getTextContext(fullText, targetUrl, radius = 200) {
   return fullText.substring(start, end)
 }
 
+// ✅ 只修复提取码部分（中文括号 + 宽容匹配）
 function extractAccessCode(...texts) {
   for (const text of texts) {
     if (!text) continue
 
     let match = null
 
-    match = text.match(/（\s*(?:访问码|密码|提取码)\s*[:：]?\s*([a-zA-Z0-9]{4,6})\s*）/i)
+    // 中文括号支持：（访问码：abcd）
+    match = text.match(/（\s*(访问码|密码|提取码)\s*[:：]?\s*([a-zA-Z0-9]{4,6})\s*）/)
+    if (match) return match[2]
+
+    // 标准形式：访问码: abcd
+    match = text.match(/(?:访问码|密码|提取码|access[ _]?code)?\s*[:：]?\s*([a-zA-Z0-9]{4,6})\b/i)
     if (match) return match[1]
 
-    match = text.match(/(?:访问码|密码|提取码|access[ _]?code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})\b/i)
-    if (match) return match[1]
-
+    // 最后一招：孤立的四位码（不包含在URL中）
     match = text.match(/\b([a-zA-Z0-9]{4,6})\b(?![^]*http)/)
     if (match && !/\d{8,}/.test(match[1])) return match[1]
   }
@@ -214,13 +177,13 @@ async function search(ext) {
   let page = ext.page || 1
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
 
-  const { data } = await $fetch.get(url, {
+  const html = request(url, {
     headers: {
       'User-Agent': UA,
     },
   })
 
-  const $ = cheerio.load(data)
+  const $ = cheerio.load(html)
 
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return
@@ -241,7 +204,7 @@ async function search(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: appConfig.site + href,
+        url: `https://www.leijing.xyz/${href}`,
       },
     })
   })
