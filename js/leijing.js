@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 10, // 版本号更新
+  ver: 12, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -106,6 +106,8 @@ async function getTracks(ext) {
       headers: {
         'Referer': appConfig.site,
         'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
       }
     })
     
@@ -121,39 +123,82 @@ async function getTracks(ext) {
       console.log(`全局访问码: ${globalAccessCode}`)
     }
     
-    // 2. 查找并模拟点击"资源链接"按钮
-    const resourceLinks = $('a, button, div').filter((i, el) => {
-      const text = $(el).text().trim().toLowerCase()
-      return text.includes('资源链接') || text.includes('下载链接') || text.includes('网盘链接')
+    // 2. 增强型资源链接定位（针对截图中的样式）
+    let resourceContent = ''
+    const resourceElements = []
+    
+    // 查找所有可能的资源容器
+    const possibleContainers = [
+      '.resource-links', '.hidden-links', '.links-container', 
+      '.resource-box', '.link-box', '.download-area'
+    ]
+    
+    // 先尝试直接查找资源容器
+    possibleContainers.forEach(selector => {
+      const container = $(selector)
+      if (container.length > 0) {
+        resourceElements.push(container.html())
+      }
     })
     
-    console.log(`找到 ${resourceLinks.length} 个资源链接按钮`)
-    
-    if (resourceLinks.length > 0) {
-      // 模拟点击第一个资源链接按钮
-      const resourceContent = resourceLinks.first().closest('.content, .post-content, .thread-content, .topic-content, .resource-content')
-        .add(resourceLinks.first().next('.resource-links, .hidden-links, .links-container'))
-        .add(resourceLinks.first().parent())
-        .html()
+    // 如果没找到容器，查找资源按钮
+    if (resourceElements.length === 0) {
+      const resourceTriggers = $('a, button, span, div').filter((i, el) => {
+        const text = $(el).text().trim().toLowerCase()
+        return text.includes('资源链接') || text.includes('下载链接') || 
+               text.includes('网盘链接') || text.includes('查看链接') ||
+               text.includes('保存资源')
+      })
       
-      if (resourceContent) {
-        console.log(`解析资源链接区域内容`)
-        const $resource = cheerio.load(resourceContent)
-        const resourceText = $resource.text()
+      console.log(`找到 ${resourceTriggers.length} 个资源触发元素`)
+      
+      // 处理每个找到的触发元素
+      resourceTriggers.each((i, el) => {
+        // 尝试1: 获取兄弟元素中的资源
+        let content = $(el).next('.resource-content, .link-content').html()
         
-        // 扫描资源链接区域
+        // 尝试2: 获取父元素中的资源
+        if (!content) {
+          content = $(el).closest('.post-content, .thread-content, .content, .topic-content').html()
+        }
+        
+        // 尝试3: 获取数据属性中的资源
+        if (!content) {
+          const dataLinks = $(el).attr('data-links') || $(el).attr('data-content')
+          if (dataLinks) content = dataLinks
+        }
+        
+        if (content) {
+          resourceElements.push(content)
+        }
+      })
+    }
+    
+    // 3. 解析找到的资源内容
+    if (resourceElements.length > 0) {
+      console.log(`解析资源区域内容`)
+      resourceElements.forEach(content => {
+        const $res = cheerio.load(content)
+        const resourceText = $res.text()
         scanForLinks(resourceText, tracks, globalAccessCode, uniqueLinks, title)
-      }
+      })
+    } else {
+      console.log("未找到资源区域，扫描整个页面内容")
+      scanForLinks($('body').text(), tracks, globalAccessCode, uniqueLinks, title)
     }
     
-    // 3. 如果没有找到资源链接按钮，扫描整个页面
+    // 4. 特殊处理：查找隐藏的JS数据
     if (tracks.length === 0) {
-      console.log("未找到资源链接按钮，扫描整个页面内容")
-      const fullText = $('body').text()
-      scanForLinks(fullText, tracks, globalAccessCode, uniqueLinks, title)
+      console.log("尝试解析JS数据")
+      $('script').each((i, script) => {
+        const scriptContent = $(script).html() || ''
+        if (scriptContent.includes('cloud.189.cn')) {
+          scanForLinks(scriptContent, tracks, globalAccessCode, uniqueLinks, title)
+        }
+      })
     }
     
-    // 4. 如果还是没找到，尝试深度扫描
+    // 5. 深度扫描作为后备
     if (tracks.length === 0) {
       console.log("常规方法未找到资源，启动深度扫描...")
       const fullText = $('body').text()
@@ -182,6 +227,19 @@ async function getTracks(ext) {
     }
     
     console.log(`共找到 ${tracks.length} 个资源`)
+    
+    // 如果没有找到资源，显示提示按钮
+    if (tracks.length === 0) {
+      tracks.push({
+        name: "未找到资源",
+        pan: "可能需要手动操作",
+        ext: {
+          action: "openBrowser",
+          url: url
+        }
+      })
+    }
+    
     return jsonify({ list: [{
       title: "资源列表",
       tracks,
@@ -194,7 +252,10 @@ async function getTracks(ext) {
       tracks: [{
         name: "加载失败",
         pan: "请检查网络或链接",
-        ext: { accessCode: "" }
+        ext: { 
+          action: "openBrowser",
+          url: url
+        }
       }],
     }]})
   }
@@ -205,6 +266,7 @@ function scanForLinks(text, tracks, globalAccessCode, uniqueLinks, title) {
   if (!text) return
   
   const panMatches = []
+  
   // 格式1: 标准URL格式
   const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
   let match
@@ -216,6 +278,23 @@ function scanForLinks(text, tracks, globalAccessCode, uniqueLinks, title) {
   const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
   while ((match = shortPattern.exec(text)) !== null) {
     panMatches.push('https://' + match[0])
+  }
+  
+  // 格式3: 带访问码的完整格式
+  const fullPattern = /(?:网盘|资源|链接)[:：]?\s*(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+)\s*(?:访问码|密码|提取码)[:：]?\s*([a-z0-9]{4,6})/gi
+  while ((match = fullPattern.exec(text)) !== null) {
+    panMatches.push(match[1])
+    // 如果有专属访问码，优先使用
+    if (match[3]) {
+      const panUrl = match[1]
+      tracks.push({
+        name: title,
+        pan: panUrl,
+        ext: { accessCode: match[3] }
+      })
+      // 添加到已处理集合
+      uniqueLinks.add(normalizePanUrl(panUrl))
+    }
   }
   
   // 去重
