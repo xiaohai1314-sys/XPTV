@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 5,
+  ver: 6,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -112,32 +112,10 @@ async function getTracks(ext) {
     const title = $('h1').text().trim() || "网盘资源"
     console.log(`页面标题: ${title}`)
     
-    // 1. 直接查找下载区域
-    let downloadContent = ""
-    $('p, div').each((i, el) => {
-      const text = $(el).text().trim()
-      if (text.includes('下载地址') || text.includes('网盘链接') || 
-          text.includes('资源地址') || text.includes('访问码') || 
-          text.includes('提取码') || text.includes('密码')) {
-        downloadContent = $(el).parent().html()
-        return false
-      }
-    })
+    // 1. 获取整个内容区域（包括简介）
+    const contentHtml = $('.thread-content, .post-content, .content, .topic-content').first().html() || $('body').html()
     
-    // 2. 如果没找到，尝试整个内容区域
-    if (!downloadContent) {
-      downloadContent = $('.thread-content, .post-content, .content').first().html()
-    }
-    
-    // 3. 如果仍然没找到，使用整个页面
-    if (!downloadContent) {
-      downloadContent = $('body').html()
-      console.log("使用整个页面内容提取资源")
-    }
-    
-    console.log(`提取内容长度: ${downloadContent ? downloadContent.length : 0} 字符`)
-    
-    if (!downloadContent) {
+    if (!contentHtml) {
       console.log("未找到任何内容区域")
       return jsonify({ list: [{
         title: "资源列表",
@@ -145,21 +123,22 @@ async function getTracks(ext) {
       }]})
     }
     
-    // 处理下载内容
-    const $dl = cheerio.load(downloadContent)
+    console.log(`内容区域长度: ${contentHtml.length} 字符`)
     
-    // 提取所有链接
-    $dl('a').each((i, el) => {
-      let href = $dl(el).attr('href') || ''
+    // 处理内容区域
+    const $content = cheerio.load(contentHtml)
+    
+    // 2. 提取所有链接（包括简介中的直接链接）
+    $content('a').each((i, el) => {
+      let href = $content(el).attr('href') || ''
       href = href.replace(/&amp;/g, '&')
       
       if (isValidPanUrl(href)) {
-        const linkText = $dl(el).text().trim()
-        const parentText = $dl(el).parent().text()
+        const linkText = $content(el).text().trim()
+        const parentText = $content(el).parent().text()
         
         console.log(`找到链接: ${href}, 文本: ${linkText}`)
         
-        // 增强访问码提取 - 检查链接文本和父文本
         const accessCode = extractAccessCode(linkText, parentText)
         tracks.push({
           name: title,
@@ -169,8 +148,8 @@ async function getTracks(ext) {
       }
     })
     
-    // 提取文本中的链接
-    const textContent = $dl.text()
+    // 3. 提取文本中的链接（特别处理简介中的直接链接）
+    const textContent = $content.text()
     
     // 增强访问码提取 - 特别关注数字+字母组合
     let globalAccessCode = ''
@@ -202,7 +181,33 @@ async function getTracks(ext) {
       }
     }
     
-    // 提取所有天翼云盘链接
+    // 4. 特别处理简介中的直接网盘链接（带访问码格式）
+    const directLinkMatches = textContent.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)\s*\(?(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\)?/gi)
+    
+    if (directLinkMatches) {
+      directLinkMatches.forEach(match => {
+        const panMatch = match.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)/i)
+        const codeMatch = match.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
+        
+        if (panMatch && codeMatch) {
+          const panUrl = panMatch[0]
+          const accessCode = codeMatch[1]
+          
+          // 避免重复添加
+          const exists = tracks.some(t => t.pan === panUrl)
+          if (!exists) {
+            tracks.push({
+              name: title,
+              pan: panUrl,
+              ext: { accessCode }
+            })
+            console.log(`从简介直接找到资源: ${panUrl}, 访问码: ${accessCode}`)
+          }
+        }
+      })
+    }
+    
+    // 5. 提取所有天翼云盘链接（包括简介中的直接链接）
     const panMatches = textContent.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
     console.log(`在文本中找到 ${panMatches.length} 个链接`)
     
@@ -221,7 +226,7 @@ async function getTracks(ext) {
       }
     })
     
-    // 如果还没找到资源，尝试更深入扫描
+    // 6. 如果还没找到资源，尝试更深入扫描
     if (tracks.length === 0) {
       console.log("常规方法未找到资源，尝试深度扫描...")
       
@@ -274,19 +279,19 @@ function extractAccessCode(...texts) {
   for (const text of texts) {
     if (!text) continue
     
-    // 尝试关键词后的访问码（字母+数字组合）
+    // 1. 尝试关键词后的访问码（字母+数字组合）
     let match = text.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
     if (match) return match[1]
     
-    // 尝试括号内的访问码
-    match = text.match(/[\(（]\s*([a-z0-9]{4,6})\s*[\)）]/i)
+    // 2. 尝试括号内的访问码
+    match = text.match(/[\(（][^\)）]*?(?:访问码|密码|码|code)?[:：]?\s*([a-z0-9]{4,6})[^\)）]*[\)）]/i)
     if (match) return match[1]
     
-    // 尝试冒号后的访问码
+    // 3. 尝试冒号后的访问码
     match = text.match(/[:：]\s*([a-z0-9]{4,6})\b/i)
     if (match) return match[1]
     
-    // 尝试独立访问码（字母+数字组合）
+    // 4. 尝试独立访问码（带边界检查）
     match = text.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/i)
     if (match) {
       const code = match[1]
