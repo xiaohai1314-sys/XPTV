@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 7,
+  ver: 6,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -112,31 +112,8 @@ async function getTracks(ext) {
     const title = $('h1').text().trim() || "网盘资源"
     console.log(`页面标题: ${title}`)
     
-    // 1. 重点查找包含"云盘"的区域 - 针对新页面结构
-    let cloudSection = null
-    
-    // 查找包含"云盘"标题的区块
-    $('h2, h3, strong').each((i, el) => {
-      const text = $(el).text().trim()
-      if (text.includes('云盘') || text.includes('网盘') || text.includes('资源')) {
-        cloudSection = $(el).parent()
-        return false // 退出循环
-      }
-    })
-    
-    // 2. 如果没找到，尝试整个内容区域
-    if (!cloudSection) {
-      cloudSection = $('.thread-content, .post-content, .content, .topic-content').first()
-      console.log("未找到云盘区域，使用整个内容区域")
-    }
-    
-    if (!cloudSection || cloudSection.length === 0) {
-      cloudSection = $('body')
-      console.log("使用整个页面作为内容区域")
-    }
-    
-    // 提取HTML内容
-    const contentHtml = cloudSection.html()
+    // 1. 获取整个内容区域（包括简介）
+    const contentHtml = $('.thread-content, .post-content, .content, .topic-content').first().html() || $('body').html()
     
     if (!contentHtml) {
       console.log("未找到任何内容区域")
@@ -151,7 +128,7 @@ async function getTracks(ext) {
     // 处理内容区域
     const $content = cheerio.load(contentHtml)
     
-    // 3. 提取所有链接（包括简介中的直接链接）
+    // 2. 提取所有链接（包括简介中的直接链接）
     $content('a').each((i, el) => {
       let href = $content(el).attr('href') || ''
       href = href.replace(/&amp;/g, '&')
@@ -171,42 +148,10 @@ async function getTracks(ext) {
       }
     })
     
-    // 4. 提取文本内容
+    // 3. 提取文本中的链接（特别处理简介中的直接链接）
     const textContent = $content.text()
     
-    // 5. 特别处理简介中的直接网盘链接（带访问码格式）
-    const directLinkMatches = textContent.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)\s*\(?(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\)?/gi)
-    
-    if (directLinkMatches) {
-      console.log(`找到 ${directLinkMatches.length} 个直接链接匹配项`)
-      
-      directLinkMatches.forEach(match => {
-        const panMatch = match.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)/i)
-        const codeMatch = match.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
-        
-        if (panMatch && codeMatch) {
-          const panUrl = panMatch[0]
-          const accessCode = codeMatch[1]
-          
-          // 避免重复添加
-          const exists = tracks.some(t => t.pan === panUrl)
-          if (!exists) {
-            tracks.push({
-              name: title,
-              pan: panUrl,
-              ext: { accessCode }
-            })
-            console.log(`从简介直接找到资源: ${panUrl}, 访问码: ${accessCode}`)
-          }
-        }
-      })
-    }
-    
-    // 6. 提取所有天翼云盘链接（包括简介中的直接链接）
-    const panMatches = textContent.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
-    console.log(`在文本中找到 ${panMatches.length} 个链接`)
-    
-    // 7. 提取访问码 - 特别关注数字+字母组合
+    // 增强访问码提取 - 特别关注数字+字母组合
     let globalAccessCode = ''
     
     // 优先尝试关键词后的访问码
@@ -236,6 +181,36 @@ async function getTracks(ext) {
       }
     }
     
+    // 4. 特别处理简介中的直接网盘链接（带访问码格式）
+    const directLinkMatches = textContent.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)\s*\(?(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\)?/gi)
+    
+    if (directLinkMatches) {
+      directLinkMatches.forEach(match => {
+        const panMatch = match.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)/i)
+        const codeMatch = match.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
+        
+        if (panMatch && codeMatch) {
+          const panUrl = panMatch[0]
+          const accessCode = codeMatch[1]
+          
+          // 避免重复添加
+          const exists = tracks.some(t => t.pan === panUrl)
+          if (!exists) {
+            tracks.push({
+              name: title,
+              pan: panUrl,
+              ext: { accessCode }
+            })
+            console.log(`从简介直接找到资源: ${panUrl}, 访问码: ${accessCode}`)
+          }
+        }
+      })
+    }
+    
+    // 5. 提取所有天翼云盘链接（包括简介中的直接链接）
+    const panMatches = textContent.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
+    console.log(`在文本中找到 ${panMatches.length} 个链接`)
+    
     // 添加文本中找到的链接
     panMatches.forEach(panUrl => {
       if (isValidPanUrl(panUrl)) {
@@ -247,12 +222,11 @@ async function getTracks(ext) {
             pan: panUrl,
             ext: { accessCode: globalAccessCode }
           })
-          console.log(`添加文本链接: ${panUrl}`)
         }
       }
     })
     
-    // 8. 如果还没找到资源，尝试深度扫描整个页面
+    // 6. 如果还没找到资源，尝试更深入扫描
     if (tracks.length === 0) {
       console.log("常规方法未找到资源，尝试深度扫描...")
       
@@ -275,7 +249,6 @@ async function getTracks(ext) {
             pan: panUrl,
             ext: { accessCode: deepAccessCode || globalAccessCode }
           })
-          console.log(`深度扫描添加: ${panUrl}`)
         }
       })
       
@@ -283,28 +256,6 @@ async function getTracks(ext) {
     }
     
     console.log(`共找到 ${tracks.length} 个资源`)
-    
-    // 9. 特殊处理：如果仍然没有资源，尝试提取所有链接
-    if (tracks.length === 0) {
-      console.log("最终尝试：提取页面所有链接")
-      
-      $('a').each((i, el) => {
-        let href = $(el).attr('href') || ''
-        href = href.replace(/&amp;/g, '&')
-        
-        if (isValidPanUrl(href)) {
-          const linkText = $(el).text().trim()
-          const parentText = $(el).parent().text()
-          
-          const accessCode = extractAccessCode(linkText, parentText)
-          tracks.push({
-            name: title,
-            pan: href,
-            ext: { accessCode }
-          })
-        }
-      })
-    }
     
     return jsonify({ list: [{
       title: "资源列表",
