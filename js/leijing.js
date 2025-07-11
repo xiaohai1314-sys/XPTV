@@ -108,29 +108,70 @@ async function getTracks(ext) {
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   
-  // 1. 首先尝试从评论区前的内容提取（针对特殊页面）
-  let mainContent = ''
-  const commentSection = $('.comment-list, #comments, .reply-list').first()
+  // 1. 针对特定页面结构优化 - 提取隐藏内容
+  let hiddenContent = ''
   
-  if (commentSection.length > 0) {
-    // 获取评论区之前的所有内容
-    let prevElements = commentSection.prevAll()
-    prevElements.each((i, el) => {
-      mainContent += $.html(el)
-    })
-  } else {
-    // 使用默认内容区域
-    mainContent = $('.content, .post-content, .thread-content, .entry-content').html() || $('body').html()
+  // 尝试多种隐藏内容选择器
+  const hiddenSelectors = [
+    '.reply-content', // topicId=18117 使用的选择器
+    '.hidden-content',
+    '.reply-to-view',
+    '.comment-to-view',
+    '.hide-content',
+    '[style*="display:none"]',
+    '[style*="display: none"]'
+  ]
+  
+  hiddenSelectors.forEach(selector => {
+    if ($(selector).length > 0 && !hiddenContent) {
+      hiddenContent = $(selector).html()
+    }
+  })
+  
+  // 2. 如果找到隐藏内容，优先从中提取资源
+  if (hiddenContent) {
+    extractResourcesFromContent(hiddenContent, tracks, title, true)
   }
   
-  // 2. 提取资源
+  // 3. 提取可见内容区域
+  const contentSelectors = [
+    '.content',
+    '.post-content',
+    '.thread-content',
+    '.entry-content',
+    '.article-content',
+    '.topic-content'
+  ]
+  
+  let mainContent = ''
+  contentSelectors.forEach(selector => {
+    if ($(selector).length > 0 && !mainContent) {
+      mainContent = $(selector).html()
+    }
+  })
+  
+  // 4. 如果没有找到特定内容区域，使用整个页面
+  if (!mainContent) {
+    mainContent = $('body').html()
+  }
+  
+  // 5. 从主内容提取资源
   if (mainContent) {
     extractResourcesFromContent(mainContent, tracks, title)
   }
   
-  // 3. 如果没找到资源，尝试备用方法
+  // 6. 如果仍然没有找到资源，尝试直接文本提取
   if (tracks.length === 0) {
-    extractFallbackResources($, tracks, title)
+    const bodyText = $('body').text()
+    extractTextResources(bodyText, tracks, title)
+  }
+  
+  // 7. 特殊处理：如果页面有多个资源区域
+  if (tracks.length === 0) {
+    $('.resource-item, .download-section, .pan-list').each((i, el) => {
+      const sectionHtml = $(el).html()
+      extractResourcesFromContent(sectionHtml, tracks, title)
+    })
   }
   
   return jsonify({ list: [{
@@ -140,7 +181,7 @@ async function getTracks(ext) {
 }
 
 // 从内容HTML提取资源
-function extractResourcesFromContent(html, tracks, title) {
+function extractResourcesFromContent(html, tracks, title, isHidden = false) {
   const $ = cheerio.load(html)
   const seenUrls = new Set()
   
@@ -155,7 +196,7 @@ function extractResourcesFromContent(html, tracks, title) {
       if (!seenUrls.has(href)) {
         seenUrls.add(href)
         tracks.push({
-          name: title,
+          name: isHidden ? `${title} [隐藏]` : title,
           pan: href,
           ext: { accessCode }
         })
@@ -164,7 +205,7 @@ function extractResourcesFromContent(html, tracks, title) {
   })
   
   // 提取文本中的链接
-  $('p, div, span, li').each((i, el) => {
+  $('p, div, span, li, td').each((i, el) => {
     const text = $(el).text()
     const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/g) || []
     
@@ -175,7 +216,7 @@ function extractResourcesFromContent(html, tracks, title) {
         const accessCode = extractAccessCode(text, context)
         
         tracks.push({
-          name: title,
+          name: isHidden ? `${title} [隐藏]` : title,
           pan: panUrl,
           ext: { accessCode }
         })
@@ -183,70 +224,23 @@ function extractResourcesFromContent(html, tracks, title) {
     })
   })
   
-  // 特殊处理：隐藏内容（需要评论可见）
-  $('.hidden-content, .reply-to-view, .comment-to-view').each((i, el) => {
-    const hiddenHtml = $(el).html()
-    if (hiddenHtml) {
-      const $hidden = cheerio.load(hiddenHtml)
-      
-      // 在隐藏内容中查找资源
-      $hidden('a').each((i, el) => {
-        const href = $hidden(el).attr('href') || ''
-        if (isValidPanUrl(href) && !seenUrls.has(href)) {
-          seenUrls.add(href)
-          const linkText = $hidden(el).text().trim()
-          const context = getLinkContext($hidden, el)
-          const accessCode = extractAccessCode(linkText, context)
-          
-          tracks.push({
-            name: title + " [隐藏资源]",
-            pan: href,
-            ext: { accessCode }
-          })
-        }
-      })
-      
-      // 在隐藏文本中查找
-      const hiddenText = $hidden.text()
-      const panMatches = hiddenText.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/g) || []
-      panMatches.forEach(panUrl => {
-        if (isValidPanUrl(panUrl) && !seenUrls.has(panUrl)) {
-          seenUrls.add(panUrl)
-          const accessCode = extractAccessCode(hiddenText)
-          
-          tracks.push({
-            name: title + " [隐藏资源]",
-            pan: panUrl,
-            ext: { accessCode }
-          })
-        }
-      })
-    }
-  })
-}
-
-// 备用资源提取方法
-function extractFallbackResources($, tracks, title) {
-  const seenUrls = new Set()
-  
-  // 尝试整个页面文本提取
-  const pageText = $('body').text()
-  const panMatches = pageText.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/g) || []
-  
-  panMatches.forEach(panUrl => {
-    if (isValidPanUrl(panUrl) && !seenUrls.has(panUrl)) {
-      seenUrls.add(panUrl)
-      
-      // 在链接附近查找访问码
-      const context = getTextContextAround(pageText, panUrl)
-      const accessCode = extractAccessCode(context)
-      
-      tracks.push({
-        name: title,
-        pan: panUrl,
-        ext: { accessCode }
-      })
-    }
+  // 特殊处理：代码块中的资源
+  $('pre, code').each((i, el) => {
+    const text = $(el).text()
+    const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/g) || []
+    
+    panMatches.forEach(panUrl => {
+      if (isValidPanUrl(panUrl) && !seenUrls.has(panUrl)) {
+        seenUrls.add(panUrl)
+        const accessCode = extractAccessCode(text)
+        
+        tracks.push({
+          name: isHidden ? `${title} [代码块]` : `${title} [代码]`,
+          pan: panUrl,
+          ext: { accessCode }
+        })
+      }
+    })
   })
 }
 
@@ -257,69 +251,89 @@ function isValidPanUrl(url) {
 }
 
 // 获取链接周围的上下文
-function getLinkContext($, element, distance = 100) {
+function getLinkContext($, element) {
   let context = ''
-  let current = $(element)
+  const $parent = $(element).parent()
   
-  // 添加前几个元素
-  for (let i = 0; i < 2; i++) {
-    current = current.prev()
-    if (current.length > 0) {
-      context = current.text().trim() + ' ' + context
-    }
+  // 获取父元素文本
+  context += $parent.text().trim() + ' '
+  
+  // 获取前一个元素
+  const $prev = $parent.prev()
+  if ($prev.length) {
+    context += $prev.text().trim() + ' '
   }
   
-  // 添加当前元素
-  context += $(element).text().trim() + ' '
-  
-  // 添加后几个元素
-  current = $(element)
-  for (let i = 0; i < 2; i++) {
-    current = current.next()
-    if (current.length > 0) {
-      context += current.text().trim() + ' '
-    }
+  // 获取后一个元素
+  const $next = $parent.next()
+  if ($next.length) {
+    context += $next.text().trim() + ' '
   }
   
   return context
 }
 
 // 获取文本元素周围的上下文
-function getTextContext($, element, distance = 100) {
+function getTextContext($, element) {
   let context = ''
-  let current = $(element)
+  const $parent = $(element).parent()
   
-  // 添加前几个元素
-  for (let i = 0; i < 2; i++) {
-    current = current.prev()
-    if (current.length > 0) {
-      context = current.text().trim() + ' ' + context
-    }
+  // 获取父元素文本
+  context += $parent.text().trim() + ' '
+  
+  // 获取前一个元素
+  const $prev = $(element).prev()
+  if ($prev.length) {
+    context += $prev.text().trim() + ' '
   }
   
-  // 添加当前元素
-  context += $(element).text().trim() + ' '
-  
-  // 添加后几个元素
-  current = $(element)
-  for (let i = 0; i < 2; i++) {
-    current = current.next()
-    if (current.length > 0) {
-      context += current.text().trim() + ' '
-    }
+  // 获取后一个元素
+  const $next = $(element).next()
+  if ($next.length) {
+    context += $next.text().trim() + ' '
   }
   
   return context
 }
 
-// 在文本中围绕特定URL获取上下文
-function getTextContextAround(fullText, targetUrl, radius = 200) {
-  const index = fullText.indexOf(targetUrl)
-  if (index === -1) return ''
+// 从文本提取资源
+function extractTextResources(text, tracks, title) {
+  // 分割文本块
+  const blocks = text.split(/\n\s*\n/)
   
-  const start = Math.max(0, index - radius)
-  const end = Math.min(fullText.length, index + targetUrl.length + radius)
-  return fullText.substring(start, end)
+  blocks.forEach(block => {
+    // 跳过不包含网盘链接的块
+    if (!block.includes('cloud.189.cn')) return
+    
+    // 提取当前块的所有链接
+    const panMatches = block.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+    
+    // 提取当前块的访问码
+    let accessCode = ''
+    const codeMatch = block.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
+    if (codeMatch) {
+      accessCode = codeMatch[1]
+    } else {
+      // 尝试在块中查找访问码
+      const codeMatch2 = block.match(/\b(?:码|验证码|code)[:：]?\s*(\w{4,6})\b/i)
+      if (codeMatch2) accessCode = codeMatch2[1]
+    }
+    
+    // 添加资源
+    panMatches.forEach(panUrl => {
+      if (isValidPanUrl(panUrl)) {
+        // 避免重复添加
+        const exists = tracks.some(t => t.pan === panUrl)
+        if (!exists) {
+          tracks.push({
+            name: title,
+            pan: panUrl,
+            ext: { accessCode }
+          })
+        }
+      }
+    })
+  })
 }
 
 // 提取访问码
