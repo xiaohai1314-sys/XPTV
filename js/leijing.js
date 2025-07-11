@@ -95,152 +95,34 @@ async function getTracks(ext) {
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   
-  // 直接处理内容区域
-  const contentElement = $('.content')
-  if (contentElement.length > 0) {
-    const contentHtml = contentElement.html()
-    extractResources(contentHtml, tracks, title)
-  }
+  // 简化提取逻辑 - 直接从整个页面文本提取
+  const pageText = $('body').text()
   
-  // 如果没找到资源，检查整个页面
-  if (tracks.length === 0) {
-    const bodyHtml = $('body').html()
-    extractResources(bodyHtml, tracks, title)
-  }
+  // 提取所有网盘链接
+  const panMatches = pageText.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+  
+  // 提取所有访问码
+  const accessCodeMatches = pageText.match(/(?:访问码|访问密码|提取码)[:：]?\s*(\w{4,6})/gi) || []
+  const accessCodes = accessCodeMatches.map(code => 
+    code.replace(/(?:访问码|访问密码|提取码)[:：]?\s*/i, '')
+  )
+  
+  // 将链接和访问码配对
+  panMatches.forEach((panUrl, index) => {
+    // 使用第一个访问码作为默认值
+    const accessCode = accessCodes[index] || accessCodes[0] || ''
+    
+    tracks.push({
+      name: title,
+      pan: panUrl,
+      ext: { accessCode }
+    })
+  })
   
   return jsonify({ list: [{
     title: "资源列表",
     tracks,
   }]})
-}
-
-// 增强版资源提取函数
-function extractResources(html, tracks, title) {
-  const $ = cheerio.load(html)
-  const panSet = new Set()
-  
-  // 特别处理下载地址区域
-  let downloadSection = null
-  $('p, div').each((i, el) => {
-    const text = $(el).text().trim()
-    if (text.includes('下载地址') || text.includes('网盘链接')) {
-      downloadSection = $(el).nextUntil('hr, .comment, .reply, h1, h2, h3')
-      if (downloadSection.length === 0) {
-        downloadSection = $(el).parent()
-      }
-      return false // 退出循环
-    }
-  })
-  
-  // 如果有下载区域，优先处理
-  if (downloadSection && downloadSection.length > 0) {
-    extractFromSection($, downloadSection, panSet, tracks, title)
-  } else {
-    // 否则处理整个内容
-    extractFromSection($, $('body'), panSet, tracks, title)
-  }
-}
-
-// 从指定区域提取资源
-function extractFromSection($, section, panSet, tracks, title) {
-  // 首先尝试查找所有链接
-  section.find('a').each((i, el) => {
-    const href = $(el).attr('href') || ''
-    if (href.includes('cloud.189.cn')) {
-      const linkText = $(el).text().trim()
-      const parentText = $(el).parent().text()
-      const accessCode = extractAccessCode(linkText, parentText)
-      addResource(panSet, tracks, title, href, accessCode)
-    }
-  })
-  
-  // 然后处理文本节点
-  section.contents().each((i, node) => {
-    if (node.nodeType === 3) { // 文本节点
-      const text = $(node).text().trim()
-      if (text) {
-        // 匹配网盘链接
-        const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
-        panMatches.forEach(panUrl => {
-          // 在附近文本中查找访问码
-          const context = getTextContext($, node, 3) // 获取前后3行文本
-          const accessCode = extractAccessCode(text, context)
-          addResource(panSet, tracks, title, panUrl, accessCode)
-        })
-      }
-    }
-  })
-}
-
-// 获取文本上下文（前后几行）
-function getTextContext($, node, lines = 3) {
-  let context = ''
-  let currentNode = node
-  let count = 0
-  
-  // 向前查找
-  while (currentNode && count < lines) {
-    context = $(currentNode).text() + context
-    currentNode = currentNode.previousSibling
-    count++
-  }
-  
-  // 向后查找
-  currentNode = node.nextSibling
-  count = 0
-  while (currentNode && count < lines) {
-    context += $(currentNode).text()
-    currentNode = currentNode.nextSibling
-    count++
-  }
-  
-  return context
-}
-
-// 提取访问码
-function extractAccessCode(...texts) {
-  for (const text of texts) {
-    // 尝试匹配标准格式：访问码: xxxx
-    let match = text.match(/(?:访问码|访问密码|提取码|密码)[:：]?\s*(\w{4,6})\b/i)
-    if (match) return match[1]
-    
-    // 尝试匹配括号格式：(访问码: xxxx)
-    match = text.match(/\(?\s*(?:访问码|密码)\s*[:：]?\s*(\w{4,6})\s*\)?/i)
-    if (match) return match[1]
-    
-    // 尝试匹配单独一行格式：访问码：xxxx
-    match = text.match(/^(?:访问码|密码)\s*[:：]?\s*(\w{4,6})$/im)
-    if (match) return match[1]
-    
-    // 尝试匹配纯4-6位字母数字（排除明显不是访问码的）
-    match = text.match(/\b(\w{4,6})\b(?!.*http|.*\.\w{2,4})/)
-    if (match && !/\d{8,}/.test(match[1]) {
-      return match[1]
-    }
-  }
-  return ''
-}
-
-// 添加资源到列表
-function addResource(panSet, tracks, title, panUrl, accessCode = '') {
-  // 标准化URL
-  const cleanUrl = panUrl.replace(/[\s()]+$/, '')
-  
-  if (!panSet.has(cleanUrl)) {
-    panSet.add(cleanUrl)
-    
-    // 优化资源名称
-    let resourceName = title
-    if (tracks.length > 0) {
-      resourceName = `${title} - 资源${tracks.length + 1}`
-    }
-    
-    tracks.push({
-      name: resourceName,
-      pan: cleanUrl,
-      ext: { accessCode }
-    })
-  }
 }
 
 async function getPlayinfo(ext) {
