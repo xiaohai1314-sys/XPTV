@@ -8,27 +8,39 @@ const appConfig = {
   tabs: [
     {
       name: '剧集',
-      ext: { id: '?tagId=42204684250355' },
+      ext: {
+        id: '?tagId=42204684250355',
+      },
     },
     {
       name: '电影',
-      ext: { id: '?tagId=42204681950354' },
+      ext: {
+        id: '?tagId=42204681950354',
+      },
     },
     {
       name: '动漫',
-      ext: { id: '?tagId=42204792950357' },
+      ext: {
+        id: '?tagId=42204792950357',
+      },
     },
     {
       name: '纪录片',
-      ext: { id: '?tagId=42204697150356' },
+      ext: {
+        id: '?tagId=42204697150356',
+      },
     },
     {
       name: '综艺',
-      ext: { id: '?tagId=42210356650363' },
+      ext: {
+        id: '?tagId=42210356650363',
+      },
     },
     {
       name: '影视原盘',
-      ext: { id: '?tagId=42212287587456' },
+      ext: {
+        id: '?tagId=42212287587456',
+      },
     },
   ],
 }
@@ -41,11 +53,12 @@ async function getCards(ext) {
   ext = argsify(ext)
   let cards = []
   let { page = 1, id } = ext
+
   const url = appConfig.site + `/${id}&page=${page}`
 
   const { data } = await $fetch.get(url, {
     headers: {
-      'Referer': appConfig.site,
+      'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
@@ -72,12 +85,14 @@ async function getCards(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: `${appConfig.site}/${href}`,
+        url: `https://www.leijing.xyz/${href}`,
       },
     })
   })
 
-  return jsonify({ list: cards })
+  return jsonify({
+    list: cards,
+  })
 }
 
 async function getTracks(ext) {
@@ -87,7 +102,7 @@ async function getTracks(ext) {
 
   const { data } = await $fetch.get(url, {
     headers: {
-      'Referer': appConfig.site,
+      'Referer': 'https://www.leijing.xyz/',
       'User-Agent': UA,
     }
   })
@@ -95,55 +110,73 @@ async function getTracks(ext) {
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   
-  // 1. 首先尝试从.content区域提取
+  // 1. 首先尝试提取内容区域的文本
   let contentText = $('.content').text()
   
-  // 2. 如果没找到内容，使用整个页面
-  if (!contentText || contentText.length < 100) {
+  // 2. 如果内容区域太小，使用整个页面文本
+  if (!contentText || contentText.length < 50) {
     contentText = $('body').text()
   }
   
-  // 增强型提取逻辑 - 专门处理您提供的格式
-  const resourceBlocks = contentText.split(/\n\s*\n/) // 按空行分割文本块
+  // 3. 提取所有网盘链接
+  const panMatches = contentText.match(/https?:\/\/cloud\.189\.cn[^\s)]+/g) || []
   
-  resourceBlocks.forEach(block => {
-    // 跳过无关内容块
-    if (!block.includes('cloud.189.cn')) return
+  // 4. 提取所有访问码（支持两种格式）
+  const accessCodes = []
+  
+  // 格式1: 链接和访问码在同一行 (https://... (访问码：xxx))
+  const inlineCodeRegex = /https?:\/\/cloud\.189\.cn[^\s)]+\s*\([^)]*?(?:访问码|密码)[:：]?\s*(\w{4,6})[^)]*\)/gi
+  let inlineMatch
+  while ((inlineMatch = inlineCodeRegex.exec(contentText)) !== null) {
+    accessCodes.push(inlineMatch[1])
+  }
+  
+  // 格式2: 链接和访问码分行 (链接：https://... 访问码：xxx)
+  const blockCodeRegex = /(?:链接|地址|网盘)[:：]?\s*(https?:\/\/cloud\.189\.cn[^\s)]+)[\s\S]*?(?:访问码|密码)[:：]?\s*(\w{4,6})/gi
+  let blockMatch
+  while ((blockMatch = blockCodeRegex.exec(contentText)) !== null) {
+    // 确保链接存在
+    if (blockMatch[1] && blockMatch[2]) {
+      // 添加到链接列表（如果尚未存在）
+      if (!panMatches.includes(blockMatch[1])) {
+        panMatches.push(blockMatch[1])
+      }
+      accessCodes.push(blockMatch[2])
+    }
+  }
+  
+  // 5. 全局访问码提取（备用）
+  const globalCodeRegex = /(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/gi
+  let globalMatch
+  while ((globalMatch = globalCodeRegex.exec(contentText)) !== null) {
+    // 只添加唯一的访问码
+    if (!accessCodes.includes(globalMatch[1])) {
+      accessCodes.push(globalMatch[1])
+    }
+  }
+  
+  // 6. 创建资源列表
+  panMatches.forEach((panUrl, index) => {
+    // 标准化URL
+    const cleanUrl = panUrl.replace(/[\s)]+$/, '')
     
-    // 提取当前块内的所有链接
-    const panMatches = block.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
-    
-    // 在当前块内查找访问码
+    // 确定访问码（优先使用匹配的访问码）
     let accessCode = ''
-    const codeMatch = block.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
-    if (codeMatch) {
-      accessCode = codeMatch[1]
+    if (accessCodes.length > index) {
+      accessCode = accessCodes[index]
+    } else if (accessCodes.length > 0) {
+      accessCode = accessCodes[0]  // 使用第一个访问码作为默认
     }
     
-    // 添加找到的链接
-    panMatches.forEach(panUrl => {
-      tracks.push({
-        name: title,
-        pan: panUrl,
-        ext: { accessCode }
-      })
+    // 创建资源项
+    tracks.push({
+      name: panMatches.length > 1 ? `${title} - 资源${index + 1}` : title,
+      pan: cleanUrl,
+      ext: {
+        accessCode: accessCode
+      }
     })
   })
-  
-  // 如果上面没找到，使用全文本扫描作为后备
-  if (tracks.length === 0) {
-    const panMatches = contentText.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
-    const codeMatch = contentText.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
-    const accessCode = codeMatch ? codeMatch[1] : ''
-    
-    panMatches.forEach(panUrl => {
-      tracks.push({
-        name: title,
-        pan: panUrl,
-        ext: { accessCode }
-      })
-    })
-  }
   
   return jsonify({ list: [{
     title: "资源列表",
@@ -158,12 +191,15 @@ async function getPlayinfo(ext) {
 async function search(ext) {
   ext = argsify(ext)
   let cards = []
+
   let text = encodeURIComponent(ext.text)
   let page = ext.page || 1
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
 
   const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA }
+    headers: {
+      'User-Agent': UA,
+    },
   })
 
   const $ = cheerio.load(data)
@@ -188,10 +224,12 @@ async function search(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: `${appConfig.site}/${href}`,
+        url: `https://www.leijing.xyz/${href}`,
       },
     })
   })
 
-  return jsonify({ list: cards })
+  return jsonify({
+    list: cards,
+  })
 }
