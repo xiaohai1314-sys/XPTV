@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 1,
+  ver: 2,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -108,39 +108,78 @@ async function getTracks(ext) {
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   
-  // 1. 查找下载区域
-  let downloadSection = null
-  const downloadHeaders = $('p, h3, h4, div').filter((i, el) => {
+  // 智能提取下载区域内容
+  let downloadContent = ''
+  
+  // 1. 尝试查找包含"下载地址"的区域
+  $('p, div, h3, h4').each((i, el) => {
     const text = $(el).text().trim()
-    return /下载地址|网盘链接|资源下载|领取地址|下载链接/i.test(text)
+    if (text.includes('下载地址') || text.includes('网盘链接') || text.includes('资源地址')) {
+      downloadContent = $(el).parent().html()
+      return false // 退出循环
+    }
   })
   
-  if (downloadHeaders.length > 0) {
-    // 获取下载区域内容
-    downloadSection = downloadHeaders.first().nextUntil('hr, .comment, .reply, h1, h2, h3, .footer')
-    if (downloadSection.length === 0) {
-      downloadSection = downloadHeaders.first().parent()
-    }
-  } else {
-    // 如果找不到下载标题，使用整个内容区域
-    downloadSection = $('.content, .post-content, .thread-content, .entry-content').first()
-    if (downloadSection.length === 0) {
-      downloadSection = $('body')
-    }
+  // 2. 如果没找到，使用整个内容区域
+  if (!downloadContent) {
+    downloadContent = $('.content, .post-content, .thread-content').first().html() || $('body').html()
   }
   
-  // 2. 提取下载区域文本
-  const downloadText = downloadSection.text()
-  
-  // 3. 提取资源
-  if (downloadText) {
-    extractResourcesFromText(downloadText, tracks, title)
+  // 处理下载内容
+  if (downloadContent) {
+    const $dl = cheerio.load(downloadContent)
+    
+    // 提取所有链接
+    $dl('a').each((i, el) => {
+      let href = $dl(el).attr('href') || ''
+      href = href.replace(/&amp;/g, '&') // 处理HTML实体编码
+      
+      if (isValidPanUrl(href)) {
+        const linkText = $dl(el).text().trim()
+        const context = getLinkContext($dl, el)
+        const accessCode = extractAccessCode(linkText, context)
+        
+        tracks.push({
+          name: title,
+          pan: href,
+          ext: { accessCode }
+        })
+      }
+    })
+    
+    // 提取文本中的链接和访问码
+    $dl('*').contents().each((i, el) => {
+      if (el.type === 'text') {
+        const text = $dl(el).text().trim()
+        
+        // 提取天翼云盘链接（支持所有格式）
+        const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/(?:t|web\/share)\/[^\s<)]+/gi) || []
+        
+        // 提取访问码（支持更多格式）
+        const accessCodeMatch = text.match(/(?:访问码|密码|提取码|访问密码|code)[:：]?\s*(\w{4,6})/i)
+        const accessCode = accessCodeMatch ? accessCodeMatch[1] : ''
+        
+        panMatches.forEach(panUrl => {
+          if (isValidPanUrl(panUrl)) {
+            // 避免重复添加
+            const exists = tracks.some(t => t.pan === panUrl)
+            if (!exists) {
+              tracks.push({
+                name: title,
+                pan: panUrl,
+                ext: { accessCode }
+              })
+            }
+          }
+        })
+      }
+    })
   }
   
-  // 4. 如果没找到资源，尝试整个页面
+  // 如果仍然没找到资源，尝试直接文本提取
   if (tracks.length === 0) {
     const bodyText = $('body').text()
-    extractResourcesFromText(bodyText, tracks, title)
+    extractTextResources(bodyText, tracks, title)
   }
   
   return jsonify({ list: [{
@@ -149,73 +188,124 @@ async function getTracks(ext) {
   }]})
 }
 
+// 检查是否是有效的天翼云盘URL（支持所有格式）
+function isValidPanUrl(url) {
+  if (!url) return false
+  return /https?:\/\/cloud\.189\.cn\/(t|web\/share)\//i.test(url)
+}
+
+// 获取链接周围的上下文
+function getLinkContext($, element, distance = 100) {
+  let context = ''
+  let current = $(element)
+  
+  // 添加前几个元素
+  for (let i = 0; i < 2; i++) {
+    current = current.prev()
+    if (current.length > 0) {
+      context = current.text().trim() + ' ' + context
+    }
+  }
+  
+  // 添加当前元素
+  context += $(element).text().trim() + ' '
+  
+  // 添加后几个元素
+  current = $(element)
+  for (let i = 0; i < 2; i++) {
+    current = current.next()
+    if (current.length > 0) {
+      context += current.text().trim() + ' '
+    }
+  }
+  
+  return context
+}
+
+// 获取文本元素周围的上下文
+function getTextContext($, element, distance = 100) {
+  let context = ''
+  let current = $(element)
+  
+  // 添加前几个元素
+  for (let i = 0; i < 2; i++) {
+    current = current.prev()
+    if (current.length > 0) {
+      context = current.text().trim() + ' ' + context
+    }
+  }
+  
+  // 添加当前元素
+  context += $(element).text().trim() + ' '
+  
+  // 添加后几个元素
+  current = $(element)
+  for (let i = 0; i < 2; i++) {
+    current = current.next()
+    if (current.length > 0) {
+      context += current.text().trim() + ' '
+    }
+  }
+  
+  return context
+}
+
 // 从文本提取资源
-function extractResourcesFromText(text, tracks, title) {
-  // 1. 提取所有网盘链接
-  const panMatches = text.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/g) || []
+function extractTextResources(text, tracks, title) {
+  // 分割文本块
+  const blocks = text.split(/\n\s*\n/)
   
-  // 2. 提取所有访问码
-  const accessCodes = []
-  
-  // 格式1: 链接和访问码在同一行 (https://... (访问码：xxx))
-  const inlineRegex = /https?:\/\/cloud\.189\.cn[^\s)]+\s*\([^)]*?(?:访问码|密码)[:：]?\s*(\w{4,6})[^)]*\)/gi
-  let inlineMatch
-  while ((inlineMatch = inlineRegex.exec(text)) !== null) {
-    accessCodes.push(inlineMatch[1])
-  }
-  
-  // 格式2: 链接和访问码分行 (链接：https://... 访问码：xxx)
-  const blockRegex = /(?:链接|地址|网盘)[:：]?\s*(https?:\/\/cloud\.189\.cn[^\s)]+)[\s\S]*?(?:访问码|密码)[:：]?\s*(\w{4,6})/gi
-  let blockMatch
-  while ((blockMatch = blockRegex.exec(text)) !== null) {
-    // 确保链接存在
-    if (blockMatch[1] && blockMatch[2]) {
-      // 添加到链接列表（如果尚未存在）
-      if (!panMatches.includes(blockMatch[1])) {
-        panMatches.push(blockMatch[1])
-      }
-      accessCodes.push(blockMatch[2])
-    }
-  }
-  
-  // 格式3: 通用访问码提取
-  const globalCodeRegex = /(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/gi
-  let globalMatch
-  while ((globalMatch = globalCodeRegex.exec(text)) !== null) {
-    // 只添加唯一的访问码
-    if (!accessCodes.includes(globalMatch[1])) {
-      accessCodes.push(globalMatch[1])
-    }
-  }
-  
-  // 5. 创建资源项
-  panMatches.forEach((panUrl, index) => {
-    // 标准化URL
-    const cleanUrl = panUrl.replace(/[\s)]+$/, '')
+  blocks.forEach(block => {
+    // 跳过不包含网盘链接的块
+    if (!block.includes('cloud.189.cn')) return
     
-    // 确定访问码（优先使用匹配的访问码）
+    // 提取当前块的所有链接
+    const panMatches = block.match(/https?:\/\/cloud\.189\.cn\/[^\s)]+/g) || []
+    
+    // 提取当前块的访问码
     let accessCode = ''
-    if (accessCodes.length > index) {
-      accessCode = accessCodes[index]
-    } else if (accessCodes.length > 0) {
-      accessCode = accessCodes[0]  // 使用第一个访问码作为默认
+    const codeMatch = block.match(/(?:访问码|密码|访问密码|提取码)[:：]?\s*(\w{4,6})/i)
+    if (codeMatch) {
+      accessCode = codeMatch[1]
     }
     
-    // 创建资源项
-    tracks.push({
-      name: panMatches.length > 1 ? `${title} - 资源${index + 1}` : title,
-      pan: cleanUrl,
-      ext: {
-        accessCode: accessCode
+    // 添加资源
+    panMatches.forEach(panUrl => {
+      if (isValidPanUrl(panUrl)) {
+        // 避免重复添加
+        const exists = tracks.some(t => t.pan === panUrl)
+        if (!exists) {
+          tracks.push({
+            name: title,
+            pan: panUrl,
+            ext: { accessCode }
+          })
+        }
       }
     })
   })
 }
 
-// 检查是否是有效的网盘URL
-function isValidPanUrl(url) {
-  if (!url) return false
-  return /https?:\/\/cloud\.189\.cn\/(t|web\/share)\//.test(url)
+// 提取访问码（支持更多格式）
+function extractAccessCode(...texts) {
+  for (const text of texts) {
+    if (!text) continue
+    
+    // 尝试多种格式
+    let match = text.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*(\w{4,6})\b/i)
+    if (match) return match[1]
+    
+    match = text.match(/\(?\s*(?:访问码|密码)\s*[:：]?\s*(\w{4,6})\s*\)?/i)
+    if (match) return match[1]
+    
+    match = text.match(/^(?:访问码|密码)\s*[:：]?\s*(\w{4,6})$/im)
+    if (match) return match[1]
+    
+    // 尝试匹配纯4-6位字母数字
+    match = text.match(/\b([a-z0-9]{4,6})\b(?!.*http)/i)
+    if (match) return match[1]
+  }
+  return ''
 }
 
 async function getPlayinfo(ext) {
