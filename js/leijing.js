@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 3,
+  ver: 4,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -99,6 +99,9 @@ async function getTracks(ext) {
   const url = ext.url
 
   try {
+    // 打印调试信息
+    console.log(`正在加载资源页面: ${url}`)
+    
     const { data } = await $fetch.get(url, {
       headers: {
         'Referer': appConfig.site,
@@ -109,74 +112,114 @@ async function getTracks(ext) {
     const $ = cheerio.load(data)
     const title = $('h1').text().trim() || "网盘资源"
     
-    // 直接提取资源区域内容
-    let resourceContent = $('.thread-content').html() || $('.post-content').html() || $('body').html()
+    // 打印页面标题
+    console.log(`页面标题: ${title}`)
     
-    if (!resourceContent) {
+    // 1. 直接查找下载区域
+    let downloadContent = ""
+    $('p, div').each((i, el) => {
+      const text = $(el).text().trim()
+      if (text.includes('下载地址') || text.includes('网盘链接') || text.includes('资源地址')) {
+        downloadContent = $(el).parent().html()
+        return false // 退出循环
+      }
+    })
+    
+    // 2. 如果没找到，尝试整个内容区域
+    if (!downloadContent) {
+      downloadContent = $('.thread-content, .post-content, .content').first().html()
+    }
+    
+    // 3. 如果仍然没找到，使用整个页面
+    if (!downloadContent) {
+      downloadContent = $('body').html()
+      console.log("使用整个页面内容提取资源")
+    }
+    
+    // 打印内容长度
+    console.log(`提取内容长度: ${downloadContent ? downloadContent.length : 0} 字符`)
+    
+    if (!downloadContent) {
+      console.log("未找到任何内容区域")
       return jsonify({ list: [{
         title: "资源列表",
         tracks: [],
       }]})
     }
     
-    // 清除干扰元素
-    const $res = cheerio.load(resourceContent)
-    $res('script, style, iframe, noscript').remove()
+    // 处理下载内容
+    const $dl = cheerio.load(downloadContent)
     
-    // 提取所有文本内容
-    const allText = $res('body').text()
+    // 打印处理后的HTML
+    console.log("处理后的HTML:", $dl.html().substring(0, 500) + "...")
     
-    // 提取天翼云盘链接
-    const panMatches = allText.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
-    
-    // 提取访问码
-    let accessCode = ''
-    const codeMatch = allText.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*(\w{4,6})/i)
-    if (codeMatch) {
-      accessCode = codeMatch[1]
-    } else {
-      // 尝试匹配独立的4-6位字母数字
-      const codeMatch2 = allText.match(/\b([a-z0-9]{4,6})\b(?!.*http)/i)
-      if (codeMatch2) accessCode = codeMatch2[1]
-    }
-    
-    // 添加唯一资源
-    const uniquePans = [...new Set(panMatches)]
-    uniquePans.forEach(panUrl => {
-      if (/https?:\/\/cloud\.189\.cn\/(t|web\/share)\//i.test(panUrl)) {
+    // 提取所有链接
+    $dl('a').each((i, el) => {
+      let href = $dl(el).attr('href') || ''
+      href = href.replace(/&amp;/g, '&')
+      
+      if (isValidPanUrl(href)) {
+        const linkText = $dl(el).text().trim()
+        const parentText = $dl(el).parent().text()
+        
+        // 打印找到的链接
+        console.log(`找到链接: ${href}, 文本: ${linkText}`)
+        
+        const accessCode = extractAccessCode(linkText, parentText)
         tracks.push({
           name: title,
-          pan: panUrl,
+          pan: href,
           ext: { accessCode }
         })
       }
     })
     
-    // 如果还没找到，尝试链接提取
-    if (tracks.length === 0) {
-      $res('a').each((i, el) => {
-        let href = $res(el).attr('href') || ''
-        href = href.replace(/&amp;/g, '&')
-        
-        if (/https?:\/\/cloud\.189\.cn\/(t|web\/share)\//i.test(href)) {
-          const linkText = $res(el).text().trim()
-          const context = $res(el).parent().text()
-          const ac = extractAccessCode(linkText, context) || accessCode
-          
+    // 提取文本中的链接
+    const textContent = $dl.text()
+    const panMatches = textContent.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
+    
+    // 打印文本中找到的链接
+    console.log(`在文本中找到 ${panMatches.length} 个链接`)
+    
+    // 提取访问码
+    let globalAccessCode = ''
+    const codeMatch = textContent.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*(\w{4,6})/i)
+    if (codeMatch) {
+      globalAccessCode = codeMatch[1]
+      console.log(`全局访问码: ${globalAccessCode}`)
+    } else {
+      // 尝试匹配独立的4-6位字母数字
+      const codeMatch2 = textContent.match(/\b([a-z0-9]{4,6})\b(?!.*http)/i)
+      if (codeMatch2) {
+        globalAccessCode = codeMatch2[1]
+        console.log(`独立访问码: ${globalAccessCode}`)
+      }
+    }
+    
+    // 添加文本中找到的链接
+    panMatches.forEach(panUrl => {
+      if (isValidPanUrl(panUrl)) {
+        // 避免重复添加
+        const exists = tracks.some(t => t.pan === panUrl)
+        if (!exists) {
           tracks.push({
             name: title,
-            pan: href,
-            ext: { accessCode: ac }
+            pan: panUrl,
+            ext: { accessCode: globalAccessCode }
           })
         }
-      })
-    }
+      }
+    })
+    
+    // 打印最终找到的资源数量
+    console.log(`共找到 ${tracks.length} 个资源`)
     
     return jsonify({ list: [{
       title: "资源列表",
       tracks,
     }]})
   } catch (e) {
+    console.error("资源加载错误:", e)
     return jsonify({ list: [{
       title: "资源列表",
       tracks: [{
@@ -186,6 +229,12 @@ async function getTracks(ext) {
       }],
     }]})
   }
+}
+
+// 检查是否是有效的天翼云盘URL
+function isValidPanUrl(url) {
+  if (!url) return false
+  return /https?:\/\/cloud\.189\.cn\/(t|web\/share)\//i.test(url)
 }
 
 // 提取访问码（支持更多格式）
