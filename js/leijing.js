@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 6,
+  ver: 7, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -112,8 +112,9 @@ async function getTracks(ext) {
     const title = $('h1').text().trim() || "网盘资源"
     console.log(`页面标题: ${title}`)
     
-    // 1. 获取整个内容区域（包括简介）
+    // 获取整个内容区域的HTML和文本
     const contentHtml = $('.thread-content, .post-content, .content, .topic-content').first().html() || $('body').html()
+    const textContent = contentHtml ? cheerio.load(contentHtml).text() : ''
     
     if (!contentHtml) {
       console.log("未找到任何内容区域")
@@ -123,100 +124,83 @@ async function getTracks(ext) {
       }]})
     }
     
-    console.log(`内容区域长度: ${contentHtml.length} 字符`)
+    console.log(`内容区域长度: ${textContent.length} 字符`)
     
-    // 处理内容区域
-    const $content = cheerio.load(contentHtml)
-    
-    // 2. 提取所有链接（包括简介中的直接链接）
-    $content('a').each((i, el) => {
-      let href = $content(el).attr('href') || ''
-      href = href.replace(/&amp;/g, '&')
-      
-      if (isValidPanUrl(href)) {
-        const linkText = $content(el).text().trim()
-        const parentText = $content(el).parent().text()
-        
-        console.log(`找到链接: ${href}, 文本: ${linkText}`)
-        
-        const accessCode = extractAccessCode(linkText, parentText)
-        tracks.push({
-          name: title,
-          pan: href,
-          ext: { accessCode }
-        })
-      }
-    })
-    
-    // 3. 提取文本中的链接（特别处理简介中的直接链接）
-    const textContent = $content.text()
-    
-    // 增强访问码提取 - 特别关注数字+字母组合
+    // 1. 全局访问码提取（优先）
     let globalAccessCode = ''
-    
-    // 优先尝试关键词后的访问码
-    const codeMatch = textContent.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
-    if (codeMatch) {
-      globalAccessCode = codeMatch[1]
-      console.log(`关键词访问码: ${globalAccessCode}`)
+    const globalCodeMatch = textContent.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
+    if (globalCodeMatch) {
+      globalAccessCode = globalCodeMatch[1]
+      console.log(`全局访问码: ${globalAccessCode}`)
     }
     
-    // 尝试提取独立访问码（数字+字母组合）
-    if (!globalAccessCode) {
-      // 更全面的独立访问码匹配
-      const standaloneCode = textContent.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/gi)
-      if (standaloneCode && standaloneCode.length > 0) {
-        // 过滤掉常见无效组合
-        const validCodes = standaloneCode.filter(code => 
-          !/^[0-9]+$/.test(code) && // 排除纯数字
-          !/^[a-z]+$/.test(code) && // 排除纯字母
-          !/^[0-9]{4}$/.test(code) && // 排除4位纯数字（可能是年份）
-          !/^(?:http|www)/i.test(code) // 排除URL片段
+    // 2. 提取所有有效云盘链接（增强格式支持）
+    const panMatches = []
+    
+    // 格式1: 标准URL格式
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+    let match
+    while ((match = urlPattern.exec(textContent)) !== null) {
+      panMatches.push(match[0])
+    }
+    
+    // 格式2: 无协议简写格式 (cloud.189.cn/...)
+    const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+    while ((match = shortPattern.exec(textContent)) !== null) {
+      panMatches.push('https://' + match[0])
+    }
+    
+    console.log(`找到 ${panMatches.length} 个云盘链接`)
+    
+    // 3. 为每个链接提取专属访问码
+    panMatches.forEach(panUrl => {
+      if (!isValidPanUrl(panUrl)) return
+      
+      let accessCode = globalAccessCode
+      const index = textContent.indexOf(panUrl)
+      
+      // 在链接前后100字符内搜索专属访问码
+      if (index !== -1) {
+        const searchStart = Math.max(0, index - 100)
+        const searchEnd = Math.min(textContent.length, index + panUrl.length + 100)
+        const contextText = textContent.substring(searchStart, searchEnd)
+        
+        // 尝试提取专属访问码
+        const localCode = extractAccessCode(contextText)
+        if (localCode) {
+          console.log(`为链接 ${panUrl} 找到专属访问码: ${localCode}`)
+          accessCode = localCode
+        }
+        
+        // 特殊格式处理：链接后直接跟访问码
+        const directMatch = contextText.match(
+          new RegExp(`${escapeRegExp(panUrl)}[\\s\\S]{0,30}?(?:访问码|密码|访问密码|提取码|code)[:：]?\\s*([a-z0-9]{4,6})`, 'i')
         )
         
-        if (validCodes.length > 0) {
-          globalAccessCode = validCodes[0]
-          console.log(`独立访问码: ${globalAccessCode}`)
+        if (directMatch && directMatch[1]) {
+          console.log(`找到直接关联访问码: ${directMatch[1]} for ${panUrl}`)
+          accessCode = directMatch[1]
         }
       }
-    }
-    
-    // 4. 特别处理简介中的直接网盘链接（带访问码格式）
-    const directLinkMatches = textContent.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)\s*\(?(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\)?/gi)
-    
-    if (directLinkMatches) {
-      directLinkMatches.forEach(match => {
-        const panMatch = match.match(/(https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s)]+)/i)
-        const codeMatch = match.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
-        
-        if (panMatch && codeMatch) {
-          const panUrl = panMatch[0]
-          const accessCode = codeMatch[1]
-          
-          // 避免重复添加
-          const exists = tracks.some(t => t.pan === panUrl)
-          if (!exists) {
-            tracks.push({
-              name: title,
-              pan: panUrl,
-              ext: { accessCode }
-            })
-            console.log(`从简介直接找到资源: ${panUrl}, 访问码: ${accessCode}`)
-          }
-        }
+      
+      tracks.push({
+        name: title,
+        pan: panUrl,
+        ext: { accessCode }
       })
-    }
+    })
     
-    // 5. 提取所有天翼云盘链接（包括简介中的直接链接）
-    const panMatches = textContent.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
-    console.log(`在文本中找到 ${panMatches.length} 个链接`)
-    
-    // 添加文本中找到的链接
-    panMatches.forEach(panUrl => {
-      if (isValidPanUrl(panUrl)) {
-        // 避免重复添加
-        const exists = tracks.some(t => t.pan === panUrl)
-        if (!exists) {
+    // 4. 深度扫描兜底（当未找到资源时）
+    if (tracks.length === 0) {
+      console.log("常规方法未找到资源，启动深度扫描...")
+      const fullText = $('body').text()
+      
+      // 深度扫描所有可能的URL格式
+      const deepPattern = /(https?:\/\/)?cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+      while ((match = deepPattern.exec(fullText)) !== null) {
+        const panUrl = match[0].startsWith('http') ? match[0] : 'https://' + match[0]
+        
+        if (isValidPanUrl(panUrl) && !tracks.some(t => t.pan === panUrl)) {
           tracks.push({
             name: title,
             pan: panUrl,
@@ -224,43 +208,15 @@ async function getTracks(ext) {
           })
         }
       }
-    })
-    
-    // 6. 如果还没找到资源，尝试更深入扫描
-    if (tracks.length === 0) {
-      console.log("常规方法未找到资源，尝试深度扫描...")
-      
-      // 深度扫描整个页面
-      const fullText = $('body').text()
-      const deepPanMatches = fullText.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi) || []
-      
-      // 深度扫描访问码
-      let deepAccessCode = ''
-      const deepCodeMatch = fullText.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i)
-      if (deepCodeMatch) {
-        deepAccessCode = deepCodeMatch[1]
-      }
-      
-      // 添加找到的资源
-      deepPanMatches.forEach(panUrl => {
-        if (isValidPanUrl(panUrl)) {
-          tracks.push({
-            name: title,
-            pan: panUrl,
-            ext: { accessCode: deepAccessCode || globalAccessCode }
-          })
-        }
-      })
-      
-      console.log(`深度扫描找到 ${deepPanMatches.length} 个资源`)
+      console.log(`深度扫描找到 ${tracks.length} 个资源`)
     }
     
     console.log(`共找到 ${tracks.length} 个资源`)
-    
     return jsonify({ list: [{
       title: "资源列表",
       tracks,
     }]})
+    
   } catch (e) {
     console.error("资源加载错误:", e)
     return jsonify({ list: [{
@@ -274,35 +230,39 @@ async function getTracks(ext) {
   }
 }
 
+// 辅助函数：转义正则特殊字符
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // 增强访问码提取函数
-function extractAccessCode(...texts) {
-  for (const text of texts) {
-    if (!text) continue
-    
-    // 1. 尝试关键词后的访问码（字母+数字组合）
-    let match = text.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
-    if (match) return match[1]
-    
-    // 2. 尝试括号内的访问码
-    match = text.match(/[\(（][^\)）]*?(?:访问码|密码|码|code)?[:：]?\s*([a-z0-9]{4,6})[^\)）]*[\)）]/i)
-    if (match) return match[1]
-    
-    // 3. 尝试冒号后的访问码
-    match = text.match(/[:：]\s*([a-z0-9]{4,6})\b/i)
-    if (match) return match[1]
-    
-    // 4. 尝试独立访问码（带边界检查）
-    match = text.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/i)
-    if (match) {
-      const code = match[1]
-      // 排除常见无效组合
-      if (!/^[0-9]+$/.test(code) && // 排除纯数字
-          !/^[a-z]+$/.test(code) && // 排除纯字母
-          !/^[0-9]{4}$/.test(code)) { // 排除4位纯数字（可能是年份）
-        return code
-      }
+function extractAccessCode(text) {
+  if (!text) return ''
+  
+  // 格式1: 【访问码：abcd】
+  let match = text.match(/[\[【]访问码[:：]\s*([a-z0-9]{4,6})[\]】]/i)
+  if (match) return match[1]
+  
+  // 格式2: (密码：abcd)
+  match = text.match(/[\(（]密码[:：]\s*([a-z0-9]{4,6})[\)）]/i)
+  if (match) return match[1]
+  
+  // 格式3: 访问码：abcd
+  match = text.match(/(?:访问码|密码|访问密码|提取码|code)[:：]\s*([a-z0-9]{4,6})\b/i)
+  if (match) return match[1]
+  
+  // 格式4: 独立4-6位字母数字组合
+  const standalone = text.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/i)
+  if (standalone) {
+    const code = standalone[1]
+    // 过滤无效组合
+    if (!/^\d+$/.test(code) &&  // 排除纯数字
+        !/^[a-z]+$/i.test(code) &&  // 排除纯字母
+        !/^\d{4}$/.test(code)) {   // 排除4位纯数字
+      return code
     }
   }
+  
   return ''
 }
 
