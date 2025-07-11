@@ -8,39 +8,27 @@ const appConfig = {
   tabs: [
     {
       name: '剧集',
-      ext: {
-        id: '?tagId=42204684250355',
-      },
+      ext: { id: 'tagId=42204684250355' },
     },
     {
       name: '电影',
-      ext: {
-        id: '?tagId=42204681950354',
-      },
+      ext: { id: 'tagId=42204681950354' },
     },
     {
       name: '动漫',
-      ext: {
-        id: '?tagId=42204792950357',
-      },
+      ext: { id: 'tagId=42204792950357' },
     },
     {
       name: '纪录片',
-      ext: {
-        id: '?tagId=42204697150356',
-      },
+      ext: { id: 'tagId=42204697150356' },
     },
     {
       name: '综艺',
-      ext: {
-        id: '?tagId=42210356650363',
-      },
+      ext: { id: 'tagId=42210356650363' },
     },
     {
       name: '影视原盘',
-      ext: {
-        id: '?tagId=42212287587456',
-      },
+      ext: { id: 'tagId=42212287587456' },
     },
   ],
 }
@@ -54,7 +42,10 @@ async function getCards(ext) {
   let cards = []
   let { page = 1, id } = ext
 
-  const url = appConfig.site + `/${id}&page=${page}`
+  const url = appConfig.site + `/thread?topicId=${id}&page=${page}`
+
+  // 打印请求的URL，确认能否正确请求数据
+  print(`请求链接：${url}`)
 
   const { data } = await $fetch.get(url, {
     headers: {
@@ -63,21 +54,19 @@ async function getCards(ext) {
     }
   })
 
+  // 打印网页内容，检查是否能获取到页面数据
+  print(`页面内容：${data.slice(0, 500)}`)
+
   const $ = cheerio.load(data)
 
+  // 打印抓取的HTML内容
   $('.topicItem').each((index, each) => {
-    if ($(each).find('.cms-lock-solid').length > 0) return
-
     const href = $(each).find('h2 a').attr('href')
     const title = $(each).find('h2 a').text()
+
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/
     const match = title.match(regex)
     const dramaName = match ? match[1] : title
-    const r = $(each).find('.summary').text()
-    const tag = $(each).find('.tag').text()
-
-    if (/content/.test(r) && !/cloud/.test(r)) return
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return
 
     cards.push({
       vod_id: href,
@@ -100,6 +89,8 @@ async function getTracks(ext) {
   const tracks = []
   const url = ext.url
 
+  print(`请求网盘资源链接：${url}`)
+
   const { data } = await $fetch.get(url, {
     headers: {
       'Referer': 'https://www.leijing.xyz/',
@@ -107,15 +98,18 @@ async function getTracks(ext) {
     }
   })
 
+  // 打印页面HTML，检查是否加载成功
+  print(`页面内容：${data.slice(0, 500)}`)
+
   const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   const pageHtml = $.html()
 
-  print(pageHtml)  // 打印页面HTML，以确认是否加载正确
-
   const validResources = extractValidResources(pageHtml)
 
+  // 打印提取的资源
   print(`✅ 抓取到资源数量: ${validResources.length}`)
+
   validResources.forEach((res, i) => {
     print(`资源${i + 1}: 链接=${res.url}, 提取码=${res.accessCode}`)
     tracks.push({
