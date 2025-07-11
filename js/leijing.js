@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio()
 
 const appConfig = {
-  ver: 9, // 版本号更新
+  ver: 10, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -113,126 +113,72 @@ async function getTracks(ext) {
     const title = $('h1').text().trim() || "网盘资源"
     console.log(`页面标题: ${title}`)
     
-    // 获取整个内容区域的HTML和文本
-    const contentHtml = $('.thread-content, .post-content, .content, .topic-content').first().html() || $('body').html()
-    const textContent = contentHtml ? cheerio.load(contentHtml).text() : ''
-    
-    if (!contentHtml) {
-      console.log("未找到任何内容区域")
-      return jsonify({ list: [{
-        title: "资源列表",
-        tracks: [],
-      }]})
-    }
-    
-    console.log(`内容区域长度: ${textContent.length} 字符`)
-    
     // 1. 全局访问码提取（优先）
     let globalAccessCode = ''
-    const globalCodeMatch = textContent.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
+    const globalCodeMatch = $('body').text().match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
     if (globalCodeMatch) {
       globalAccessCode = globalCodeMatch[1]
       console.log(`全局访问码: ${globalAccessCode}`)
     }
     
-    // 2. 提取所有有效云盘链接（增强格式支持），使用Set去重
-    const panSet = new Set()
-    
-    // 格式1: 标准URL格式
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
-    let match
-    while ((match = urlPattern.exec(textContent)) !== null) {
-      panSet.add(match[0])
-    }
-    
-    // 格式2: 无协议简写格式 (cloud.189.cn/...)
-    const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
-    while ((match = shortPattern.exec(textContent)) !== null) {
-      panSet.add('https://' + match[0])
-    }
-    
-    const panMatches = Array.from(panSet)
-    console.log(`找到 ${panMatches.length} 个云盘链接（去重后）`)
-    
-    // 3. 为每个链接提取专属访问码
-    panMatches.forEach(panUrl => {
-      if (!isValidPanUrl(panUrl)) return
-      
-      // 标准化URL以去除重复
-      const normalizedUrl = normalizePanUrl(panUrl)
-      if (uniqueLinks.has(normalizedUrl)) {
-        console.log(`跳过重复链接: ${panUrl}`)
-        return
-      }
-      uniqueLinks.add(normalizedUrl)
-      
-      let accessCode = globalAccessCode
-      const index = textContent.indexOf(panUrl)
-      
-      // 在链接前后100字符内搜索专属访问码
-      if (index !== -1) {
-        const searchStart = Math.max(0, index - 100)
-        const searchEnd = Math.min(textContent.length, index + panUrl.length + 100)
-        const contextText = textContent.substring(searchStart, searchEnd)
-        
-        // 尝试提取专属访问码
-        const localCode = extractAccessCode(contextText)
-        if (localCode) {
-          console.log(`为链接 ${panUrl} 找到专属访问码: ${localCode}`)
-          accessCode = localCode
-        }
-        
-        // 特殊格式处理：链接后直接跟访问码
-        const directMatch = contextText.match(
-          new RegExp(`${escapeRegExp(panUrl)}[\\s\\S]{0,30}?(?:访问码|密码|访问密码|提取码|code)[:：]?\\s*([a-z0-9]{4,6})`, 'i')
-        )
-        
-        if (directMatch && directMatch[1]) {
-          console.log(`找到直接关联访问码: ${directMatch[1]} for ${panUrl}`)
-          accessCode = directMatch[1]
-        }
-      }
-      
-      tracks.push({
-        name: title,
-        pan: panUrl,
-        ext: { accessCode }
-      })
+    // 2. 查找并模拟点击"资源链接"按钮
+    const resourceLinks = $('a, button, div').filter((i, el) => {
+      const text = $(el).text().trim().toLowerCase()
+      return text.includes('资源链接') || text.includes('下载链接') || text.includes('网盘链接')
     })
     
-    // 4. 深度扫描兜底（当未找到资源时）
+    console.log(`找到 ${resourceLinks.length} 个资源链接按钮`)
+    
+    if (resourceLinks.length > 0) {
+      // 模拟点击第一个资源链接按钮
+      const resourceContent = resourceLinks.first().closest('.content, .post-content, .thread-content, .topic-content, .resource-content')
+        .add(resourceLinks.first().next('.resource-links, .hidden-links, .links-container'))
+        .add(resourceLinks.first().parent())
+        .html()
+      
+      if (resourceContent) {
+        console.log(`解析资源链接区域内容`)
+        const $resource = cheerio.load(resourceContent)
+        const resourceText = $resource.text()
+        
+        // 扫描资源链接区域
+        scanForLinks(resourceText, tracks, globalAccessCode, uniqueLinks, title)
+      }
+    }
+    
+    // 3. 如果没有找到资源链接按钮，扫描整个页面
+    if (tracks.length === 0) {
+      console.log("未找到资源链接按钮，扫描整个页面内容")
+      const fullText = $('body').text()
+      scanForLinks(fullText, tracks, globalAccessCode, uniqueLinks, title)
+    }
+    
+    // 4. 如果还是没找到，尝试深度扫描
     if (tracks.length === 0) {
       console.log("常规方法未找到资源，启动深度扫描...")
       const fullText = $('body').text()
-      const deepSet = new Set()
-      
-      // 深度扫描所有可能的URL格式
       const deepPattern = /(https?:\/\/)?cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+      let match
       while ((match = deepPattern.exec(fullText)) !== null) {
         const panUrl = match[0].startsWith('http') ? match[0] : 'https://' + match[0]
-        deepSet.add(panUrl)
-      }
-      
-      // 去重后添加
-      const deepPanMatches = Array.from(deepSet)
-      deepPanMatches.forEach(panUrl => {
-        if (!isValidPanUrl(panUrl)) return
         
-        // 标准化URL以去除重复
-        const normalizedUrl = normalizePanUrl(panUrl)
-        if (uniqueLinks.has(normalizedUrl)) {
-          console.log(`跳过深度扫描重复链接: ${panUrl}`)
-          return
+        if (isValidPanUrl(panUrl)) {
+          // 标准化URL以去除重复
+          const normalizedUrl = normalizePanUrl(panUrl)
+          if (uniqueLinks.has(normalizedUrl)) {
+            console.log(`跳过深度扫描重复链接: ${panUrl}`)
+            continue
+          }
+          uniqueLinks.add(normalizedUrl)
+          
+          tracks.push({
+            name: title,
+            pan: panUrl,
+            ext: { accessCode: globalAccessCode }
+          })
         }
-        uniqueLinks.add(normalizedUrl)
-        
-        tracks.push({
-          name: title,
-          pan: panUrl,
-          ext: { accessCode: globalAccessCode }
-        })
-      })
-      console.log(`深度扫描找到 ${deepPanMatches.length} 个资源`)
+      }
+      console.log(`深度扫描找到 ${tracks.length} 个资源`)
     }
     
     console.log(`共找到 ${tracks.length} 个资源`)
@@ -252,6 +198,73 @@ async function getTracks(ext) {
       }],
     }]})
   }
+}
+
+// 扫描文本中的链接并添加到tracks
+function scanForLinks(text, tracks, globalAccessCode, uniqueLinks, title) {
+  if (!text) return
+  
+  const panMatches = []
+  // 格式1: 标准URL格式
+  const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+  let match
+  while ((match = urlPattern.exec(text)) !== null) {
+    panMatches.push(match[0])
+  }
+  
+  // 格式2: 无协议简写格式 (cloud.189.cn/...)
+  const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
+  while ((match = shortPattern.exec(text)) !== null) {
+    panMatches.push('https://' + match[0])
+  }
+  
+  // 去重
+  const uniquePanMatches = [...new Set(panMatches)]
+  
+  uniquePanMatches.forEach(panUrl => {
+    if (!isValidPanUrl(panUrl)) return
+    
+    // 标准化URL以去除重复
+    const normalizedUrl = normalizePanUrl(panUrl)
+    if (uniqueLinks.has(normalizedUrl)) {
+      console.log(`跳过重复链接: ${panUrl}`)
+      return
+    }
+    uniqueLinks.add(normalizedUrl)
+    
+    let accessCode = globalAccessCode
+    const index = text.indexOf(panUrl)
+    
+    // 在链接前后100字符内搜索专属访问码
+    if (index !== -1) {
+      const searchStart = Math.max(0, index - 100)
+      const searchEnd = Math.min(text.length, index + panUrl.length + 100)
+      const contextText = text.substring(searchStart, searchEnd)
+      
+      // 尝试提取专属访问码
+      const localCode = extractAccessCode(contextText)
+      if (localCode) {
+        console.log(`为链接 ${panUrl} 找到专属访问码: ${localCode}`)
+        accessCode = localCode
+      }
+      
+      // 特殊格式处理：链接后直接跟访问码
+      const directMatch = contextText.match(
+        new RegExp(`${escapeRegExp(panUrl)}[\\s\\S]{0,30}?(?:访问码|密码|访问密码|提取码|code)[:：]?\\s*([a-z0-9]{4,6})`, 'i')
+      )
+      
+      if (directMatch && directMatch[1]) {
+        console.log(`找到直接关联访问码: ${directMatch[1]} for ${panUrl}`)
+        accessCode = directMatch[1]
+      }
+    }
+    
+    tracks.push({
+      name: title,
+      pan: panUrl,
+      ext: { accessCode }
+    })
+  })
 }
 
 // 辅助函数：转义正则特殊字符
