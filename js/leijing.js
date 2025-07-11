@@ -25,14 +25,14 @@ async function getCards(ext) {
   let { page = 1, id } = ext
   const url = appConfig.site + `/${id}&page=${page}`
 
-  const html = request(url, {
+  const { data } = await $fetch.get(url, {
     headers: {
-      'Referer': 'https://www.leijing.xyz/',
+      'Referer': appConfig.site + '/',
       'User-Agent': UA,
     }
   })
 
-  const $ = cheerio.load(html)
+  const $ = cheerio.load(data)
 
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return
@@ -53,7 +53,7 @@ async function getCards(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: `https://www.leijing.xyz/${href}`,
+        url: appConfig.site + href,
       },
     })
   })
@@ -66,14 +66,14 @@ async function getTracks(ext) {
   const tracks = []
   const url = ext.url
 
-  const html = request(url, {
+  const { data } = await $fetch.get(url, {
     headers: {
-      'Referer': 'https://www.leijing.xyz/',
+      'Referer': appConfig.site + '/',
       'User-Agent': UA,
     }
   })
 
-  const $ = cheerio.load(html)
+  const $ = cheerio.load(data)
   const title = $('h1').text().trim() || "网盘资源"
   const pageHtml = $.html()
   const validResources = extractValidResources(pageHtml, title)
@@ -133,8 +133,7 @@ function extractValidResources(html, title) {
 }
 
 function isValidPanUrl(url) {
-  if (!url) return false
-  return /https?:\/\/cloud\.189\.cn\/.+/.test(url)
+  return !!url && /https?:\/\/cloud\.189\.cn\/.+/.test(url)
 }
 
 function addResource(resources, url, accessCode = '') {
@@ -211,18 +210,17 @@ async function getPlayinfo(ext) {
 async function search(ext) {
   ext = argsify(ext)
   let cards = []
-
   let text = encodeURIComponent(ext.text)
   let page = ext.page || 1
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
 
-  const html = request(url, {
+  const { data } = await $fetch.get(url, {
     headers: {
       'User-Agent': UA,
     },
   })
 
-  const $ = cheerio.load(html)
+  const $ = cheerio.load(data)
 
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return
@@ -243,7 +241,7 @@ async function search(ext) {
       vod_pic: '',
       vod_remarks: '',
       ext: {
-        url: `https://www.leijing.xyz/${href}`,
+        url: appConfig.site + href,
       },
     })
   })
