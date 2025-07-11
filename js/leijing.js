@@ -89,39 +89,26 @@ async function getTracks(ext) {
   });
   
   const $ = cheerio.load(data);
-  const pans = new Set(); // 确保链接唯一
-  const urlRegex = /(https?:\/\/[^\s（]+)/g;
+  const pageText = $('body').text();
   
-  // 提取页面中所有符合规则的链接
-  $('div,p,a').each((index, each) => {
-    // 处理链接属性
-    const href = ($(each).attr('href') ?? "").replace('http://', 'https://');
-    if (href) processUrl(href);
-    
-    // 处理文本中的链接
-    const text = $(each).text().trim();
-    const urls = text.match(urlRegex);
-    if (urls) urls.forEach(processUrl);
-  });
+  // 提取链接和访问码
+  const linkRegex = /(https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+)/g;
+  const codeRegex = /访问码[:：]\s*([a-zA-Z0-9]+)/g;
   
-  // 处理链接的辅助函数
-  function processUrl(url) {
-    if (url.startsWith('https://cloud.189.cn/') && !pans.has(url)) {
-      pans.add(url);
-    }
-  }
+  const links = pageText.match(linkRegex) || [];
+  const codes = pageText.match(codeRegex) || [];
   
-  // 只保留第一个有效链接（符合“每个帖子一个链接”的需求）
-  if (pans.size > 0) {
-    const panUrl = Array.from(pans)[0];
-    // 检测是否需要访问码（通过页面是否含“访问码”“提取码”文本判断）
-    const pageText = $('body').text();
-    const needCode = /访问码|提取码/.test(pageText);
+  // 处理提取到的链接和访问码
+  if (links.length > 0) {
+    const panUrl = links[0]; // 取第一个链接
+    const needCode = codes.length > 0; // 判断是否需要访问码
+    const accessCode = codes.length > 0 ? codes[0].replace(/访问码[:：]\s*/, '') : '';
     
     tracks.push({
       name: "网盘",
       pan: panUrl,
-      needCode: needCode, // 新增标识：是否需要访问码
+      needCode: needCode,
+      accessCode: accessCode, // 新增：提取到的访问码
       ext: {}
     });
   }
