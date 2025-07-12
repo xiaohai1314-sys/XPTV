@@ -1,230 +1,237 @@
-// 修改为兼容tvOS和iOS的通用脚本
+// 方佬改进
+// 2025-7-12 优化iOS和Apple TV兼容性
 const cheerio = createCheerio()
-// 使用通用User-Agent兼容tvOS和iOS
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+// 使用兼容iOS和Apple TV的User-Agent
+const UA = 'Mozilla/5.0 (Apple; CPU OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) Mobile/15E148'
 
 const appConfig = {
-	ver: 1,
-	title: '观影网',
-	site: 'https://www.gying.org',
-	tabs: [
-		{
-			name: '电影',
-			ext: {
-				id: '/mv/------',
-			},
-		},
-		{
-			name: '剧集',
-			ext: {
-				id: '/tv/------',
-			},
-		},
-		{
-			name: '动漫',
-			ext: {
-				id: '/ac/------',
-			},
-		}
-	],
-}
-
-// 检测是否为tvOS环境
-function isTVOS() {
-    return $info && $info.osName === 'tvOS'
+    ver: 2, // 更新版本号
+    title: '观影网',
+    site: 'https://www.gying.org/',
+    tabs: [
+        {
+            name: '电影',
+            ext: {
+                id: 'mv?page=',
+            },
+        },
+        {
+            name: '剧集',
+            ext: {
+                id: 'tv?page=',
+            },
+        },
+        {
+            name: '动漫',
+            ext: {
+                id: 'ac?page=',
+            },
+        }
+    ],
 }
 
 async function getConfig() {
-	return jsonify(appConfig)
+    return jsonify(appConfig)
 }
 
 async function getCards(ext) {
-	ext = argsify(ext)
-	let cards = []
-	let { page = 1, id } = ext
-	const url = appConfig.site + id + page
-	
-	const { data } = await $fetch.get(url, {
-        headers: {
-            "User-Agent": UA,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ext = argsify(ext)
+    let cards = []
+    let { page = 1, id } = ext
+    const url = `${appConfig.site}${id}${page}`
+    
+    try {
+        const { data } = await $fetch.get(url, {
+            headers: { "User-Agent": UA }
+        });
+        
+        // 检测DNS劫持或错误页面
+        if (data.includes('p.error') || data.includes('DNS劫持')) {
+            return handleError("检测到DNS劫持或错误页面");
         }
-    });
-	
-	const $ = cheerio.load(data)
-	
-	// tvOS优化：使用更健壮的选择器
-	if (isTVOS()) {
-		// tvOS专用解析逻辑
-		const scriptContent = $('script').filter((_, script) => {
-			return $(script).html().includes('_obj.header');
-		}).html();
-		
-		if (scriptContent) {
-			const jsonStart = scriptContent.indexOf('{');
-			const jsonEnd = scriptContent.lastIndexOf('}') + 1;
-			const jsonString = scriptContent.slice(jsonStart, jsonEnd);
-			
-			const inlistMatch = jsonString.match(/_obj\.inlist=({.*});/);
-			if (inlistMatch) {
-				try {
-					const inlistData = JSON.parse(inlistMatch[1]);
-					inlistData["i"].forEach((item, index) => {
-						cards.push({
-							vod_id: item,
-							vod_name: inlistData["t"][index],
-							vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
-							vod_remarks: inlistData["g"][index], 
-							ext: {
-								url: `https://www.gyg.la/res/downurl/${inlistData["ty"]}/${item}`,
-							},
-						})
-					});
-				} catch (e) {
-					$utils.toastError("解析数据失败: " + e.message);
-				}
-			} else {
-				$utils.toastError("未找到 _obj.inlist 数据");
-			}
-		} else {
-			$utils.toastError("未找到包含_obj.header的脚本");
-		}
-	} else {
-		// iOS专用解析逻辑
-		const t1 = $('p.error').text()
-		if ($('p.error').length > 0) { 
-			$utils.openSafari(appConfig.site, UA);
-		} else {
-			$('.v5d').each((index, element) => {
-				const name = $(element).find('b').text().trim() || 'N/A';
-				const imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || $(element).find('img').attr('src') || 'N/A';
-				const additionalInfo = $(element).find('p').text().trim() || 'N/A';
-				const pathMatch = $(element).find('a').attr('href') || 'N/A'
-				
-				cards.push({
-					vod_id: pathMatch,
-					vod_name: name,
-					vod_pic: imgUrl,
-					vod_remarks: additionalInfo,
-					ext: {
-						url: `${appConfig.site}/res/downurl${pathMatch}`,
-					},
-				})
-			});
-		}
-	}
-	
-	return jsonify({
-		list: cards,
-	})
+        
+        const $ = cheerio.load(data)
+        
+        // 更健壮的JSON数据提取
+        const scriptContent = $('script').map((i, el) => $(el).html()).get().join('');
+        const jsonStart = scriptContent.indexOf('_obj.header');
+        if (jsonStart === -1) return handleError("未找到数据对象");
+        
+        const jsonString = extractJson(scriptContent, jsonStart);
+        if (!jsonString) return handleError("无法解析数据对象");
+        
+        try {
+            const jsonData = JSON.parse(jsonString);
+            if (!jsonData.inlist || !jsonData.inlist.i) return handleError("无效的数据格式");
+            
+            const inlistData = jsonData.inlist;
+            
+            inlistData.i.forEach((item, index) => {
+                cards.push({
+                    vod_id: item,
+                    vod_name: inlistData.t[index] || "未知标题",
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
+                    vod_remarks: inlistData.g[index] || "未知信息",
+                    ext: {
+                        url: `${appConfig.site}res/downurl/${inlistData.ty}/${item}`,
+                    },
+                })
+            });
+        } catch (e) {
+            return handleError("解析JSON数据失败: " + e.message);
+        }
+        
+        return jsonify({ list: cards });
+    } catch (error) {
+        return handleError("网络请求失败: " + error.message);
+    }
 }
 
 async function getTracks(ext) {
-	ext = argsify(ext)
+    ext = argsify(ext)
     let tracks = []
-	let url = ext.url
-	
-	const { data } = await $fetch.get(url, {
-		headers: {
-			'User-Agent': UA,
-			'Accept': 'application/json'
-		},
-	})
-	
-	try {
-		const respstr = JSON.parse(data)
-		
-		if(respstr.hasOwnProperty('panlist')){
-			respstr.panlist.url.forEach((item, index) => {
-				tracks.push({
-					name:'网盘',
-					pan: item,
-					ext: {
-						accessCode: respstr.panlist.code?.[index] || ''
-					},
-				})
-			})
-		} else if(respstr.hasOwnProperty('file')){
-			$utils.toastError('网盘验证掉签')
-		} else {
-			$utils.toastError('没有网盘资源');
-		}
-	} catch (e) {
-		$utils.toastError('解析网盘数据失败: ' + e.message)
-	}
-	
-	return jsonify({
-		list: [
-			{
-				title: '资源列表',
-				tracks,
-			},
-		],
-	})
+    let url = ext.url
+    
+    try {
+        const { data } = await $fetch.get(url, {
+            headers: { 'User-Agent': UA }
+        });
+        
+        let respstr;
+        try {
+            respstr = JSON.parse(data);
+        } catch (e) {
+            return handleError("解析资源数据失败");
+        }
+        
+        if (respstr.panlist && respstr.panlist.url) {
+            const regex = {
+                '中英': /中英/g,
+                '1080P': /1080P/g,
+                '杜比': /杜比/g,
+                '原盘': /原盘/g,
+                '1080p': /1080p/g,
+                '双语字幕': /双语字幕/g,
+            };
+            
+            respstr.panlist.url.forEach((item, index) => {
+                let name = ''
+                for (const keyword in regex) {
+                    const matches = respstr.panlist.name[index].match(regex[keyword]);
+                    if (matches) {
+                        name = `${name}${matches[0]} `
+                    }
+                }
+                
+                // 添加资源类型作为前缀
+                const resourceType = respstr.panlist.tname[respstr.panlist.type[index]] || "资源";
+                tracks.push({
+                    name: `${resourceType}: ${name.trim() || "高质量资源"}`,
+                    pan: item,
+                    ext: { url: '' },
+                })
+            });
+        } else if (respstr.file) {
+            return handleError("需要验证，请前往主站完成验证");
+        } else {
+            return handleError("没有可用的网盘资源");
+        }
+        
+        return jsonify({
+            list: [{ title: '资源列表', tracks }]
+        });
+    } catch (error) {
+        return handleError("获取资源失败: " + error.message);
+    }
 }
 
 async function getPlayinfo(ext) {
-	ext = argsify(ext)
-	const url = ext.url
-   	  
-	return jsonify({ urls: [ext.url] })
+    return jsonify({ urls: [ext.url] })
 }
 
 async function search(ext) {
-	ext = argsify(ext)
-	
-	let text = encodeURIComponent(ext.text)
-	let page = ext.page || 1
-	let url = `${appConfig.site}/s/1---${page}/${text}`
-	
-	const { data } = await $fetch.get(url, {
-	    headers: {
-			"User-Agent": UA,
-			"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    	},
-	})
-	
-	const $ = cheerio.load(data)
-	let cards = []
-   
-	// 统一选择器兼容tvOS和iOS
-	$('.v5d, .video-item').each((index, element) => {
-		const name = $(element).find('b, .title').text().trim() || 'N/A';
-		const imgEl = $(element).find('picture source[data-srcset], img');
-		let imgUrl = imgEl.attr('data-srcset') || imgEl.attr('src') || 'N/A';
-		
-		// 处理相对路径
-		if (imgUrl.startsWith('//')) {
-			imgUrl = 'https:' + imgUrl;
-		} else if (imgUrl.startsWith('/')) {
-			imgUrl = appConfig.site + imgUrl;
-		}
-		
-		const additionalInfo = $(element).find('p, .info').text().trim() || 'N/A';
-		const pathMatch = $(element).find('a').attr('href') || 'N/A'
-		const fullUrl = pathMatch.startsWith('http') ? pathMatch : appConfig.site + pathMatch;
-		
-		cards.push({
-			vod_id: pathMatch,
-			vod_name: name,
-			vod_pic: imgUrl,
-			vod_remarks: additionalInfo,
-			ext: {
-				url: fullUrl,
-			},
-		})
-	});
-	
-	return jsonify({
-		list: cards,
-	})
+    ext = argsify(ext)
+    let cards = []
+    
+    let text = encodeURIComponent(ext.text)
+    let page = ext.page || 1
+    let url = `${appConfig.site}/s/1---${page}/${text}`
+    
+    try {
+        const { data } = await $fetch.get(url, {
+            headers: { "User-Agent": UA }
+        });
+        
+        const $ = cheerio.load(data)
+        
+        $('.v5d').each((index, element) => {
+            const name = $(element).find('b').text().trim() || '未知标题';
+            
+            // 更健壮的图片URL获取
+            let imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || 
+                         $(element).find('img').attr('src') || 
+                         'https://via.placeholder.com/150';
+            
+            // 确保URL完整
+            if (imgUrl.startsWith('//')) {
+                imgUrl = 'https:' + imgUrl;
+            } else if (!imgUrl.startsWith('http')) {
+                imgUrl = appConfig.site + imgUrl.replace(/^\/+/, '');
+            }
+            
+            const additionalInfo = $(element).find('p').text().trim() || '暂无信息';
+            const pathMatch = $(element).find('a').attr('href') || '';
+            
+            cards.push({
+                vod_id: pathMatch,
+                vod_name: name,
+                vod_pic: imgUrl,
+                vod_remarks: additionalInfo,
+                ext: {
+                    url: `${appConfig.site}/res/downurl${pathMatch}`,
+                },
+            })
+        });
+        
+        return jsonify({ list: cards });
+    } catch (error) {
+        return handleError("搜索失败: " + error.message);
+    }
 }
 
-// tvOS专用函数：处理焦点和导航
-if (isTVOS()) {
-    $focus.onSelect((target) => {
-        if (target && target.ext && target.ext.url) {
-            $browser.open(target.ext.url);
+// ========== 辅助函数 ==========
+function handleError(message) {
+    // 在Apple TV上避免使用toastError
+    try {
+        $utils.toastError(message);
+    } catch (e) {
+        console.error(message);
+    }
+    return jsonify({ list: [], error: message });
+}
+
+function extractJson(scriptContent, startIndex) {
+    // 更健壮的JSON提取方法
+    let openBraces = 0;
+    let jsonStart = -1;
+    let jsonEnd = -1;
+    
+    for (let i = startIndex; i < scriptContent.length; i++) {
+        if (scriptContent[i] === '{') {
+            if (openBraces === 0) jsonStart = i;
+            openBraces++;
+        } else if (scriptContent[i] === '}') {
+            openBraces--;
+            if (openBraces === 0) {
+                jsonEnd = i;
+                break;
+            }
         }
-    });
+    }
+    
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+        return scriptContent.substring(jsonStart, jsonEnd + 1);
+    }
+    
+    return null;
 }
