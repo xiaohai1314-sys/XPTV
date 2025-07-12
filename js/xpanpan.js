@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 6, // 版本号更新
+  ver: 7, // 版本号更新
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
   tabs: [
@@ -87,103 +87,46 @@ async function getCards(ext) {
 
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext;
+  const { url, postId } = ext;
   if (!url) return jsonify({ list: [] });
 
   log(`加载帖子详情: ${url}`);
 
-  // 第一次请求获取原始页面
-  let finalHtml = '';
-  let response = await $fetch.get(url, {
+  // 第一次请求：检查是否需要回复
+  const { data: firstResponse, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
     timeout: 15000,
   });
 
-  if (response.status !== 200) {
-    log(`帖子请求失败: HTTP ${response.status}`);
+  if (status !== 200) {
+    log(`帖子请求失败: HTTP ${status}`);
     return jsonify({ list: [] });
   }
 
-  finalHtml = response.data;
-
-  // 检查是否需要回复
-  if (finalHtml.includes('请回复后再查看')) {
-    log('需要回复解锁内容，尝试模拟回复...');
+  // 如果页面提示需要回复，先执行回复操作
+  if (firstResponse.includes('请回复后再查看')) {
+    log('检测到需要回复的帖子，尝试模拟回复...');
+    const replySuccess = await simulateReply(url, postId);
     
-    try {
-      const $ = cheerio.load(finalHtml);
-      const form = $('#fastpostform');
-      if (form.length > 0) {
-        // 获取表单参数
-        const formhash = form.find('input[name="formhash"]').val();
-        const tid = form.find('input[name="tid"]').val();
-        const fid = form.find('input[name="fid"]').val();
-        
-        if (formhash && tid) {
-          // 快捷回复内容池
-          const replies = [
-            "感谢楼主的分享！",
-            "资源太棒了，感谢分享！",
-            "非常需要这个资源，感谢！"
-          ];
-          
-          // 随机选择一条回复
-          const randomReply = replies[Math.floor(Math.random() * replies.length)];
-          
-          // 构建POST数据
-          const postData = new URLSearchParams({
-            formhash: formhash,
-            tid: tid,
-            fid: fid || '',
-            message: randomReply,
-            fastpost: 'true',
-            usesig: 'true',
-            subject: ''
-          });
-          
-          // 获取表单action URL
-          let actionUrl = form.attr('action');
-          if (!actionUrl.startsWith('http')) {
-            actionUrl = new URL(actionUrl, appConfig.site).href;
-          }
-          
-          // 提交回复
-          const { status: replyStatus, headers } = await $fetch.post(actionUrl, {
-            headers: {
-              'User-Agent': UA,
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Referer': url
-            },
-            body: postData.toString(),
-            timeout: 20000
-          });
-          
-          if (replyStatus === 200 || replyStatus === 302) {
-            log(`模拟回复成功 (${randomReply})，等待页面刷新...`);
-            
-            // 延长等待时间至3秒确保页面完全刷新
-            await delay(3000);
-            
-            // 重新获取页面内容
-            response = await $fetch.get(url, {
-              headers: { 'User-Agent': UA },
-              timeout: 15000
-            });
-            
-            finalHtml = response.data;
-            log('页面刷新完成，开始提取链接');
-          } else {
-            log(`回复失败: HTTP ${replyStatus}`);
-          }
-        }
-      }
-    } catch (e) {
-      log('模拟回复出错: ' + e.message);
+    if (!replySuccess) {
+      log('回复失败，返回空结果');
+      return jsonify({ list: [] });
     }
+    
+    // 等待3秒让页面刷新
+    log('等待页面刷新...');
+    await delay(3000);
   }
 
-  // 提取网盘链接 - 使用更精确的方法
-  const links = extractVisiblePanLinks(finalHtml);
+  // 第二次请求：提取网盘链接
+  log('重新加载页面提取链接...');
+  const { data: finalHtml } = await $fetch.get(url, {
+    headers: { 'User-Agent': UA },
+    timeout: 15000,
+  });
+
+  // 全局扫描网盘链接
+  const links = extractAllPanLinks(finalHtml);
   
   if (links.length === 0) {
     log('未找到有效网盘链接');
@@ -207,69 +150,113 @@ async function getTracks(ext) {
   });
 }
 
-// 精确提取页面中可见的网盘链接
-function extractVisiblePanLinks(html) {
-  const $ = cheerio.load(html);
-  const links = [];
-  
-  // 1. 优先提取特定容器中的链接（回复后显示区域）
-  const visibleContainers = [
-    '#postlist', 
-    '.plc', 
-    '.t_f', 
-    '.pcb', 
-    '.postmessage',
-    '.replyview'
-  ];
-  
-  visibleContainers.forEach(selector => {
-    $(selector).each((i, container) => {
-      // 只提取可见容器中的链接
-      if ($(container).is(':visible') || $(container).css('display') !== 'none') {
-        $(container).find('a').each((j, el) => {
-          const href = $(el).attr('href') || '';
-          if (isValidPanLink(href)) {
-            links.push(href);
-          }
-        });
-      }
+// 模拟回复功能（独立函数）
+async function simulateReply(url, postId) {
+  try {
+    log(`获取回复表单: ${url}`);
+    const { data: formPage } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA },
+      timeout: 15000,
     });
-  });
-  
-  // 2. 提取所有包含网盘关键词的链接
-  $('a').each((i, el) => {
-    const href = $(el).attr('href') || '';
-    const text = $(el).text().toLowerCase();
     
-    const panKeywords = ['夸克', '阿里', '网盘', 'quark', 'aliyun', 'pan'];
-    if (panKeywords.some(keyword => text.includes(keyword)) && isValidPanLink(href)) {
-      links.push(href);
+    const $ = cheerio.load(formPage);
+    const form = $('#fastpostform');
+    
+    if (form.length === 0) {
+      log('未找到回复表单');
+      return false;
     }
-  });
+    
+    // 获取表单参数
+    const formhash = form.find('input[name="formhash"]').val();
+    const tid = form.find('input[name="tid"]').val();
+    const fid = form.find('input[name="fid"]').val();
+    
+    if (!formhash || !tid) {
+      log('缺少必要的表单参数');
+      return false;
+    }
+    
+    // 快捷回复内容池
+    const replies = [
+      "感谢楼主的分享！",
+      "资源太棒了，感谢分享！",
+      "非常需要这个资源，感谢！"
+    ];
+    
+    // 随机选择一条回复
+    const randomReply = replies[Math.floor(Math.random() * replies.length)];
+    
+    // 构建POST数据
+    const postData = new URLSearchParams({
+      formhash: formhash,
+      tid: tid,
+      fid: fid || '',
+      message: randomReply,
+      fastpost: 'true',
+      usesig: 'true',
+      subject: ''
+    });
+    
+    // 获取表单action URL
+    let actionUrl = form.attr('action');
+    if (!actionUrl.startsWith('http')) {
+      actionUrl = new URL(actionUrl, appConfig.site).href;
+    }
+    
+    log(`提交回复到: ${actionUrl}`);
+    const { status: replyStatus } = await $fetch.post(actionUrl, {
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': url
+      },
+      body: postData.toString(),
+      timeout: 20000
+    });
+    
+    if (replyStatus === 200 || replyStatus === 302) {
+      log(`模拟回复成功 (${randomReply})`);
+      return true;
+    } else {
+      log(`回复失败: HTTP ${replyStatus}`);
+      return false;
+    }
+  } catch (e) {
+    log('模拟回复出错: ' + e.message);
+    return false;
+  }
+}
+
+// 全局扫描网盘链接
+function extractAllPanLinks(html) {
+  // 使用正则表达式全局匹配所有链接
+  const linkRegex = /https?:\/\/[^\s'"]+/g;
+  const allLinks = html.match(linkRegex) || [];
   
-  // 3. 提取文本中的网盘链接
-  const textLinks = html.match(/https?:\/\/[^\s'"]+/g) || [];
-  textLinks.forEach(link => {
-    // 只提取包含网盘域名的文本链接
-    if (isValidPanLink(link)) {
-      links.push(link);
-    }
-  });
+  // 过滤有效的网盘链接
+  const panLinks = allLinks.filter(link => isValidPanLink(link));
   
   // 去重处理
-  return [...new Set(links)];
+  return [...new Set(panLinks)];
 }
 
 // 精确的网盘链接验证
 function isValidPanLink(link) {
-  // 定义夸克网盘的正则
-  const quarkRegex = /https?:\/\/(?:pan\.)?quark\.cn\/[a-z0-9]+/i;
+  // 排除常见非网盘链接
+  if (link.includes('.css') || link.includes('.js') || 
+      link.includes('.png') || link.includes('.jpg') || 
+      link.includes('.gif') || link.includes('gravatar')) {
+    return false;
+  }
   
-  // 定义阿里云盘的正则
-  const aliRegex = /https?:\/\/(?:www\.)?(?:aliyundrive|alipan)\.com\/[s]?\/[a-zA-Z0-9]+/i;
+  // 夸克网盘匹配
+  const isQuark = /https?:\/\/(?:[a-z]+\.)?quark\.cn\/[a-z0-9]+/i.test(link);
   
-  // 检查是否为有效链接
-  return quarkRegex.test(link) || aliRegex.test(link);
+  // 阿里云盘匹配
+  const isAli = /https?:\/\/(?:[a-z]+\.)?(?:aliyundrive|alipan)\.com\/[s]?\/[a-zA-Z0-9]+/i.test(link);
+  
+  return isQuark || isAli;
 }
 
 // 获取网盘名称
@@ -312,39 +299,43 @@ async function search(ext) {
   const $ = cheerio.load(data);
   let cards = [];
 
-  // 修复搜索结果的解析 - 使用更可靠的选择器
-  $('.threadlist li, li.thread, li.search').each((i, el) => {
+  // 主选择器：尝试匹配搜索结果项
+  $('.threadlist li, li.thread, li.search, .thread').each((i, el) => {
     const linkEl = $(el).find('a.subject');
     const href = linkEl.attr('href') || '';
     const title = linkEl.text().trim();
     
-    if (href && title && (href.startsWith('thread-') || href.includes('thread'))) {
+    if (href && title && href.includes('thread')) {
+      const fullUrl = href.startsWith('http') ? href : `${appConfig.site}/${href}`;
       cards.push({
         vod_id: href,
         vod_name: title,
         vod_pic: '',
         vod_remarks: '',
         ext: {
-          url: `${appConfig.site}/${href}`,
+          url: fullUrl,
+          postId: href.match(/thread-(\d+)/)?.[1] || '',
         },
       });
     }
   });
 
-  // 备用选择器
+  // 备用选择器：直接查找所有主题链接
   if (cards.length === 0) {
-    $('a.subject').each((i, el) => {
+    $('a').each((i, el) => {
       const href = $(el).attr('href') || '';
       const title = $(el).text().trim();
       
-      if (href && title && (href.startsWith('thread-') || href.includes('thread'))) {
+      if (href.includes('thread-') && title) {
+        const fullUrl = href.startsWith('http') ? href : `${appConfig.site}/${href}`;
         cards.push({
           vod_id: href,
           vod_name: title,
           vod_pic: '',
           vod_remarks: '',
           ext: {
-            url: `${appConfig.site}/${href}`,
+            url: fullUrl,
+            postId: href.match(/thread-(\d+)/)?.[1] || '',
           },
         });
       }
