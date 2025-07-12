@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2, // 版本号更新
+  ver: 3, // 版本号更新
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
   tabs: [
@@ -147,7 +147,7 @@ async function getTracks(ext) {
           }
           
           // 提交回复
-          const { status: replyStatus } = await $fetch.post(actionUrl, {
+          const { status: replyStatus, headers } = await $fetch.post(actionUrl, {
             headers: {
               'User-Agent': UA,
               'Content-Type': 'application/x-www-form-urlencoded',
@@ -160,8 +160,15 @@ async function getTracks(ext) {
           if (replyStatus === 200 || replyStatus === 302) {
             log(`模拟回复成功 (${randomReply})`);
             
+            // 获取重定向URL（如果有）
+            let redirectUrl = url;
+            if (replyStatus === 302 && headers.location) {
+              redirectUrl = new URL(headers.location, appConfig.site).href;
+              log(`重定向到: ${redirectUrl}`);
+            }
+            
             // 重新获取页面内容
-            const { data: newData } = await $fetch.get(url, {
+            const { data: newData } = await $fetch.get(redirectUrl, {
               headers: { 'User-Agent': UA },
               timeout: 15000
             });
@@ -181,9 +188,13 @@ async function getTracks(ext) {
   const links = extractPanLinks(finalHtml);
   
   if (links.length === 0) {
-    log('未找到有效网盘链接');
+    log('未找到有效网盘链接，尝试备用提取方法...');
+    const backupLinks = extractBackupPanLinks(finalHtml);
+    links.push(...backupLinks);
   }
 
+  log(`找到 ${links.length} 个网盘链接`);
+  
   const tracks = links.map(link => ({
     name: "网盘链接",
     pan: link,
@@ -205,28 +216,42 @@ function extractPanLinks(html) {
   const $ = cheerio.load(html);
   const links = [];
   
-  // 先尝试在隐藏区域查找
-  const hiddenLinks = $('#hiddenlinks, .replyview, .hidecont').find('a[href*="//"]');
-  hiddenLinks.each((i, el) => {
-    const href = $(el).attr('href') || '';
-    if (isValidPanLink(href)) {
-      links.push(href);
-    }
+  // 1. 查找隐藏区域的网盘链接
+  const hiddenContainers = $('#hiddenlinks, .replyview, .hidecont, .locked');
+  hiddenContainers.each((i, container) => {
+    const text = $(container).text();
+    const matches = text.match(/(https?:\/\/[^\s]+)/g) || [];
+    matches.forEach(link => {
+      if (isValidPanLink(link)) {
+        links.push(link);
+      }
+    });
   });
   
-  // 查找所有可能包含网盘链接的元素
-  $('a[href*="//"]').each((i, el) => {
-    const href = $(el).attr('href') || '';
-    if (isValidPanLink(href)) {
-      links.push(href);
-    }
-  });
-  
-  // 文本中提取链接
-  const textLinks = html.match(/https?:\/\/[^\s'"]+/g) || [];
-  textLinks.forEach(link => {
+  // 2. 查找所有网盘链接按钮
+  $('.wpzysq-btn, .pan-btn, .downbtn').each((i, btn) => {
+    const link = $(btn).attr('href') || '';
     if (isValidPanLink(link)) {
       links.push(link);
+    }
+  });
+  
+  // 3. 查找所有包含"网盘"或"下载"的链接
+  $('a').each((i, el) => {
+    const link = $(el).attr('href') || '';
+    const text = $(el).text().toLowerCase();
+    
+    if (isValidPanLink(link) {
+      links.push(link);
+    }
+    // 检查文本中包含"网盘"但可能没有正确格式化的链接
+    else if (text.includes('网盘') || text.includes('下载')) {
+      const textLinks = text.match(/(https?:\/\/[^\s]+)/g) || [];
+      textLinks.forEach(tl => {
+        if (isValidPanLink(tl)) {
+          links.push(tl);
+        }
+      });
     }
   });
   
@@ -234,16 +259,43 @@ function extractPanLinks(html) {
   return [...new Set(links)];
 }
 
+// 备用提取方法 - 针对特殊格式
+function extractBackupPanLinks(html) {
+  const links = [];
+  const regex = /(?:夸克|阿里|网盘).*?(https?:\/\/[a-zA-Z0-9\-\.\/]+)/g;
+  
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    const link = match[1];
+    if (isValidPanLink(link)) {
+      links.push(link);
+    }
+  }
+  
+  return links;
+}
+
 // 网盘链接验证
 function isValidPanLink(link) {
   // 只保留夸克和阿里云盘
-  const validDomains = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
+  const validDomains = [
+    'quark.cn', 
+    'aliyundrive.com', 
+    'alipan.com',
+    'pan.quark.cn',
+    'www.aliyundrive.com',
+    'www.alipan.com'
+  ];
   
   // 排除图片等无关资源
-  const invalidExtensions = ['.jpg', '.png', '.gif', '.jpeg', '.webp'];
+  const invalidExtensions = ['.jpg', '.png', '.gif', '.jpeg', '.webp', '.css', '.js'];
   
-  return validDomains.some(domain => link.includes(domain)) &&
-         !invalidExtensions.some(ext => link.includes(ext));
+  // 检查是否为有效链接
+  const isValid = validDomains.some(domain => link.includes(domain)) &&
+         !invalidExtensions.some(ext => link.includes(ext)) &&
+         link.startsWith('http');
+  
+  return isValid;
 }
 
 async function getPlayinfo(ext) {
