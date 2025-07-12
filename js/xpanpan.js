@@ -105,7 +105,7 @@ async function getTracks(ext) {
   }
 
   // 检查是否需要回复
-  if (data.includes('本贴含有特定内容，请回复后再查看')) {
+  if (data.includes('您好，本贴含有特定内容，请回复后再查看')) {
     log('检测到需要回复，自动回复中...');
     const replySuccess = await autoReply(ext);
     if (!replySuccess) {
