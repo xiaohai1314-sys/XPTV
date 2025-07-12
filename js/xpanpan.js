@@ -35,40 +35,46 @@ async function getCards(ext) {
 
   const url = `${appConfig.site}/${category}-${page}.html`;
 
-  const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA }
-  });
+  try {
+    const { data } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA }
+    });
 
-  const $ = cheerio.load(data);
-  
-  // 解析帖子列表
-  $('#threadlisttableid tbody').each((index, element) => {
-    if ($(element).hasClass('sticky') || 
-        $(element).find('.locked').length > 0 ||
-        $(element).find('.expired-tag').length > 0) {
-      return; // 跳过置顶帖、锁帖和失效贴
-    }
+    const $ = cheerio.load(data);
     
-    const titleEl = $(element).find('.s.xst');
-    const title = titleEl.text().trim();
-    const href = titleEl.attr('href');
-    const postId = href.match(/-(\d+)-/)?.[1];
-    
-    if (href && title) {
-      cards.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: '',
-        vod_remarks: postId && repliedPosts.has(postId) ? '已回复' : '',
-        ext: {
-          url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
-          postId // 保存帖子ID用于后续判断
-        },
-      });
-    }
-  });
+    // 解析帖子列表 - 根据实际HTML结构调整
+    $('tbody').each((index, element) => {
+      // 跳过置顶帖、锁帖和失效贴
+      if ($(element).hasClass('sticky') || 
+          $(element).find('.locked').length > 0 ||
+          $(element).find('.expired-tag').length > 0) {
+        return;
+      }
+      
+      const titleEl = $(element).find('.s.xst');
+      const title = titleEl.text().trim();
+      const href = titleEl.attr('href');
+      const postId = href.match(/thread-(\d+)/)?.[1];
+      
+      if (href && title) {
+        const isReplied = postId && repliedPosts.has(postId);
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: '',
+          vod_remarks: isReplied ? '已回复' : '',
+          ext: {
+            url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
+            postId
+          },
+        });
+      }
+    });
 
-  return jsonify({ list: cards });
+    return jsonify({ list: cards });
+  } catch (error) {
+    return jsonify({ list: [] });
+  }
 }
 
 async function getTracks(ext) {
@@ -80,87 +86,92 @@ async function getTracks(ext) {
   // 检查是否已经回复过此帖
   const alreadyReplied = postId && repliedPosts.has(postId);
   
-  // 第一次请求获取帖子内容
-  const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA }
-  });
-  
-  const $ = cheerio.load(data);
-  
-  // 检查资源是否失效
-  if ($('.expired-tag').length > 0 || 
-      $('span:contains("有人标记失效")').length > 0 || 
-      $('font:contains("失效")').length > 0) {
-    return jsonify({ list: [] });
-  }
-  
-  // 尝试直接提取网盘链接（可能已经回复过）
-  const directLinks = extractPanLinks(data);
-  if (directLinks.length > 0 && alreadyReplied) {
-    return formatTracks(directLinks);
-  }
-  
-  // 检测需要回复的提示
-  const replyPrompt = $('div:contains("请回复后再查看")');
-  const needsReply = replyPrompt.length > 0 && !alreadyReplied;
-  
-  // 如果需要回复且未回复过
-  if (needsReply) {
-    // 获取回复表单所需参数
-    const formhash = $('input[name="formhash"]').val();
-    const tid = url.match(/thread-(\d+)/)?.[1];
+  try {
+    // 第一次请求获取帖子内容
+    const { data } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA }
+    });
     
-    if (formhash && tid) {
-      // 构造回复请求
-      const replyUrl = `${appConfig.site}/forum.php?mod=post&action=reply&tid=${tid}&extra=&replysubmit=yes`;
+    const $ = cheerio.load(data);
+    
+    // 检查资源是否失效 - 根据实际HTML结构调整
+    if ($('.expired-tag').length > 0 || 
+        $('span:contains("有人标记失效")').length > 0 || 
+        $('font:contains("失效")').length > 0) {
+      return jsonify({ list: [] });
+    }
+    
+    // 尝试直接提取网盘链接
+    const directLinks = extractPanLinks(data);
+    if (directLinks.length > 0 && alreadyReplied) {
+      return formatTracks(directLinks);
+    }
+    
+    // 检测需要回复的提示
+    const replyPrompt = $('div:contains("请回复后再查看")');
+    const needsReply = replyPrompt.length > 0 && !alreadyReplied;
+    
+    // 如果需要回复且未回复过
+    if (needsReply) {
+      // 获取回复表单所需参数
+      const formhash = $('input[name="formhash"]').val();
+      const tid = url.match(/thread-(\d+)/)?.[1];
       
-      // 使用第一条快捷回复内容
-      const firstReply = $('li.replyfast a').first().text();
-      
-      // 提交回复
-      const response = await $fetch.post(replyUrl, {
-        form: {
-          formhash,
-          message: firstReply || '感谢分享',
-          usesig: 1,
-          subject: ''
-        },
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': UA,
-          'Referer': url
-        }
-      });
-      
-      // 如果回复成功，标记为已回复
-      if (response.status === 200 || response.status === 302) {
+      if (formhash && tid) {
+        // 构造回复请求
+        const replyUrl = `${appConfig.site}/forum.php?mod=post&action=reply&tid=${tid}&extra=&replysubmit=yes`;
+        
+        // 使用第一条快捷回复内容
+        const firstReply = $('li.replyfast a').first().text() || '感谢分享';
+        
+        // 提交回复
+        await $fetch.post(replyUrl, {
+          form: {
+            formhash,
+            message: firstReply,
+            usesig: 1,
+            subject: ''
+          },
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': UA,
+            'Referer': url
+          }
+        });
+        
+        // 标记为已回复
         repliedPosts.add(tid);
+        
         // 等待1秒让服务器处理
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    
+    // 重新获取帖子内容
+    const { data: newData } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA }
+    });
+    
+    // 提取网盘链接
+    const links = extractPanLinks(newData);
+    
+    return formatTracks(links);
+  } catch (error) {
+    return jsonify({ list: [] });
   }
-  
-  // 重新获取帖子内容（带回复后的内容）
-  const { data: newData } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA }
-  });
-  
-  // 提取网盘链接
-  const links = extractPanLinks(newData);
-  return formatTracks(links);
 }
 
 // 提取网盘链接的辅助函数
 function extractPanLinks(html) {
   // 在整个网页中搜索网盘链接
-  const linkRegex = /(https?:\/\/[^\s]+)/g;
+  const linkRegex = /(https?:\/\/[^\s'"]+)/g;
   const matches = html.match(linkRegex) || [];
   
   // 筛选夸克和阿里云盘链接
   return matches.filter(link => 
-    (link.includes('quark.cn') || link.includes('aliyundrive.com')) &&
-    !link.includes('example.com') // 过滤示例链接
+    (link.includes('quark.cn') || 
+     link.includes('aliyundrive.com')) &&
+    !link.includes('wpzysq.com') // 过滤本站链接
   );
 }
 
@@ -192,38 +203,43 @@ async function search(ext) {
   let page = ext.page || 1;
   let url = `${appConfig.site}/search.php?mod=forum&q=${text}&page=${page}`;
 
-  const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA }
-  });
+  try {
+    const { data } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA }
+    });
 
-  const $ = cheerio.load(data);
-  
-  // 解析搜索结果
-  $('.pbw .xs2 a').each((index, element) => {
-    const title = $(element).text().trim();
-    const href = $(element).attr('href');
-    const postId = href.match(/-(\d+)-/)?.[1];
+    const $ = cheerio.load(data);
     
-    // 跳过失效和锁定结果
-    const parentRow = $(element).closest('tr');
-    if (parentRow.find('.expired-tag').length > 0 || 
-        parentRow.find('.locked').length > 0) {
-      return;
-    }
-    
-    if (href && title) {
-      cards.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: '',
-        vod_remarks: postId && repliedPosts.has(postId) ? '已回复' : '',
-        ext: {
-          url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
-          postId
-        },
-      });
-    }
-  });
+    // 解析搜索结果
+    $('.pbw .xs2 a').each((index, element) => {
+      const title = $(element).text().trim();
+      const href = $(element).attr('href');
+      const postId = href.match(/thread-(\d+)/)?.[1];
+      
+      // 跳过失效和锁定结果
+      const parentRow = $(element).closest('tr');
+      if (parentRow.find('.expired-tag').length > 0 || 
+          parentRow.find('.locked').length > 0) {
+        return;
+      }
+      
+      if (href && title) {
+        const isReplied = postId && repliedPosts.has(postId);
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: '',
+          vod_remarks: isReplied ? '已回复' : '',
+          ext: {
+            url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
+            postId
+          },
+        });
+      }
+    });
 
-  return jsonify({ list: cards });
+    return jsonify({ list: cards });
+  } catch (error) {
+    return jsonify({ list: [] });
+  }
 }
