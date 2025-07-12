@@ -5,7 +5,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
-  cookie: 'bbs_sid=e38l80spcgnafbi1lss7v1r345; __mxau__c1-WWwEoLo0=3f12f674-b707-418a-bb0e-5dfbaa51b8b7; __mxaf__c1-WWwEoLo0=1752288379; bbs_token=QZA31B9BZ8CLeeTC8y9Z9qnjfr2hndnHL7JQP8F61oQ91ls4SIXqwfvLvSCXCcKxEkyJXqMttbc1bEt2_2BQztNjjyR8Q_3D; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%227507edde-c2cc-4fee-8366-7d3a05d32aad%22%2C%22vd%22%3A3%2C%22stt%22%3A588%2C%22dr%22%3A507%2C%22expires%22%3A1752326781%2C%22ct%22%3A1752324981%7D; __mxav__c1-WWwEoLo0=90', // 替换为你的 cookie
+  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=aW6rfi72e6c23pcrKkxet_2BYn_2BT4RngeRTNXY5Mo6Ouun4aBPLqqC_2FWhr04mRQiHBojUNa3rQtvmvvlb0c33_2Fd15Czwc_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=6;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%222f99d9bf-4332-4d75-8560-f7c681d29fc8%22%2C%22vd%22%3A1%2C%22stt%22%3A0%2C%22dr%22%3A0%2C%22expires%22%3A1752328372%2C%22ct%22%3A1752326572%7D;', // 替换为你的 cookie
   tabs: [
     {
       name: '影视/剧集',
@@ -172,14 +172,16 @@ async function autoReply(ext) {
 }
 
 function extractPanLinks(html) {
-  const linkRegex = /(https?:\/\/[^\s'"]+)/g;
-  const matches = html.match(linkRegex) || [];
+  console.log('原始HTML:', html); // 打印原始HTML内容
+  const quarkRegex = /https?:\/\/(pan\.quark\.cn|quark\.cn)\//g;
+  const aliyunRegex = /https?:\/\/aliyundrive\.com\//g;
+  const quarkMatches = html.match(quarkRegex) || [];
+  const aliyunMatches = html.match(aliyunRegex) || [];
 
-  // 夸克网盘链接格式通常包含 quark.cn 或者 pan.quark.cn
-  // 阿里云盘链接格式通常包含 aliyundrive.com
-  return matches.filter(link =>
-    (link.includes('quark.cn') || link.includes('pan.quark.cn') || link.includes('aliyundrive.com'))
-  );
+  console.log('夸克网盘链接:', quarkMatches); // 打印夸克网盘链接
+  console.log('阿里云盘链接:', aliyunMatches); // 打印阿里云盘链接
+
+  return quarkMatches.concat(aliyunMatches);
 }
 
 async function getPlayinfo(ext) {
