@@ -1,28 +1,28 @@
-// 观影网脚本 - TV端专用修复版
-const cheerio = createCheerio()
-const UA = 'Mozilla/5.0 (Apple; CPU OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) TV Safari/604.1'
-
+// 观影网脚本 - TV端直接数据提取版
 const appConfig = {
-    ver: 60,
+    ver: 100,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
         {
             name: '电影',
             ext: {
-                id: 'mv?page=',
+                id: 'mv',
+                pageParam: '?page='
             },
         },
         {
             name: '剧集',
             ext: {
-                id: 'tv?page=',
+                id: 'tv',
+                pageParam: '?page='
             },
         },
         {
             name: '动漫',
             ext: {
-                id: 'ac?page=',
+                id: 'ac',
+                pageParam: '?page='
             },
         }
     ],
@@ -34,318 +34,285 @@ async function getConfig() {
 
 async function getCards(ext) {
     ext = argsify(ext)
-    let { page = 1, id } = ext
-    const url = `${appConfig.site}${id}${page}`
+    let cards = []
+    const { page = 1, id } = ext
+    const tabConfig = appConfig.tabs.find(tab => tab.ext.id === id)
+    
+    if (!tabConfig) {
+        return handleError("无效的分类ID")
+    }
+    
+    const url = `${appConfig.site}${id}${tabConfig.ext.pageParam}${page}`
     
     try {
         console.log(`[TV] 正在请求: ${url}`);
         
-        // 添加详细的调试信息
-        const startTime = Date.now();
+        // 使用更可靠的网络请求方法
+        const response = await fetchData(url);
         
-        // 使用代理友好的配置
-        const response = await $fetch.get(url, {
-            headers: { 
-                "User-Agent": UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-                "Connection": "keep-alive",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-                "X-Requested-With": "XMLHttpRequest" // 模拟AJAX请求
-            },
-            timeout: 30000,
-            followRedirects: true,
-            retry: 2 // 失败重试2次
-        });
-        
-        const endTime = Date.now();
-        console.log(`[TV] 收到响应，耗时: ${endTime - startTime}ms`);
-        
-        // 检查响应状态
-        if (response.status !== 200) {
-            console.error(`[TV] 请求失败，状态码: ${response.status}`);
-            return handleError(`网络请求失败，状态码: ${response.status}`);
+        if (!response.success) {
+            return handleError(response.message);
         }
         
         const data = response.data;
         
-        // 保存HTML用于调试
-        try {
-            $utils.writeFile("tv_debug.html", data);
-            console.log("[TV] 已保存页面到 tv_debug.html");
-        } catch (e) {
-            console.warn("[TV] 无法保存调试文件");
+        // 方法1: 尝试提取JSON数据
+        const jsonData = extractJsonData(data);
+        if (jsonData) {
+            cards = parseJsonData(jsonData, id);
+            if (cards.length > 0) {
+                console.log(`[TV] 从JSON解析到 ${cards.length} 个项目`);
+                return jsonify({ list: cards });
+            }
         }
         
-        // 检测DNS劫持
-        if (data.includes('DNS劫持')) {
-            console.warn("[TV] 检测到DNS劫持警告");
-            return handleError("检测到DNS劫持，请设置DNS为223.5.5.5或119.29.29.29");
-        }
-        
-        const $ = cheerio.load(data);
-        
-        // 方法1: 尝试解析列表项
-        const cards = parseListItems($);
+        // 方法2: 尝试提取HTML数据
+        cards = parseHtmlData(data, id);
         if (cards.length > 0) {
-            console.log(`[TV] 成功解析 ${cards.length} 个项目`);
+            console.log(`[TV] 从HTML解析到 ${cards.length} 个项目`);
             return jsonify({ list: cards });
         }
         
-        // 方法2: 尝试解析轮播图
-        const bannerCards = parseBannerItems($);
-        if (bannerCards.length > 0) {
-            console.log(`[TV] 成功解析 ${bannerCards.length} 个轮播项目`);
-            return jsonify({ list: bannerCards });
+        // 方法3: 尝试直接API调用
+        const apiCards = await tryApiCall(id, page);
+        if (apiCards.length > 0) {
+            console.log(`[TV] 从API解析到 ${apiCards.length} 个项目`);
+            return jsonify({ list: apiCards });
         }
         
-        // 方法3: 尝试解析脚本数据
-        const scriptCards = parseScriptData($);
-        if (scriptCards.length > 0) {
-            console.log(`[TV] 从脚本解析 ${scriptCards.length} 个项目`);
-            return jsonify({ list: scriptCards });
-        }
-        
-        // 方法4: 尝试使用简化选择器
-        const simpleCards = parseSimpleItems($);
-        if (simpleCards.length > 0) {
-            console.log(`[TV] 使用简化选择器解析 ${simpleCards.length} 个项目`);
-            return jsonify({ list: simpleCards });
-        }
-        
-        return handleError("无法解析页面数据，请检查 tv_debug.html");
+        return handleError("无法解析页面数据");
     } catch (error) {
-        console.error("[TV] 请求失败:", error);
         return handleError(`网络请求失败: ${error.message}`);
     }
 }
 
-function parseListItems($) {
+async function fetchData(url) {
+    try {
+        const startTime = Date.now();
+        const response = await $fetch.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (AppleTV; CPU OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN",
+                "Connection": "keep-alive",
+                "Cache-Control": "no-cache"
+            },
+            timeout: 30000,
+            retry: 2
+        });
+        
+        const endTime = Date.now();
+        console.log(`[TV] 请求耗时: ${endTime - startTime}ms, 状态码: ${response.status}`);
+        
+        if (response.status !== 200) {
+            return {
+                success: false,
+                message: `HTTP错误: ${response.status}`
+            };
+        }
+        
+        return {
+            success: true,
+            data: response.data
+        };
+    } catch (error) {
+        return {
+            success: false,
+            message: `请求失败: ${error.message}`
+        };
+    }
+}
+
+function extractJsonData(html) {
+    try {
+        const jsonStart = html.indexOf('_obj = {');
+        if (jsonStart === -1) return null;
+        
+        const jsonEnd = html.indexOf('};', jsonStart);
+        if (jsonEnd === -1) return null;
+        
+        const jsonStr = html.substring(jsonStart + 7, jsonEnd + 1);
+        
+        // 修复常见的JSON格式问题
+        const fixedJson = jsonStr
+            .replace(/'/g, '"')
+            .replace(/(\w+)\s*:/g, '"$1":')
+            .replace(/,(\s*[}\]])/g, '$1');
+        
+        return JSON.parse(fixedJson);
+    } catch (e) {
+        console.error("[TV] JSON提取失败:", e);
+        return null;
+    }
+}
+
+function parseJsonData(jsonData, type) {
     const cards = [];
-    const listItems = $('.pic-list li');
-    console.log(`[TV] 找到 ${listItems.length} 个列表项目`);
     
-    listItems.each((index, element) => {
-        try {
-            const $el = $(element);
-            const $link = $el.find('a').first();
-            const path = $link.attr('href') || '';
-            
-            if (!path) {
-                console.warn("[TV] 列表项目缺少路径");
-                return;
-            }
-            
-            const name = $el.find('h3').text().trim() || '未知标题';
-            
-            // 提取图片URL
-            let imgUrl = $el.find('source').attr('data-srcset') || 
-                        $el.find('img').attr('src') || 
-                        $el.find('img').attr('data-src') || '';
-            
-            // 提取详细信息
-            const info = $el.find('p').text().trim() || '';
-            
+    if (!jsonData.inlist || !jsonData.inlist.i) {
+        return cards;
+    }
+    
+    try {
+        jsonData.inlist.i.forEach((id, index) => {
             cards.push({
-                vod_id: path.split('/').pop() || `item-${index}`,
-                vod_name: name,
-                vod_pic: normalizeImageUrl(imgUrl),
-                vod_remarks: info,
+                vod_id: id,
+                vod_name: jsonData.inlist.t[index] || "未知标题",
+                vod_pic: `https://s.tutu.pm/img/${type}/${id}.webp`,
+                vod_remarks: jsonData.inlist.g[index] || "",
                 ext: {
-                    url: `${appConfig.site}res/downurl/${getTypeFromPath(path)}/${path.split('/').pop()}`,
+                    url: `${appConfig.site}res/downurl/${type}/${id}`,
                 },
             });
-        } catch (e) {
-            console.error("[TV] 解析列表项失败:", e);
-        }
-    });
+        });
+    } catch (e) {
+        console.error("[TV] JSON解析失败:", e);
+    }
     
     return cards;
 }
 
-function parseBannerItems($) {
+function parseHtmlData(html, type) {
     const cards = [];
-    const bannerItems = $('#banner .swiper-slide');
-    console.log(`[TV] 找到 ${bannerItems.length} 个轮播项目`);
     
-    bannerItems.each((index, element) => {
-        try {
-            const $el = $(element);
-            const $link = $el.find('a.pic');
-            const path = $link.attr('href') || '';
+    try {
+        // 使用正则表达式直接提取数据，避免DOM解析问题
+        const itemRegex = /<a\s+href="\/(mv|tv|ac)\/([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let match;
+        
+        while ((match = itemRegex.exec(html)) !== null) {
+            const itemType = match[1];
+            const id = match[2];
+            const content = match[3];
             
-            if (!path) {
-                console.warn("[TV] 轮播项目缺少路径");
-                return;
-            }
+            // 提取标题
+            const nameMatch = content.match(/<h3[^>]*>([^<]+)<\/h3>/i) || 
+                             content.match(/<b[^>]*>([^<]+)<\/b>/i) || 
+                             content.match(/class="tit"[^>]*>([^<]+)<\/a>/i);
             
-            const name = $el.find('a.tit span').text().trim() || '未知标题';
+            const name = nameMatch ? nameMatch[1].trim() : "未知标题";
             
-            // 提取图片URL
-            let imgUrl = $link.find('source').attr('data-srcset') || 
-                        $link.find('img').attr('src') || 
-                        $link.find('img').attr('data-src') || '';
+            // 提取图片
+            const imgMatch = content.match(/<img[^>]+src="([^"]+)"[^>]*>/i) || 
+                            content.match(/<source[^>]+data-srcset="([^"]+)"[^>]*>/i);
+            
+            let imgUrl = imgMatch ? imgMatch[1] : "";
+            
+            // 提取描述
+            const descMatch = content.match(/<p[^>]*>([^<]+)<\/p>/i);
+            const desc = descMatch ? descMatch[1].trim() : "";
             
             cards.push({
-                vod_id: path.split('/').pop() || `banner-${index}`,
+                vod_id: id,
                 vod_name: name,
                 vod_pic: normalizeImageUrl(imgUrl),
-                vod_remarks: "轮播推荐",
+                vod_remarks: desc,
                 ext: {
-                    url: `${appConfig.site}res/downurl/${getTypeFromPath(path)}/${path.split('/').pop()}`,
+                    url: `${appConfig.site}res/downurl/${itemType}/${id}`,
                 },
             });
-        } catch (e) {
-            console.error("[TV] 解析轮播图失败:", e);
         }
-    });
+    } catch (e) {
+        console.error("[TV] HTML解析失败:", e);
+    }
     
     return cards;
 }
 
-function parseScriptData($) {
-    const cards = [];
-    const scripts = $('script');
-    console.log(`[TV] 找到 ${scripts.length} 个脚本`);
+async function tryApiCall(type, page) {
+    const apiUrls = [
+        `${appConfig.site}api/${type}?page=${page}`,
+        `${appConfig.site}data/${type}.json?page=${page}`,
+        `${appConfig.site}ajax/list?type=${type}&page=${page}`
+    ];
     
-    scripts.each((i, el) => {
+    for (const apiUrl of apiUrls) {
         try {
-            const scriptContent = $(el).html();
-            if (!scriptContent || !scriptContent.includes('_obj')) return;
+            console.log(`[TV] 尝试API: ${apiUrl}`);
             
-            console.log("[TV] 找到包含 _obj 的脚本");
+            const response = await $fetch.get(apiUrl, {
+                headers: {
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                timeout: 15000
+            });
             
-            const jsonMatch = scriptContent.match(/_obj\s*=\s*({[\s\S]*?});/);
-            if (jsonMatch && jsonMatch[1]) {
+            if (response.status === 200 && response.data) {
+                // 尝试解析API响应
                 try {
-                    // 尝试修复JSON
-                    const fixedJson = jsonMatch[1]
-                        .replace(/'/g, '"')
-                        .replace(/(\w+):/g, '"$1":')
-                        .replace(/,\s*}/g, '}')
-                        .replace(/,\s*]/g, ']');
+                    let data = response.data;
                     
-                    const jsonData = JSON.parse(fixedJson);
-                    if (jsonData.inlist && jsonData.inlist.i) {
-                        console.log("[TV] 从脚本解析到数据");
-                        
-                        jsonData.inlist.i.forEach((item, index) => {
-                            cards.push({
-                                vod_id: item,
-                                vod_name: jsonData.inlist.t[index] || "未知标题",
-                                vod_pic: `https://s.tutu.pm/img/${jsonData.ty}/${item}.webp`,
-                                vod_remarks: jsonData.inlist.g[index] || "",
-                                ext: {
-                                    url: `${appConfig.site}res/downurl/${jsonData.ty}/${item}`,
-                                },
-                            });
-                        });
+                    // 如果返回的是字符串，尝试解析为JSON
+                    if (typeof data === 'string') {
+                        data = JSON.parse(data);
+                    }
+                    
+                    if (data.items && Array.isArray(data.items)) {
+                        return data.items.map(item => ({
+                            vod_id: item.id || item.vod_id,
+                            vod_name: item.title || item.name,
+                            vod_pic: item.image || item.pic,
+                            vod_remarks: item.info || item.remarks,
+                            ext: {
+                                url: `${appConfig.site}res/downurl/${type}/${item.id || item.vod_id}`,
+                            },
+                        }));
                     }
                 } catch (e) {
-                    console.error("[TV] 解析JSON失败:", e);
+                    console.warn(`[TV] API解析失败: ${apiUrl}`, e);
                 }
             }
-        } catch (e) {
-            console.error("[TV] 解析脚本失败:", e);
+        } catch (error) {
+            console.warn(`[TV] API请求失败: ${apiUrl}`, error);
         }
-    });
+    }
     
-    return cards;
-}
-
-function parseSimpleItems($) {
-    const cards = [];
-    // 使用最简单的选择器
-    const items = $('a[href*="/mv/"], a[href*="/tv/"], a[href*="/ac/"]');
-    console.log(`[TV] 找到 ${items.length} 个链接项目`);
-    
-    items.each((index, element) => {
-        try {
-            const $el = $(element);
-            const path = $el.attr('href') || '';
-            
-            if (!path) return;
-            
-            // 查找最接近的标题元素
-            const name = $el.find('h3, h2, .title, b, strong').text().trim() || 
-                        $el.text().trim() || '未知标题';
-            
-            // 查找最接近的图片
-            const $img = $el.find('img').first();
-            let imgUrl = $img.attr('src') || 
-                        $img.attr('data-src') || 
-                        $img.attr('data-srcset') || '';
-            
-            // 查找最接近的描述
-            const info = $el.closest('li, div').find('p, .info').text().trim() || '';
-            
-            cards.push({
-                vod_id: path.split('/').pop() || `simple-${index}`,
-                vod_name: name.substring(0, 50), // 限制标题长度
-                vod_pic: normalizeImageUrl(imgUrl),
-                vod_remarks: info.substring(0, 100), // 限制信息长度
-                ext: {
-                    url: `${appConfig.site}res/downurl/${getTypeFromPath(path)}/${path.split('/').pop()}`,
-                },
-            });
-        } catch (e) {
-            console.error("[TV] 解析简单项目失败:", e);
-        }
-    });
-    
-    return cards;
+    return [];
 }
 
 async function getTracks(ext) {
     ext = argsify(ext)
     let tracks = []
-    let url = ext.url
+    const url = ext.url
     
     try {
         console.log(`[TV] 正在获取资源: ${url}`);
         
-        const response = await $fetch.get(url, {
-            headers: { 
-                'User-Agent': UA,
-                'Referer': appConfig.site,
-                'Accept': 'application/json, text/plain, */*'
-            }
-        });
+        const response = await fetchData(url);
         
-        let respstr;
+        if (!response.success) {
+            return handleError(response.message);
+        }
+        
+        const data = response.data;
+        let jsonData;
+        
         try {
-            respstr = JSON.parse(response.data);
+            jsonData = JSON.parse(data);
         } catch (e) {
-            console.warn("[TV] JSON解析失败，尝试修复");
-            
             // 尝试修复JSON
             try {
-                const fixedData = response.data
+                const fixedData = data
                     .replace(/'/g, '"')
-                    .replace(/(\w+):/g, '"$1":')
-                    .replace(/,\s*}/g, '}')
-                    .replace(/,\s*]/g, ']');
-                    
-                respstr = JSON.parse(fixedData);
+                    .replace(/(\w+)\s*:/g, '"$1":')
+                    .replace(/,(\s*[}\]])/g, '$1');
+                
+                jsonData = JSON.parse(fixedData);
             } catch (e2) {
-                console.error("[TV] JSON修复失败:", e2);
                 return handleError("解析资源数据失败");
             }
         }
         
-        if (respstr.panlist && respstr.panlist.url) {
-            console.log(`[TV] 找到 ${respstr.panlist.url.length} 个资源`);
-            
-            respstr.panlist.url.forEach((item, index) => {
-                // 直接使用原始名称
-                let name = respstr.panlist.name[index] || "资源";
+        if (jsonData.panlist && jsonData.panlist.url) {
+            jsonData.panlist.url.forEach((item, index) => {
+                let name = jsonData.panlist.name[index] || "资源";
                 
-                // 简化名称（移除多余字符）
+                // 简化名称
                 name = name.replace(/【.*?】/g, '').trim();
                 
                 // 添加资源类型
-                const resourceType = respstr.panlist.tname[respstr.panlist.type[index]] || "资源";
+                const resourceType = jsonData.panlist.tname[jsonData.panlist.type[index]] || "资源";
                 
                 tracks.push({
                     name: `${resourceType}: ${name}`,
@@ -353,11 +320,11 @@ async function getTracks(ext) {
                     ext: { url: '' },
                 })
             });
-        } else if (respstr.file) {
-            console.warn("[TV] 需要验证");
+            
+            console.log(`[TV] 找到 ${tracks.length} 个资源`);
+        } else if (jsonData.file) {
             return handleError("需要验证，请前往主站完成验证");
         } else {
-            console.warn("[TV] 没有可用资源");
             return handleError("没有可用的网盘资源");
         }
         
@@ -365,7 +332,6 @@ async function getTracks(ext) {
             list: [{ title: '资源列表', tracks }]
         });
     } catch (error) {
-        console.error("[TV] 获取资源失败:", error);
         return handleError(`获取资源失败: ${error.message}`);
     }
 }
@@ -376,67 +342,23 @@ async function getPlayinfo(ext) {
 
 async function search(ext) {
     ext = argsify(ext)
-    let cards = []
     
-    let text = encodeURIComponent(ext.text)
-    let page = ext.page || 1
-    let url = `${appConfig.site}/s/1---${page}/${text}`
+    const text = encodeURIComponent(ext.text)
+    const page = ext.page || 1
+    const url = `${appConfig.site}/s/1---${page}/${text}`
     
     try {
         console.log(`[TV] 搜索: ${text}, 页码: ${page}`);
         
-        const response = await $fetch.get(url, {
-            headers: { 
-                "User-Agent": UA,
-                "Referer": appConfig.site
-            }
-        });
+        const response = await fetchData(url);
         
-        const $ = cheerio.load(response.data);
+        if (!response.success) {
+            return handleError(response.message);
+        }
         
-        // 使用简化选择器
-        const items = $('.pic-list li, .v5d');
-        console.log(`[TV] 找到 ${items.length} 个搜索结果`);
-        
-        items.each((index, element) => {
-            try {
-                const $el = $(element);
-                const $link = $el.find('a').first();
-                const path = $link.attr('href') || '';
-                
-                if (!path) {
-                    console.warn("[TV] 搜索结果缺少路径");
-                    return;
-                }
-                
-                const name = $el.find('h3, b').text().trim() || '未知标题';
-                
-                // 提取图片URL
-                let imgUrl = $el.find('source').attr('data-srcset') || 
-                            $el.find('img').attr('src') || 
-                            $el.find('img').attr('data-src') || '';
-                
-                // 提取信息
-                const info = $el.find('p').text().trim() || '';
-                
-                cards.push({
-                    vod_id: path.split('/').pop() || `search-${index}`,
-                    vod_name: name,
-                    vod_pic: normalizeImageUrl(imgUrl),
-                    vod_remarks: info,
-                    ext: {
-                        url: `${appConfig.site}res/downurl/${getTypeFromPath(path)}/${path.split('/').pop()}`,
-                    },
-                });
-            } catch (e) {
-                console.error("[TV] 解析搜索结果失败:", e);
-            }
-        });
-        
-        console.log(`[TV] 成功解析 ${cards.length} 个搜索结果`);
-        return jsonify({ list: cards });
+        // 使用HTML解析
+        return jsonify({ list: parseHtmlData(response.data) });
     } catch (error) {
-        console.error("[TV] 搜索失败:", error);
         return handleError(`搜索失败: ${error.message}`);
     }
 }
@@ -454,28 +376,8 @@ function handleError(message) {
 
 function normalizeImageUrl(url) {
     if (!url) return '';
-    
-    // 处理协议相对URL
-    if (url.startsWith('//')) {
-        url = 'https:' + url;
-    }
-    // 处理相对URL
-    else if (url.startsWith('/')) {
-        url = appConfig.site + url;
-    }
-    // 处理无协议URL
-    else if (!url.startsWith('http')) {
-        url = 'https://' + url;
-    }
-    
-    // 确保使用安全的图片协议
+    if (url.startsWith('//')) return 'https:' + url;
+    if (url.startsWith('/')) return appConfig.site + url;
+    if (!url.startsWith('http')) return 'https://' + url;
     return url.replace(/^http:/, 'https:');
-}
-
-function getTypeFromPath(path) {
-    if (!path) return 'mv';
-    if (path.includes('/tv/')) return 'tv';
-    if (path.includes('/ac/')) return 'ac';
-    if (path.includes('/mv/')) return 'mv';
-    return 'mv';
 }
