@@ -19,10 +19,19 @@ const appConfig = {
       ext: { category: 'forum-3' }
     }
   ],
+  // 添加登录配置
+  login: {
+    username: "", // APP设置中提供
+    password: ""  // APP设置中提供
+  }
 };
 
 // 存储已回复的帖子ID
 const repliedPosts = new Set();
+
+// 登录状态
+let isLoggedIn = false;
+let loginRetryCount = 0;
 
 // 调试日志函数
 function log(message) {
@@ -30,6 +39,77 @@ function log(message) {
     $log(`[网盘资源社] ${message}`);
   } catch (e) {
     // 如果$log不可用，忽略
+  }
+}
+
+// 登录函数
+async function loginIfNeeded(ext) {
+  // 如果已经登录，直接返回
+  if (isLoggedIn) return true;
+  
+  // 检查登录配置
+  const username = ext?.username || appConfig.login.username;
+  const password = ext?.password || appConfig.login.password;
+  
+  if (!username || !password) {
+    log("缺少登录凭据，请提供用户名和密码");
+    return false;
+  }
+  
+  try {
+    log(`尝试登录: ${username}`);
+    
+    // 第一步：获取登录页面以获取formhash
+    const { data: loginPage } = await $fetch.get(`${appConfig.site}/member.php?mod=logging&action=login`, {
+      headers: { 'User-Agent': UA }
+    });
+    
+    const $loginPage = cheerio.load(loginPage);
+    const formhash = $loginPage('input[name="formhash"]').val();
+    
+    if (!formhash) {
+      log("无法获取formhash");
+      return false;
+    }
+    
+    // 第二步：提交登录请求
+    const loginUrl = `${appConfig.site}/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes`;
+    
+    const { status, headers } = await $fetch.post(loginUrl, {
+      form: {
+        formhash,
+        referer: `${appConfig.site}/./`,
+        loginfield: 'username',
+        username,
+        password,
+        questionid: '0',
+        answer: '',
+        cookietime: '2592000'
+      },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': UA,
+        'Referer': `${appConfig.site}/member.php?mod=logging&action=login`
+      },
+      timeout: 10000
+    });
+    
+    // 检查登录是否成功
+    if (status === 200 || status === 302) {
+      // 检查重定向位置
+      const location = headers?.['location'] || headers?.['Location'];
+      if (location && !location.includes('login')) {
+        isLoggedIn = true;
+        log("登录成功");
+        return true;
+      }
+    }
+    
+    log(`登录失败，状态码: ${status}`);
+    return false;
+  } catch (error) {
+    log(`登录错误: ${error.message}`);
+    return false;
   }
 }
 
@@ -49,6 +129,12 @@ async function getCards(ext) {
     const url = `${appConfig.site}/${category}-${page}.html`;
     log(`加载卡片: ${url}`);
 
+    // 登录检查
+    if (!await loginIfNeeded(ext) {
+      log("未登录，无法加载内容");
+      return jsonify({ list: [] });
+    }
+
     const { data, status } = await $fetch.get(url, {
       headers: { 'User-Agent': UA },
       timeout: 10000 // 10秒超时
@@ -59,10 +145,24 @@ async function getCards(ext) {
       return jsonify({ list: [] });
     }
 
+    // 检查是否被重定向到登录页面
+    if (data.includes('window.location.href="member.php?mod=logging"')) {
+      isLoggedIn = false;
+      loginRetryCount++;
+      
+      if (loginRetryCount <= 2) {
+        log("会话过期，尝试重新登录");
+        return getCards(ext); // 递归重试
+      } else {
+        log("多次登录失败，停止尝试");
+        return jsonify({ list: [] });
+      }
+    }
+
     const $ = cheerio.load(data);
     
     // 解析帖子列表 - 使用更可靠的选择器
-    const threadItems = $('#threadlisttableid tbody, tbody[id^="normalthread"]');
+    const threadItems = $('tbody[id^="normalthread_"]');
     
     log(`找到 ${threadItems.length} 个帖子`);
     
@@ -121,9 +221,11 @@ async function getTracks(ext) {
     
     log(`加载资源: ${url}, 帖子ID: ${postId}`);
     
-    // 检查是否已经回复过此帖
-    const alreadyReplied = postId && repliedPosts.has(postId);
-    log(`已回复状态: ${alreadyReplied}`);
+    // 登录检查
+    if (!await loginIfNeeded(ext)) {
+      log("未登录，无法加载内容");
+      return jsonify({ list: [] });
+    }
 
     // 第一次请求获取帖子内容
     const { data, status } = await $fetch.get(url, {
@@ -136,6 +238,20 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
     
+    // 检查是否被重定向到登录页面
+    if (data.includes('window.location.href="member.php?mod=logging"')) {
+      isLoggedIn = false;
+      loginRetryCount++;
+      
+      if (loginRetryCount <= 2) {
+        log("会话过期，尝试重新登录");
+        return getTracks(ext); // 递归重试
+      } else {
+        log("多次登录失败，停止尝试");
+        return jsonify({ list: [] });
+      }
+    }
+    
     const $ = cheerio.load(data);
     
     // 检查资源是否失效
@@ -145,6 +261,10 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
     
+    // 检查是否已经回复过此帖
+    const alreadyReplied = postId && repliedPosts.has(postId);
+    log(`已回复状态: ${alreadyReplied}`);
+
     // 尝试直接提取网盘链接
     const directLinks = extractPanLinks(data);
     if (directLinks.length > 0 && alreadyReplied) {
@@ -195,19 +315,25 @@ async function getTracks(ext) {
         
         // 等待1秒让服务器处理
         await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // 重新获取帖子内容
+        const { data: newData } = await $fetch.get(url, {
+          headers: { 'User-Agent': UA },
+          timeout: 10000
+        });
+        
+        // 提取网盘链接
+        const links = extractPanLinks(newData);
+        log(`提取到 ${links.length} 个网盘链接`);
+        
+        return formatTracks(links);
       } else {
         log("缺少回复所需参数");
       }
     }
     
-    // 重新获取帖子内容
-    const { data: newData } = await $fetch.get(url, {
-      headers: { 'User-Agent': UA },
-      timeout: 10000
-    });
-    
     // 提取网盘链接
-    const links = extractPanLinks(newData);
+    const links = extractPanLinks(data);
     log(`提取到 ${links.length} 个网盘链接`);
     
     return formatTracks(links);
@@ -276,6 +402,12 @@ async function search(ext) {
       return jsonify({ list: [] });
     }
     
+    // 登录检查
+    if (!await loginIfNeeded(ext)) {
+      log("未登录，无法搜索");
+      return jsonify({ list: [] });
+    }
+    
     const encodedText = encodeURIComponent(text);
     const url = `${appConfig.site}/search.php?mod=forum&q=${encodedText}&page=${page}`;
     log(`搜索: ${text}, 页码: ${page}, URL: ${url}`);
@@ -288,6 +420,20 @@ async function search(ext) {
     if (status !== 200) {
       log(`搜索请求失败: HTTP ${status}`);
       return jsonify({ list: [] });
+    }
+    
+    // 检查是否被重定向到登录页面
+    if (data.includes('window.location.href="member.php?mod=logging"')) {
+      isLoggedIn = false;
+      loginRetryCount++;
+      
+      if (loginRetryCount <= 2) {
+        log("会话过期，尝试重新登录");
+        return search(ext); // 递归重试
+      } else {
+        log("多次登录失败，停止尝试");
+        return jsonify({ list: [] });
+      }
     }
 
     const $ = cheerio.load(data);
