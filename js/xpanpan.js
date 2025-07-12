@@ -42,7 +42,7 @@ async function getCards(ext) {
 
     const $ = cheerio.load(data);
     
-    // 解析帖子列表 - 根据实际HTML结构调整
+    // 解析帖子列表 - 使用更通用的选择器
     $('tbody').each((index, element) => {
       // 跳过置顶帖、锁帖和失效贴
       if ($(element).hasClass('sticky') || 
@@ -94,7 +94,7 @@ async function getTracks(ext) {
     
     const $ = cheerio.load(data);
     
-    // 检查资源是否失效 - 根据实际HTML结构调整
+    // 检查资源是否失效
     if ($('.expired-tag').length > 0 || 
         $('span:contains("有人标记失效")').length > 0 || 
         $('font:contains("失效")').length > 0) {
@@ -152,7 +152,7 @@ async function getTracks(ext) {
       headers: { 'User-Agent': UA }
     });
     
-    // 提取网盘链接
+    // 提取网盘链接 - 使用更精确的正则表达式
     const links = extractPanLinks(newData);
     
     return formatTracks(links);
@@ -210,8 +210,8 @@ async function search(ext) {
 
     const $ = cheerio.load(data);
     
-    // 解析搜索结果
-    $('.pbw .xs2 a').each((index, element) => {
+    // 解析搜索结果 - 使用更通用的选择器
+    $('.xs2 a').each((index, element) => {
       const title = $(element).text().trim();
       const href = $(element).attr('href');
       const postId = href.match(/thread-(\d+)/)?.[1];
