@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 5, // 版本号更新
+  ver: 6, // 版本号更新
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
   tabs: [
@@ -161,8 +161,8 @@ async function getTracks(ext) {
           if (replyStatus === 200 || replyStatus === 302) {
             log(`模拟回复成功 (${randomReply})，等待页面刷新...`);
             
-            // 等待1-2秒让页面刷新
-            await delay(1500);
+            // 延长等待时间至3秒确保页面完全刷新
+            await delay(3000);
             
             // 重新获取页面内容
             response = await $fetch.get(url, {
@@ -182,8 +182,8 @@ async function getTracks(ext) {
     }
   }
 
-  // 提取网盘链接
-  const links = extractPanLinks(finalHtml);
+  // 提取网盘链接 - 使用更精确的方法
+  const links = extractVisiblePanLinks(finalHtml);
   
   if (links.length === 0) {
     log('未找到有效网盘链接');
@@ -192,7 +192,7 @@ async function getTracks(ext) {
   }
 
   const tracks = links.map(link => ({
-    name: "网盘链接",
+    name: getPanName(link),
     pan: link,
     ext: {},
   }));
@@ -207,60 +207,79 @@ async function getTracks(ext) {
   });
 }
 
-// 扩展网盘链接搜索范围
-function extractPanLinks(html) {
+// 精确提取页面中可见的网盘链接
+function extractVisiblePanLinks(html) {
   const $ = cheerio.load(html);
   const links = [];
   
-  // 方法1: 查找所有可能的网盘链接元素
-  $('a[href*="//"], .wpzysq-btn, .pan-btn, .downbtn, .button, .btn').each((i, el) => {
+  // 1. 优先提取特定容器中的链接（回复后显示区域）
+  const visibleContainers = [
+    '#postlist', 
+    '.plc', 
+    '.t_f', 
+    '.pcb', 
+    '.postmessage',
+    '.replyview'
+  ];
+  
+  visibleContainers.forEach(selector => {
+    $(selector).each((i, container) => {
+      // 只提取可见容器中的链接
+      if ($(container).is(':visible') || $(container).css('display') !== 'none') {
+        $(container).find('a').each((j, el) => {
+          const href = $(el).attr('href') || '';
+          if (isValidPanLink(href)) {
+            links.push(href);
+          }
+        });
+      }
+    });
+  });
+  
+  // 2. 提取所有包含网盘关键词的链接
+  $('a').each((i, el) => {
     const href = $(el).attr('href') || '';
-    if (isValidPanLink(href)) {
+    const text = $(el).text().toLowerCase();
+    
+    const panKeywords = ['夸克', '阿里', '网盘', 'quark', 'aliyun', 'pan'];
+    if (panKeywords.some(keyword => text.includes(keyword)) && isValidPanLink(href)) {
       links.push(href);
     }
   });
   
-  // 方法2: 在文本内容中搜索网盘链接
+  // 3. 提取文本中的网盘链接
   const textLinks = html.match(/https?:\/\/[^\s'"]+/g) || [];
   textLinks.forEach(link => {
+    // 只提取包含网盘域名的文本链接
     if (isValidPanLink(link)) {
       links.push(link);
     }
-  });
-  
-  // 方法3: 在特定区域搜索（如隐藏区域）
-  const specialSections = $('#hiddenlinks, .replyview, .hidecont, .locked, .postmessage, .t_f');
-  specialSections.each((i, section) => {
-    const text = $(section).text();
-    const matches = text.match(/https?:\/\/[^\s]+/g) || [];
-    matches.forEach(match => {
-      if (isValidPanLink(match)) {
-        links.push(match);
-      }
-    });
   });
   
   // 去重处理
   return [...new Set(links)];
 }
 
-// 网盘链接验证
+// 精确的网盘链接验证
 function isValidPanLink(link) {
-  // 只保留夸克和阿里云盘
-  const validDomains = [
-    'quark.cn', 
-    'aliyundrive.com', 
-    'alipan.com',
-    'pan.quark.cn',
-    'www.aliyundrive.com',
-    'www.alipan.com'
-  ];
+  // 定义夸克网盘的正则
+  const quarkRegex = /https?:\/\/(?:pan\.)?quark\.cn\/[a-z0-9]+/i;
+  
+  // 定义阿里云盘的正则
+  const aliRegex = /https?:\/\/(?:www\.)?(?:aliyundrive|alipan)\.com\/[s]?\/[a-zA-Z0-9]+/i;
   
   // 检查是否为有效链接
-  const isValid = validDomains.some(domain => link.includes(domain)) &&
-         link.startsWith('http');
-  
-  return isValid;
+  return quarkRegex.test(link) || aliRegex.test(link);
+}
+
+// 获取网盘名称
+function getPanName(link) {
+  if (link.includes('quark.cn')) {
+    return "夸克网盘";
+  } else if (link.includes('aliyundrive.com') || link.includes('alipan.com')) {
+    return "阿里云盘";
+  }
+  return "网盘链接";
 }
 
 async function getPlayinfo(ext) {
@@ -293,13 +312,13 @@ async function search(ext) {
   const $ = cheerio.load(data);
   let cards = [];
 
-  // 修复搜索结果的解析
-  $('.threadlist li, li[data-href^="thread-"]').each((i, el) => {
-    const linkEl = $(el).find('a').first();
+  // 修复搜索结果的解析 - 使用更可靠的选择器
+  $('.threadlist li, li.thread, li.search').each((i, el) => {
+    const linkEl = $(el).find('a.subject');
     const href = linkEl.attr('href') || '';
     const title = linkEl.text().trim();
     
-    if (href && title && href.startsWith('thread-')) {
+    if (href && title && (href.startsWith('thread-') || href.includes('thread'))) {
       cards.push({
         vod_id: href,
         vod_name: title,
@@ -311,6 +330,26 @@ async function search(ext) {
       });
     }
   });
+
+  // 备用选择器
+  if (cards.length === 0) {
+    $('a.subject').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      const title = $(el).text().trim();
+      
+      if (href && title && (href.startsWith('thread-') || href.includes('thread'))) {
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: '',
+          vod_remarks: '',
+          ext: {
+            url: `${appConfig.site}/${href}`,
+          },
+        });
+      }
+    });
+  }
 
   log(`搜索到 ${cards.length} 条结果`);
   return jsonify({ list: cards });
