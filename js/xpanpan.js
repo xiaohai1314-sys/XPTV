@@ -1,174 +1,258 @@
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
-const cheerio = createCheerio();
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const cheerio = require('cheerio'); // 使用Node.js的cheerio库
 
 const appConfig = {
   ver: 1,
-  title: '网盘资源社',
+  title: '网盘资源社区',
   site: 'https://www.wpzysq.com',
   tabs: [
     {
       name: '影视/剧集',
       ext: {
-        id: 'forum-1.htm?page=',
+        id: 'forum-1?page=', // 修正forum id
       },
     },
     {
-      name: '4K专区',
+      name: '4k专区',
       ext: {
-        id: 'forum-12.htm?page=',
+        id: 'forum-12?page=', // 修正forum id
       },
     },
     {
       name: '动漫区',
       ext: {
-        id: 'forum-3.htm?page=',
+        id: 'forum-3?page=', // 修正forum id
       },
-    },
+    }
   ],
 };
 
-// 调试日志
-function log(msg) {
-  try {
-    $log(`[网盘资源社] ${msg}`);
-  } catch (_) {}
+// 调试日志函数
+function log(message) {
+  console.log(`[网盘资源社] ${message}`);
 }
 
 async function getConfig() {
-  return jsonify(appConfig);
+  return appConfig;
 }
 
 async function getCards(ext) {
-  ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${appConfig.site}/${id}${page}`;
-  log(`抓取列表: ${url}`);
+  try {
+    ext = argsify(ext);
+    let cards = [];
+    let { page = 1, id } = ext;
 
-  const { data, status } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA },
-    timeout: 10000,
-  });
+    // 确保页码有效
+    page = Math.max(1, parseInt(page) || 1);
+    
+    // 使用修正后的URL格式
+    const url = `${appConfig.site}/${id}${page}`;
+    log(`加载卡片: ${url}`);
 
-  if (status !== 200) {
-    log(`请求失败: HTTP ${status}`);
-    return jsonify({ list: [] });
-  }
+    const response = await fetch(url, {
+      headers: { 'User-Agent': UA },
+      timeout: 10000
+    });
 
-  const $ = cheerio.load(data);
-  let cards = [];
-
-  $('li[data-href^="thread-"]').each((i, el) => {
-    const href = $(el).attr('data-href');
-    const title = $(el).find('a').text().trim();
-    const postId = href.match(/thread-(\d+)/)?.[1] || '';
-
-    if (href && title) {
-      cards.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: '', // 没有缩略图时可为空
-        vod_remarks: '',
-        ext: {
-          url: `${appConfig.site}/${href}`,
-          postId: postId,
-        },
-      });
+    if (!response.ok) {
+      log(`请求失败: HTTP ${response.status}`);
+      return { list: [] };
     }
-  });
 
-  log(`解析到 ${cards.length} 条帖子`);
-  return jsonify({ list: cards });
+    const data = await response.text();
+    const $ = cheerio.load(data);
+    
+    // 使用修正后的选择器
+    $('.threadlist li.thread').each((index, element) => {
+      try {
+        const titleEl = $(element).find('.style3_subject a');
+        const title = titleEl.text().trim();
+        const href = titleEl.attr('href');
+        
+        if (!href || !title) return;
+        
+        // 图片
+        const imgEl = $(element).find('.thread-image, .thumbnail');
+        const imgSrc = imgEl.attr('src') || imgEl.attr('data-src') || '';
+        
+        // 备注信息
+        const remarksEl = $(element).find('.thread-meta, .thread-info');
+        const remarks = remarksEl.text().trim();
+        
+        // 提取帖子ID
+        const postId = href.match(/thread-(\d+)/)?.[1] || '';
+        
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: imgSrc,
+          vod_remarks: remarks,
+          ext: {
+            url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
+            postId
+          },
+        });
+      } catch (e) {
+        log(`解析帖子错误: ${e.message}`);
+      }
+    });
+
+    log(`成功解析 ${cards.length} 张卡片`);
+    
+    return { list: cards };
+  } catch (error) {
+    log(`获取卡片错误: ${error.message}`);
+    return { list: [] };
+  }
 }
 
 async function getTracks(ext) {
-  ext = argsify(ext);
-  const { url } = ext;
-  if (!url) return jsonify({ list: [] });
+  try {
+    ext = argsify(ext);
+    let tracks = [];
+    let url = ext.url;
+    const postId = ext.postId || '';
+    
+    if (!url) {
+      log("缺少URL参数");
+      return { list: [] };
+    }
+    
+    log(`加载资源: ${url}, 帖子ID: ${postId}`);
 
-  log(`加载帖子详情: ${url}`);
-
-  const { data, status } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA },
-    timeout: 10000,
-  });
-
-  if (status !== 200) {
-    log(`帖子请求失败: HTTP ${status}`);
-    return jsonify({ list: [] });
+    const response = await fetch(url, {
+      headers: { 'User-Agent': UA },
+      timeout: 15000
+    });
+    
+    if (!response.ok) {
+      log(`请求失败: HTTP ${response.status}`);
+      return { list: [] };
+    }
+    
+    const data = await response.text();
+    const $ = cheerio.load(data);
+    
+    // 检查资源是否失效
+    const isExpired = $('.expired-tag, span:contains("有人标记失效"), font:contains("失效")').length > 0;
+    if (isExpired) {
+      log("资源已标记为失效");
+      return { list: [] };
+    }
+    
+    // 直接提取网盘链接
+    const links = extractPanLinks(data);
+    log(`提取到 ${links.length} 个网盘链接`);
+    
+    tracks = links.map(link => ({
+      name: "网盘资源",
+      pan: link,
+      ext: {}
+    }));
+    
+    return { 
+      list: [{
+        title: "网盘资源",
+        tracks,
+      }]
+    };
+  } catch (error) {
+    log(`获取资源错误: ${error.message}`);
+    return { list: [] };
   }
-
-  // 提取网盘链接
-  const links = extractPanLinks(data);
-  const tracks = links.map(link => ({
-    name: "网盘链接",
-    pan: link,
-    ext: {},
-  }));
-
-  return jsonify({
-    list: [
-      {
-        title: "资源列表",
-        tracks: tracks,
-      },
-    ],
-  });
 }
 
 function extractPanLinks(html) {
-  const linkRegex = /(https?:\/\/[^\s'"]+)/g;
-  const matches = html.match(linkRegex) || [];
-
-  return matches.filter(link =>
-    (link.includes('quark.cn') || link.includes('aliyundrive.com'))
-  );
-}
-
-async function getPlayinfo(ext) {
-  return jsonify({ urls: [] });
+  try {
+    // 在整个网页中搜索网盘链接
+    const linkRegex = /(https?:\/\/[^\s'"]+)/g;
+    const matches = html.match(linkRegex) || [];
+    
+    // 筛选夸克和阿里云盘链接
+    return matches.filter(link => 
+      (link.includes('quark.cn') || 
+       link.includes('aliyundrive.com')) &&
+      !link.includes('wpzysq.com') && // 过滤本站链接
+      !link.includes('.css') &&       // 过滤CSS文件
+      !link.includes('.js')           // 过滤JS文件
+    );
+  } catch (e) {
+    log(`提取链接错误: ${e.message}`);
+    return [];
+  }
 }
 
 async function search(ext) {
-  ext = argsify(ext);
-  const text = ext.text || '';
-  const page = Math.max(1, parseInt(ext.page) || 1);
-
-  if (!text) {
-    log("无关键词");
-    return jsonify({ list: [] });
-  }
-
-  const url = `${appConfig.site}/search.htm?keyword=${encodeURIComponent(text)}`;
-  log(`搜索: ${url}`);
-
-  const { data, status } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA },
-    timeout: 10000,
-  });
-
-  if (status !== 200) {
-    log(`搜索失败: HTTP ${status}`);
-    return jsonify({ list: [] });
-  }
-
-  const $ = cheerio.load(data);
-  let cards = [];
-
-  $('li[data-href^="thread-"]').each((i, el) => {
-    const href = $(el).attr('data-href');
-    const title = $(el).find('a').text().trim();
-    if (href && title) {
-      cards.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: '',
-        vod_remarks: '',
-        ext: {
-          url: `${appConfig.site}/${href}`,
-        },
-      });
+  try {
+    ext = argsify(ext);
+    let cards = [];
+    let text = ext.text || '';
+    let page = Math.max(1, parseInt(ext.page) || 1);
+    
+    if (!text) {
+      log("缺少搜索关键词");
+      return { list: [] };
     }
-  });
+    
+    // 使用修正后的搜索URL格式
+    const url = `${appConfig.site}/search/${encodeURIComponent(text)}-page-${page}.html`;
+    log(`搜索: ${text}, 页码: ${page}, URL: ${url}`);
 
-  return jsonify({ list: cards });
+    const response = await fetch(url, {
+      headers: { 'User-Agent': UA },
+      timeout: 10000
+    });
+    
+    if (!response.ok) {
+      log(`搜索请求失败: HTTP ${response.status}`);
+      return { list: [] };
+    }
+
+    const data = await response.text();
+    const $ = cheerio.load(data);
+    
+    // 使用修正后的选择器
+    $('.search-list li').each((index, element) => {
+      try {
+        const titleEl = $(element).find('.result_title a');
+        const title = titleEl.text().trim();
+        const href = titleEl.attr('href');
+        
+        if (!href || !title) return;
+        
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: '',
+          vod_remarks: '',
+          ext: {
+            url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
+          },
+        });
+      } catch (e) {
+        log(`解析搜索结果错误: ${e.message}`);
+      }
+    });
+
+    log(`成功解析 ${cards.length} 个搜索结果`);
+    return { list: cards };
+  } catch (error) {
+    log(`搜索错误: ${error.message}`);
+    return { list: [] };
+  }
 }
+
+// 辅助函数
+function argsify(ext) {
+  return JSON.parse(JSON.stringify(ext));
+}
+
+// 测试函数
+async function test() {
+  console.log("获取配置：", await getConfig());
+  console.log("获取卡片：", await getCards({ page: 1, id: 'forum-1?page=' }));
+  console.log("获取资源：", await getTracks({ url: 'https://www.wpzysq.com/thread-12345.htm', postId: '12345' }));
+  console.log("搜索：", await search({ text: '影视', page: 1 }));
+}
+
+test();
