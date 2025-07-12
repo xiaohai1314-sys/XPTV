@@ -5,7 +5,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
-  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=aW6rfi72e6c23pcrKkxet_2BYn_2BT4RngeRTNXY5Mo6Ouun4aBPLqqC_2FWhr04mRQiHBojUNa3rQtvmvvlb0c33_2Fd15Czwc_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=6;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%222f99d9bf-4332-4d75-8560-f7c681d29fc8%22%2C%22vd%22%3A1%2C%22stt%22%3A0%2C%22dr%22%3A0%2C%22expires%22%3A1752328372%2C%22ct%22%3A1752326572%7D;', // 替换为你的 cookie
+  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=BiSo9h9RKVLOm51cpkIk9q6YNOTk7TJT_2FH6o1sz7_2Fw_2FNavyFP09tKfBpr_2B3JUwZfIao0WFUCmo_2B6_2BTS2ijFupyL_2BXy8_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=10;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%222f99d9bf-4332-4d75-8560-f7c681d29fc8%22%2C%22vd%22%3A5%2C%22stt%22%3A1149%2C%22dr%22%3A17%2C%22expires%22%3A1752329521%2C%22ct%22%3A1752327721%7D;', // 替换为你的 cookie
   tabs: [
     {
       name: '影视/剧集',
@@ -107,12 +107,14 @@ async function getTracks(ext) {
   // 检查是否需要回复
   if (data.includes('您好，本贴含有特定内容，请回复后再查看')) {
     log('检测到需要回复，自动回复中...');
-    const replySuccess = await autoReply(ext);
+    const replySuccess = await autoReply(url, appConfig.cookie);
     if (!replySuccess) {
       log('自动回复失败');
       return jsonify({ list: [] });
     }
-    log('自动回复成功，重新加载帖子详情');
+    log('自动回复成功，等待页面刷新...');
+    await waitForPageRefresh(3000); // 等待3秒
+    log('重新加载帖子详情');
     const { data: newData, status: newStatus } = await $fetch.get(url, {
       headers: {
         'User-Agent': UA,
@@ -145,26 +147,22 @@ async function getTracks(ext) {
   });
 }
 
-async function autoReply(ext) {
-  const { url, postId } = ext;
-  const replyContent = [
-    '感谢楼主的分享！',
-    '资源太棒了，感谢分享！',
-    '非常需要这个资源，感谢！'
-  ][Math.floor(Math.random() * 3)]; // 随机选择一条回复内容
-
-  const replyUrl = `${appConfig.site}/reply.htm?tid=${postId}`;
+async function autoReply(postUrl, cookie) {
+  const replyUrl = new URL('forum.php?mod=post&action=reply&fid=&tid=', postUrl).toString();
   const replyData = {
-    message: replyContent,
-    submit: '发表回复',
+    formhash: '', // 需要从页面中提取
+    message: '感谢楼主的分享！',
+    infloat: 'yes',
+    handlekey: 'fastpost',
   };
 
   const { status } = await $fetch.post(replyUrl, {
     headers: {
       'User-Agent': UA,
-      'Cookie': appConfig.cookie, // 使用 cookie
+      'Cookie': cookie,
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: replyData,
+    body: new URLSearchParams(replyData).toString(),
     timeout: 10000,
   });
 
@@ -234,4 +232,13 @@ async function search(ext) {
   });
 
   return jsonify({ list: cards });
+}
+
+// 等待页面刷新
+function waitForPageRefresh(timeout) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve();
+    }, timeout);
+  });
 }
