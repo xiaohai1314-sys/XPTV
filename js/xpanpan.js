@@ -5,7 +5,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
-  cookie: 'bbs_sid=e38l80spcgnafbi1lss7v1r345; __mxau__c1-WWwEoLo0=3f12f674-b707-418a-bb0e-5dfbaa51b8b7; __mxaf__c1-WWwEoLo0=1752288379; bbs_token=QZA31B9BZ8CLeeTC8y9Z9qnjfr2hndnHL7JQP8F61oQ91ls4SIXqwfvLvSCXCcKxEkyJXqMttbc1bEt2_2BQztNjjyR8Q_3D; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%227507edde-c2cc-4fee-8366-7d3a05d32aad%22%2C%22vd%22%3A7%2C%22stt%22%3A2985%2C%22dr%22%3A7%2C%22expires%22%3A1752329178%2C%22ct%22%3A1752327378%7D; __mxav__c1-WWwEoLo0=94', // 替换为你的 cookie
+  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=BiSo9h9RKVLOm51cpkIk9q6YNOTk7TJT_2FH6o1sz7_2Fw_2FNavyFP09tKfBpr_2B3JUwZfIao0WFUCmo_2B6_2BTS2ijFupyL_2BXy8_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=10;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%222f99d9bf-4332-4d75-8560-f7c681d29fc8%22%2C%22vd%22%3A5%2C%22stt%22%3A1149%2C%22dr%22%3A17%2C%22expires%22%3A1752329521%2C%22ct%22%3A1752327721%7D;', // 替换为你的 cookie
   tabs: [
     {
       name: '影视/剧集',
