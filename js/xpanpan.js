@@ -8,30 +8,21 @@ const appConfig = {
   tabs: [
     {
       name: '影视/剧集',
-      ext: { category: 'forum-2' }
+      ext: { id: 'forum-2-' } // 使用类似guangying.js的ID格式
     },
     {
       name: '4k专区',
-      ext: { category: 'forum-36' }
+      ext: { id: 'forum-36-' }
     },
     {
       name: '动漫区',
-      ext: { category: 'forum-3' }
+      ext: { id: 'forum-3-' }
     }
   ],
-  // 添加登录配置
-  login: {
-    username: "", // APP设置中提供
-    password: ""  // APP设置中提供
-  }
 };
 
 // 存储已回复的帖子ID
 const repliedPosts = new Set();
-
-// 登录状态
-let isLoggedIn = false;
-let loginRetryCount = 0;
 
 // 调试日志函数
 function log(message) {
@@ -39,77 +30,6 @@ function log(message) {
     $log(`[网盘资源社] ${message}`);
   } catch (e) {
     // 如果$log不可用，忽略
-  }
-}
-
-// 登录函数
-async function loginIfNeeded(ext) {
-  // 如果已经登录，直接返回
-  if (isLoggedIn) return true;
-  
-  // 检查登录配置
-  const username = ext?.username || appConfig.login.username;
-  const password = ext?.password || appConfig.login.password;
-  
-  if (!username || !password) {
-    log("缺少登录凭据，请提供用户名和密码");
-    return false;
-  }
-  
-  try {
-    log(`尝试登录: ${username}`);
-    
-    // 第一步：获取登录页面以获取formhash
-    const { data: loginPage } = await $fetch.get(`${appConfig.site}/member.php?mod=logging&action=login`, {
-      headers: { 'User-Agent': UA }
-    });
-    
-    const $loginPage = cheerio.load(loginPage);
-    const formhash = $loginPage('input[name="formhash"]').val();
-    
-    if (!formhash) {
-      log("无法获取formhash");
-      return false;
-    }
-    
-    // 第二步：提交登录请求
-    const loginUrl = `${appConfig.site}/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes`;
-    
-    const { status, headers } = await $fetch.post(loginUrl, {
-      form: {
-        formhash,
-        referer: `${appConfig.site}/./`,
-        loginfield: 'username',
-        username,
-        password,
-        questionid: '0',
-        answer: '',
-        cookietime: '2592000'
-      },
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': UA,
-        'Referer': `${appConfig.site}/member.php?mod=logging&action=login`
-      },
-      timeout: 10000
-    });
-    
-    // 检查登录是否成功
-    if (status === 200 || status === 302) {
-      // 检查重定向位置
-      const location = headers?.['location'] || headers?.['Location'];
-      if (location && !location.includes('login')) {
-        isLoggedIn = true;
-        log("登录成功");
-        return true;
-      }
-    }
-    
-    log(`登录失败，状态码: ${status}`);
-    return false;
-  } catch (error) {
-    log(`登录错误: ${error.message}`);
-    return false;
   }
 }
 
@@ -121,23 +41,18 @@ async function getCards(ext) {
   try {
     ext = argsify(ext);
     let cards = [];
-    let { page = 1, category } = ext;
+    let { page = 1, id } = ext;
 
     // 确保页码有效
     page = Math.max(1, parseInt(page) || 1);
     
-    const url = `${appConfig.site}/${category}-${page}.html`;
+    // 使用类似guangying.js的URL构建方式
+    const url = `${appConfig.site}/${id}${page}.html`;
     log(`加载卡片: ${url}`);
-
-    // 登录检查
-    if (!await loginIfNeeded(ext) {
-      log("未登录，无法加载内容");
-      return jsonify({ list: [] });
-    }
 
     const { data, status } = await $fetch.get(url, {
       headers: { 'User-Agent': UA },
-      timeout: 10000 // 10秒超时
+      timeout: 10000
     });
 
     if (status !== 200) {
@@ -145,25 +60,48 @@ async function getCards(ext) {
       return jsonify({ list: [] });
     }
 
-    // 检查是否被重定向到登录页面
-    if (data.includes('window.location.href="member.php?mod=logging"')) {
-      isLoggedIn = false;
-      loginRetryCount++;
-      
-      if (loginRetryCount <= 2) {
-        log("会话过期，尝试重新登录");
-        return getCards(ext); // 递归重试
-      } else {
-        log("多次登录失败，停止尝试");
-        return jsonify({ list: [] });
-      }
-    }
-
     const $ = cheerio.load(data);
     
-    // 解析帖子列表 - 使用更可靠的选择器
-    const threadItems = $('tbody[id^="normalthread_"]');
+    // 尝试guangying.js的解析方法：从脚本中提取数据
+    const scriptContent = $('script').filter((_, script) => {
+      return $(script).html().includes('var data');
+    }).html();
     
+    if (scriptContent) {
+      log("尝试从脚本中提取数据");
+      
+      // 提取JSON数据
+      const jsonMatch = scriptContent.match(/var data\s*=\s*({.*?});/s);
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          const jsonData = JSON.parse(jsonMatch[1]);
+          
+          // 处理提取的数据
+          jsonData.items.forEach(item => {
+            cards.push({
+              vod_id: item.id,
+              vod_name: item.title,
+              vod_pic: item.image,
+              vod_remarks: item.info,
+              ext: {
+                url: `${appConfig.site}/thread-${item.id}-1-1.html`,
+                postId: item.id
+              },
+            });
+          });
+          
+          log(`从脚本中提取到 ${cards.length} 张卡片`);
+          return jsonify({ list: cards });
+        } catch (e) {
+          log(`解析JSON错误: ${e.message}`);
+        }
+      }
+    }
+    
+    log("回退到HTML解析");
+    
+    // 如果脚本解析失败，使用HTML解析
+    const threadItems = $('tbody[id^="normalthread_"]');
     log(`找到 ${threadItems.length} 个帖子`);
     
     threadItems.each((index, element) => {
@@ -220,17 +158,11 @@ async function getTracks(ext) {
     }
     
     log(`加载资源: ${url}, 帖子ID: ${postId}`);
-    
-    // 登录检查
-    if (!await loginIfNeeded(ext)) {
-      log("未登录，无法加载内容");
-      return jsonify({ list: [] });
-    }
 
     // 第一次请求获取帖子内容
     const { data, status } = await $fetch.get(url, {
       headers: { 'User-Agent': UA },
-      timeout: 15000 // 15秒超时
+      timeout: 15000
     });
     
     if (status !== 200) {
@@ -238,20 +170,33 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
     
-    // 检查是否被重定向到登录页面
-    if (data.includes('window.location.href="member.php?mod=logging"')) {
-      isLoggedIn = false;
-      loginRetryCount++;
-      
-      if (loginRetryCount <= 2) {
-        log("会话过期，尝试重新登录");
-        return getTracks(ext); // 递归重试
-      } else {
-        log("多次登录失败，停止尝试");
-        return jsonify({ list: [] });
+    // 尝试guangying.js的方法：查找JSON数据
+    const jsonMatch = data.match(/"panlist":\s*({[^}]*})/);
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        const panData = JSON.parse(jsonMatch[1]);
+        log(`找到 ${panData.url.length} 个网盘链接`);
+        
+        panData.url.forEach((item, index) => {
+          tracks.push({
+            name: panData.name[index] || "网盘资源",
+            pan: item,
+            ext: {}
+          });
+        });
+        
+        return jsonify({ 
+          list: [{
+            title: "网盘资源",
+            tracks,
+          }]
+        });
+      } catch (e) {
+        log(`解析网盘JSON错误: ${e.message}`);
       }
     }
     
+    // 回退到HTML解析
     const $ = cheerio.load(data);
     
     // 检查资源是否失效
@@ -315,25 +260,19 @@ async function getTracks(ext) {
         
         // 等待1秒让服务器处理
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 重新获取帖子内容
-        const { data: newData } = await $fetch.get(url, {
-          headers: { 'User-Agent': UA },
-          timeout: 10000
-        });
-        
-        // 提取网盘链接
-        const links = extractPanLinks(newData);
-        log(`提取到 ${links.length} 个网盘链接`);
-        
-        return formatTracks(links);
       } else {
         log("缺少回复所需参数");
       }
     }
     
+    // 重新获取帖子内容
+    const { data: newData } = await $fetch.get(url, {
+      headers: { 'User-Agent': UA },
+      timeout: 10000
+    });
+    
     // 提取网盘链接
-    const links = extractPanLinks(data);
+    const links = extractPanLinks(newData);
     log(`提取到 ${links.length} 个网盘链接`);
     
     return formatTracks(links);
@@ -402,14 +341,9 @@ async function search(ext) {
       return jsonify({ list: [] });
     }
     
-    // 登录检查
-    if (!await loginIfNeeded(ext)) {
-      log("未登录，无法搜索");
-      return jsonify({ list: [] });
-    }
-    
+    // 使用类似guangying.js的搜索URL格式
     const encodedText = encodeURIComponent(text);
-    const url = `${appConfig.site}/search.php?mod=forum&q=${encodedText}&page=${page}`;
+    const url = `${appConfig.site}/search.php?q=${encodedText}&page=${page}`;
     log(`搜索: ${text}, 页码: ${page}, URL: ${url}`);
 
     const { data, status } = await $fetch.get(url, {
@@ -421,22 +355,46 @@ async function search(ext) {
       log(`搜索请求失败: HTTP ${status}`);
       return jsonify({ list: [] });
     }
-    
-    // 检查是否被重定向到登录页面
-    if (data.includes('window.location.href="member.php?mod=logging"')) {
-      isLoggedIn = false;
-      loginRetryCount++;
-      
-      if (loginRetryCount <= 2) {
-        log("会话过期，尝试重新登录");
-        return search(ext); // 递归重试
-      } else {
-        log("多次登录失败，停止尝试");
-        return jsonify({ list: [] });
-      }
-    }
 
     const $ = cheerio.load(data);
+    
+    // 尝试guangying.js的解析方法：从脚本中提取数据
+    const scriptContent = $('script').filter((_, script) => {
+      return $(script).html().includes('var searchData');
+    }).html();
+    
+    if (scriptContent) {
+      log("尝试从脚本中提取搜索结果");
+      
+      // 提取JSON数据
+      const jsonMatch = scriptContent.match(/var searchData\s*=\s*({.*?});/s);
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          const jsonData = JSON.parse(jsonMatch[1]);
+          
+          // 处理提取的数据
+          jsonData.results.forEach(item => {
+            cards.push({
+              vod_id: item.id,
+              vod_name: item.title,
+              vod_pic: item.image,
+              vod_remarks: item.info,
+              ext: {
+                url: `${appConfig.site}/thread-${item.id}-1-1.html`,
+                postId: item.id
+              },
+            });
+          });
+          
+          log(`从脚本中提取到 ${cards.length} 个搜索结果`);
+          return jsonify({ list: cards });
+        } catch (e) {
+          log(`解析搜索结果JSON错误: ${e.message}`);
+        }
+      }
+    }
+    
+    log("回退到HTML解析搜索结果");
     
     // 解析搜索结果 - 使用更可靠的选择器
     const searchItems = $('.xs2 a, a.xst');
