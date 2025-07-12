@@ -5,7 +5,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
-  cookie: 'bbs_sid=e38l80spcgnafbi1lss7v1r345; __mxau__c1-WWwEoLo0=3f12f674-b707-418a-bb0e-5dfbaa51b8b7; __mxaf__c1-WWwEoLo0=1752288379; bbs_token=QZA31B9BZ8CLeeTC8y9Z9qnjfr2hndnHL7JQP8F61oQ91ls4SIXqwfvLvSCXCcKxEkyJXqMttbc1bEt2_2BQztNjjyR8Q_3D; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%227507edde-c2cc-4fee-8366-7d3a05d32aad%22%2C%22vd%22%3A2%2C%22stt%22%3A81%2C%22dr%22%3A81%2C%22expires%22%3A1752326274%2C%22ct%22%3A1752324474%7D; __mxav__c1-WWwEoLo0=89', // 替换为你的 cookie
+  cookie: 'bbs_sid=e38l80spcgnafbi1lss7v1r345; __mxau__c1-WWwEoLo0=3f12f674-b707-418a-bb0e-5dfbaa51b8b7; __mxaf__c1-WWwEoLo0=1752288379; bbs_token=QZA31B9BZ8CLeeTC8y9Z9qnjfr2hndnHL7JQP8F61oQ91ls4SIXqwfvLvSCXCcKxEkyJXqMttbc1bEt2_2BQztNjjyR8Q_3D; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%227507edde-c2cc-4fee-8366-7d3a05d32aad%22%2C%22vd%22%3A3%2C%22stt%22%3A588%2C%22dr%22%3A507%2C%22expires%22%3A1752326781%2C%22ct%22%3A1752324981%7D; __mxav__c1-WWwEoLo0=90', // 替换为你的 cookie
   tabs: [
     {
       name: '影视/剧集',
@@ -175,8 +175,10 @@ function extractPanLinks(html) {
   const linkRegex = /(https?:\/\/[^\s'"]+)/g;
   const matches = html.match(linkRegex) || [];
 
+  // 夸克网盘链接格式通常包含 quark.cn 或者 pan.quark.cn
+  // 阿里云盘链接格式通常包含 aliyundrive.com
   return matches.filter(link =>
-    (link.includes('quark.cn') || link.includes('aliyundrive.com'))
+    (link.includes('quark.cn') || link.includes('pan.quark.cn') || link.includes('aliyundrive.com'))
   );
 }
 
