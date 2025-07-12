@@ -8,21 +8,24 @@ const appConfig = {
   tabs: [
     {
       name: '影视/剧集',
-      ext: { id: 'forum-2-' } // 使用类似guangying.js的ID格式
+      ext: {
+        id: 'forum-2?page=', // 完全使用参考脚本的ID格式
+      },
     },
     {
       name: '4k专区',
-      ext: { id: 'forum-36-' }
+      ext: {
+        id: 'forum-36?page=',
+      },
     },
     {
       name: '动漫区',
-      ext: { id: 'forum-3-' }
+      ext: {
+        id: 'forum-3?page=',
+      },
     }
   ],
 };
-
-// 存储已回复的帖子ID
-const repliedPosts = new Set();
 
 // 调试日志函数
 function log(message) {
@@ -46,8 +49,8 @@ async function getCards(ext) {
     // 确保页码有效
     page = Math.max(1, parseInt(page) || 1);
     
-    // 使用类似guangying.js的URL构建方式
-    const url = `${appConfig.site}/${id}${page}.html`;
+    // 使用参考脚本的URL格式
+    const url = `${appConfig.site}/${id}${page}`;
     log(`加载卡片: ${url}`);
 
     const { data, status } = await $fetch.get(url, {
@@ -62,30 +65,32 @@ async function getCards(ext) {
 
     const $ = cheerio.load(data);
     
-    // 尝试guangying.js的解析方法：从脚本中提取数据
+    // 使用参考脚本的方法：从脚本中提取JSON数据
     const scriptContent = $('script').filter((_, script) => {
-      return $(script).html().includes('var data');
+      return $(script).html().includes('_obj.header');
     }).html();
-    
+
     if (scriptContent) {
       log("尝试从脚本中提取数据");
       
-      // 提取JSON数据
-      const jsonMatch = scriptContent.match(/var data\s*=\s*({.*?});/s);
-      if (jsonMatch && jsonMatch[1]) {
+      const jsonStart = scriptContent.indexOf('{');
+      const jsonEnd = scriptContent.lastIndexOf('}') + 1;
+      const jsonString = scriptContent.slice(jsonStart, jsonEnd);
+      
+      const inlistMatch = jsonString.match(/_obj\.inlist=({.*});/);
+      if (inlistMatch) {
         try {
-          const jsonData = JSON.parse(jsonMatch[1]);
+          const inlistData = JSON.parse(inlistMatch[1]);
           
-          // 处理提取的数据
-          jsonData.items.forEach(item => {
+          inlistData["i"].forEach((item, index) => {
             cards.push({
-              vod_id: item.id,
-              vod_name: item.title,
-              vod_pic: item.image,
-              vod_remarks: item.info,
+              vod_id: item,
+              vod_name: inlistData["t"][index],
+              vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
+              vod_remarks: inlistData["g"][index],
               ext: {
-                url: `${appConfig.site}/thread-${item.id}-1-1.html`,
-                postId: item.id
+                url: `${appConfig.site}/res/downurl/${inlistData["ty"]}/${item}`,
+                postId: item
               },
             });
           });
@@ -98,35 +103,33 @@ async function getCards(ext) {
       }
     }
     
+    // 如果脚本解析失败，使用HTML解析
     log("回退到HTML解析");
     
-    // 如果脚本解析失败，使用HTML解析
-    const threadItems = $('tbody[id^="normalthread_"]');
-    log(`找到 ${threadItems.length} 个帖子`);
-    
-    threadItems.each((index, element) => {
+    $('.threadlist .threaditem, .thread-item').each((index, element) => {
       try {
-        // 跳过置顶帖、锁帖和失效贴
-        if ($(element).hasClass('sticky') || 
-            $(element).find('.locked').length > 0 ||
-            $(element).find('.expired-tag').length > 0) {
-          return;
-        }
-        
-        const titleEl = $(element).find('.s.xst, a.xst');
+        const titleEl = $(element).find('.thread-title, .title');
         const title = titleEl.text().trim();
-        const href = titleEl.attr('href');
+        const href = titleEl.attr('href') || $(element).find('a').first().attr('href');
         
         if (!href || !title) return;
         
+        // 图片
+        const imgEl = $(element).find('.thread-image, .thumbnail');
+        const imgSrc = imgEl.attr('src') || imgEl.attr('data-src') || '';
+        
+        // 备注信息
+        const remarksEl = $(element).find('.thread-meta, .thread-info');
+        const remarks = remarksEl.text().trim();
+        
+        // 提取帖子ID
         const postId = href.match(/thread-(\d+)/)?.[1] || '';
-        const isReplied = postId && repliedPosts.has(postId);
         
         cards.push({
           vod_id: href,
           vod_name: title,
-          vod_pic: '',
-          vod_remarks: isReplied ? '已回复' : '',
+          vod_pic: imgSrc,
+          vod_remarks: remarks,
           ext: {
             url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
             postId
@@ -138,6 +141,13 @@ async function getCards(ext) {
     });
 
     log(`成功解析 ${cards.length} 张卡片`);
+    
+    // 调试：如果没有卡片，记录HTML片段
+    if (cards.length === 0) {
+      log("未找到卡片，HTML片段:");
+      log($.html().substring(0, 500) + "...");
+    }
+    
     return jsonify({ list: cards });
   } catch (error) {
     log(`获取卡片错误: ${error.message}`);
@@ -159,7 +169,7 @@ async function getTracks(ext) {
     
     log(`加载资源: ${url}, 帖子ID: ${postId}`);
 
-    // 第一次请求获取帖子内容
+    // 使用参考脚本的请求方式
     const { data, status } = await $fetch.get(url, {
       headers: { 'User-Agent': UA },
       timeout: 15000
@@ -170,112 +180,74 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
     
-    // 尝试guangying.js的方法：查找JSON数据
-    const jsonMatch = data.match(/"panlist":\s*({[^}]*})/);
-    if (jsonMatch && jsonMatch[1]) {
-      try {
-        const panData = JSON.parse(jsonMatch[1]);
-        log(`找到 ${panData.url.length} 个网盘链接`);
-        
-        panData.url.forEach((item, index) => {
-          tracks.push({
-            name: panData.name[index] || "网盘资源",
-            pan: item,
-            ext: {}
-          });
-        });
-        
-        return jsonify({ 
-          list: [{
-            title: "网盘资源",
-            tracks,
-          }]
-        });
-      } catch (e) {
-        log(`解析网盘JSON错误: ${e.message}`);
-      }
-    }
+    // 使用参考脚本的JSON解析方法
+    const respData = JSON.parse(data);
     
-    // 回退到HTML解析
-    const $ = cheerio.load(data);
-    
-    // 检查资源是否失效
-    const isExpired = $('.expired-tag, span:contains("有人标记失效"), font:contains("失效")').length > 0;
-    if (isExpired) {
-      log("资源已标记为失效");
-      return jsonify({ list: [] });
-    }
-    
-    // 检查是否已经回复过此帖
-    const alreadyReplied = postId && repliedPosts.has(postId);
-    log(`已回复状态: ${alreadyReplied}`);
-
-    // 尝试直接提取网盘链接
-    const directLinks = extractPanLinks(data);
-    if (directLinks.length > 0 && alreadyReplied) {
-      log(`直接提取到 ${directLinks.length} 个网盘链接`);
-      return formatTracks(directLinks);
-    }
-    
-    // 检测需要回复的提示
-    const replyPrompt = $('div:contains("请回复后再查看"), div:contains("回复后查看")');
-    const needsReply = replyPrompt.length > 0 && !alreadyReplied;
-    log(`需要回复: ${needsReply}`);
-    
-    // 如果需要回复且未回复过
-    if (needsReply) {
-      // 获取回复表单所需参数
-      const formhash = $('input[name="formhash"]').val();
-      const tid = postId || url.match(/thread-(\d+)/)?.[1];
+    if (respData && respData.panlist) {
+      log("找到panlist数据");
       
-      if (formhash && tid) {
-        log(`表单参数 - formhash: ${formhash}, tid: ${tid}`);
+      // 使用参考脚本的链接处理方式
+      const regex = {
+        '中英': /中英/g,
+        '1080P': /1080P/g,
+        '杜比': /杜比/g,
+        '原盘': /原盘/g,
+        '1080p': /1080p/g,
+        '双语字幕': /双语字幕/g,
+      };
+      
+      respData.panlist.url.forEach((item, index) => {
+        let name = '';
+        for (const keyword in regex) {
+          const matches = respData.panlist.name[index].match(regex[keyword]);
+          if (matches) {
+            name = `${name}${matches[0]}`;
+          }
+        }
         
-        // 构造回复请求
-        const replyUrl = `${appConfig.site}/forum.php?mod=post&action=reply&tid=${tid}&extra=&replysubmit=yes`;
-        
-        // 使用第一条快捷回复内容
-        const firstReply = $('li.replyfast a').first().text() || '感谢分享';
-        log(`自动回复内容: ${firstReply}`);
-        
-        // 提交回复
-        const response = await $fetch.post(replyUrl, {
-          form: {
-            formhash,
-            message: firstReply,
-            usesig: 1,
-            subject: ''
-          },
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': UA,
-            'Referer': url
-          },
-          timeout: 10000
+        tracks.push({
+          name: name || "网盘资源",
+          pan: item,
+          ext: {}
         });
-        
-        // 标记为已回复
-        repliedPosts.add(tid);
-        log(`回复成功，标记帖子 ${tid} 为已回复`);
-        
-        // 等待1秒让服务器处理
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } else {
-        log("缺少回复所需参数");
+      });
+      
+      return jsonify({ 
+        list: [{
+          title: "网盘资源",
+          tracks,
+        }]
+      });
+    } 
+    // 如果JSON解析失败，使用HTML解析
+    else {
+      log("回退到HTML解析资源");
+      const $ = cheerio.load(data);
+      
+      // 检查资源是否失效
+      const isExpired = $('.expired-tag, span:contains("有人标记失效"), font:contains("失效")').length > 0;
+      if (isExpired) {
+        log("资源已标记为失效");
+        return jsonify({ list: [] });
       }
+      
+      // 直接提取网盘链接
+      const links = extractPanLinks(data);
+      log(`提取到 ${links.length} 个网盘链接`);
+      
+      tracks = links.map(link => ({
+        name: "网盘资源",
+        pan: link,
+        ext: {}
+      }));
+      
+      return jsonify({ 
+        list: [{
+          title: "网盘资源",
+          tracks,
+        }]
+      });
     }
-    
-    // 重新获取帖子内容
-    const { data: newData } = await $fetch.get(url, {
-      headers: { 'User-Agent': UA },
-      timeout: 10000
-    });
-    
-    // 提取网盘链接
-    const links = extractPanLinks(newData);
-    log(`提取到 ${links.length} 个网盘链接`);
-    
-    return formatTracks(links);
   } catch (error) {
     log(`获取资源错误: ${error.message}`);
     return jsonify({ list: [] });
@@ -303,28 +275,6 @@ function extractPanLinks(html) {
   }
 }
 
-// 格式化轨道结果的辅助函数
-function formatTracks(links) {
-  try {
-    const uniqueLinks = [...new Set(links)];
-    const tracks = uniqueLinks.map(link => ({
-      name: "网盘资源",
-      pan: link,
-      ext: {}
-    }));
-    
-    return jsonify({ 
-      list: [{
-        title: "网盘资源",
-        tracks,
-      }]
-    });
-  } catch (e) {
-    log(`格式化轨道错误: ${e.message}`);
-    return jsonify({ list: [] });
-  }
-}
-
 async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
@@ -341,9 +291,8 @@ async function search(ext) {
       return jsonify({ list: [] });
     }
     
-    // 使用类似guangying.js的搜索URL格式
-    const encodedText = encodeURIComponent(text);
-    const url = `${appConfig.site}/search.php?q=${encodedText}&page=${page}`;
+    // 使用参考脚本的搜索URL格式
+    const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(text)}`;
     log(`搜索: ${text}, 页码: ${page}, URL: ${url}`);
 
     const { data, status } = await $fetch.get(url, {
@@ -358,74 +307,21 @@ async function search(ext) {
 
     const $ = cheerio.load(data);
     
-    // 尝试guangying.js的解析方法：从脚本中提取数据
-    const scriptContent = $('script').filter((_, script) => {
-      return $(script).html().includes('var searchData');
-    }).html();
-    
-    if (scriptContent) {
-      log("尝试从脚本中提取搜索结果");
-      
-      // 提取JSON数据
-      const jsonMatch = scriptContent.match(/var searchData\s*=\s*({.*?});/s);
-      if (jsonMatch && jsonMatch[1]) {
-        try {
-          const jsonData = JSON.parse(jsonMatch[1]);
-          
-          // 处理提取的数据
-          jsonData.results.forEach(item => {
-            cards.push({
-              vod_id: item.id,
-              vod_name: item.title,
-              vod_pic: item.image,
-              vod_remarks: item.info,
-              ext: {
-                url: `${appConfig.site}/thread-${item.id}-1-1.html`,
-                postId: item.id
-              },
-            });
-          });
-          
-          log(`从脚本中提取到 ${cards.length} 个搜索结果`);
-          return jsonify({ list: cards });
-        } catch (e) {
-          log(`解析搜索结果JSON错误: ${e.message}`);
-        }
-      }
-    }
-    
-    log("回退到HTML解析搜索结果");
-    
-    // 解析搜索结果 - 使用更可靠的选择器
-    const searchItems = $('.xs2 a, a.xst');
-    
-    log(`找到 ${searchItems.length} 个搜索结果`);
-    
-    searchItems.each((index, element) => {
+    // 使用参考脚本的搜索解析方法
+    $('.v5d').each((index, element) => {
       try {
-        const title = $(element).text().trim();
-        const href = $(element).attr('href');
-        
-        if (!href || !title) return;
-        
-        const postId = href.match(/thread-(\d+)/)?.[1] || '';
-        
-        // 检查是否失效
-        const parent = $(element).closest('tr, div');
-        const isExpired = parent.find('.expired-tag, .locked').length > 0;
-        
-        if (isExpired) return;
-        
-        const isReplied = postId && repliedPosts.has(postId);
+        const name = $(element).find('b').text().trim();
+        const imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || '';
+        const additionalInfo = $(element).find('p').text().trim();
+        const pathMatch = $(element).find('a').attr('href');
         
         cards.push({
-          vod_id: href,
-          vod_name: title,
-          vod_pic: '',
-          vod_remarks: isReplied ? '已回复' : '',
+          vod_id: pathMatch,
+          vod_name: name,
+          vod_pic: imgUrl,
+          vod_remarks: additionalInfo,
           ext: {
-            url: href.startsWith('http') ? href : `${appConfig.site}/${href}`,
-            postId
+            url: `${appConfig.site}/res/downurl${pathMatch}`,
           },
         });
       } catch (e) {
