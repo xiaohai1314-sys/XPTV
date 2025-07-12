@@ -2,7 +2,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 1,
+  ver: 2, // 版本号更新
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
   tabs: [
@@ -66,7 +66,7 @@ async function getCards(ext) {
       cards.push({
         vod_id: href,
         vod_name: title,
-        vod_pic: '', // 没有缩略图时可为空
+        vod_pic: '',
         vod_remarks: '',
         ext: {
           url: `${appConfig.site}/${href}`,
@@ -87,9 +87,10 @@ async function getTracks(ext) {
 
   log(`加载帖子详情: ${url}`);
 
-  const { data, status } = await $fetch.get(url, {
+  // 第一次请求获取原始页面
+  const { data: firstResponse, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
-    timeout: 10000,
+    timeout: 15000,
   });
 
   if (status !== 200) {
@@ -97,8 +98,92 @@ async function getTracks(ext) {
     return jsonify({ list: [] });
   }
 
+  // 检查资源是否失效
+  if (firstResponse.includes('有人标记失效')) {
+    log('资源已标记失效，跳过');
+    return jsonify({ list: [] });
+  }
+
+  // 检查是否需要回复
+  let finalHtml = firstResponse;
+  if (firstResponse.includes('请回复后再查看')) {
+    log('需要回复解锁内容，尝试模拟回复...');
+    
+    try {
+      const $ = cheerio.load(firstResponse);
+      const form = $('#fastpostform');
+      if (form.length > 0) {
+        // 获取表单参数
+        const formhash = form.find('input[name="formhash"]').val();
+        const tid = form.find('input[name="tid"]').val();
+        const fid = form.find('input[name="fid"]').val();
+        
+        if (formhash && tid) {
+          // 快捷回复内容池
+          const replies = [
+            "感谢楼主的分享！",
+            "资源太棒了，感谢分享！",
+            "非常需要这个资源，感谢！"
+          ];
+          
+          // 随机选择一条回复
+          const randomReply = replies[Math.floor(Math.random() * replies.length)];
+          
+          // 构建POST数据
+          const postData = new URLSearchParams({
+            formhash: formhash,
+            tid: tid,
+            fid: fid || '',
+            message: randomReply,
+            fastpost: 'true',
+            usesig: 'true',
+            subject: ''
+          });
+          
+          // 获取表单action URL
+          let actionUrl = form.attr('action');
+          if (!actionUrl.startsWith('http')) {
+            actionUrl = new URL(actionUrl, appConfig.site).href;
+          }
+          
+          // 提交回复
+          const { status: replyStatus } = await $fetch.post(actionUrl, {
+            headers: {
+              'User-Agent': UA,
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Referer': url
+            },
+            body: postData.toString(),
+            timeout: 15000
+          });
+          
+          if (replyStatus === 200 || replyStatus === 302) {
+            log(`模拟回复成功 (${randomReply})`);
+            
+            // 重新获取页面内容
+            const { data: newData } = await $fetch.get(url, {
+              headers: { 'User-Agent': UA },
+              timeout: 15000
+            });
+            
+            finalHtml = newData;
+          } else {
+            log(`回复失败: HTTP ${replyStatus}`);
+          }
+        }
+      }
+    } catch (e) {
+      log('模拟回复出错: ' + e.message);
+    }
+  }
+
   // 提取网盘链接
-  const links = extractPanLinks(data);
+  const links = extractPanLinks(finalHtml);
+  
+  if (links.length === 0) {
+    log('未找到有效网盘链接');
+  }
+
   const tracks = links.map(link => ({
     name: "网盘链接",
     pan: link,
@@ -115,13 +200,50 @@ async function getTracks(ext) {
   });
 }
 
+// 优化后的链接提取函数
 function extractPanLinks(html) {
-  const linkRegex = /(https?:\/\/[^\s'"]+)/g;
-  const matches = html.match(linkRegex) || [];
+  const $ = cheerio.load(html);
+  const links = [];
+  
+  // 先尝试在隐藏区域查找
+  const hiddenLinks = $('#hiddenlinks, .replyview, .hidecont').find('a[href*="//"]');
+  hiddenLinks.each((i, el) => {
+    const href = $(el).attr('href') || '';
+    if (isValidPanLink(href)) {
+      links.push(href);
+    }
+  });
+  
+  // 查找所有可能包含网盘链接的元素
+  $('a[href*="//"]').each((i, el) => {
+    const href = $(el).attr('href') || '';
+    if (isValidPanLink(href)) {
+      links.push(href);
+    }
+  });
+  
+  // 文本中提取链接
+  const textLinks = html.match(/https?:\/\/[^\s'"]+/g) || [];
+  textLinks.forEach(link => {
+    if (isValidPanLink(link)) {
+      links.push(link);
+    }
+  });
+  
+  // 去重处理
+  return [...new Set(links)];
+}
 
-  return matches.filter(link =>
-    (link.includes('quark.cn') || link.includes('aliyundrive.com'))
-  );
+// 网盘链接验证
+function isValidPanLink(link) {
+  // 只保留夸克和阿里云盘
+  const validDomains = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
+  
+  // 排除图片等无关资源
+  const invalidExtensions = ['.jpg', '.png', '.gif', '.jpeg', '.webp'];
+  
+  return validDomains.some(domain => link.includes(domain)) &&
+         !invalidExtensions.some(ext => link.includes(ext));
 }
 
 async function getPlayinfo(ext) {
