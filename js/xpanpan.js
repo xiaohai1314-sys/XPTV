@@ -1,15 +1,24 @@
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
-const cheerio = require('cheerio'); // 如果是平台内置请换成 createCheerio()
+const cheerio = createCheerio(); // 如果是 Node.js 用 require('cheerio')
 
 const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com',
-  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=26;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%226c0c2ab0-47d6-4c53-a0c1-94866b143a21%22%2C%22vd%22%3A5%2C%22stt%22%3A18%2C%22dr%22%3A1%2C%22expires%22%3A1752370849%2C%22ct%22%3A1752369049%7D;', // ← 请替换成你自己的登录 Cookie
+  cookie: 'cookie_test=Gh_2Bfke4QdQEdAGJsZYM5dpa4WBLjlNy8D1XkutgFus5h9alm;bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=26;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%226c0c2ab0-47d6-4c53-a0c1-94866b143a21%22%2C%22vd%22%3A5%2C%22stt%22%3A18%2C%22dr%22%3A1%2C%22expires%22%3A1752370849%2C%22ct%22%3A1752369049%7D;', // 👉 替换成你自己的登录 Cookie
   tabs: [
-    { name: '影视/剧集', ext: { id: 'forum-1.htm?page=' } },
-    { name: '4K专区', ext: { id: 'forum-12.htm?page=' } },
-    { name: '动漫区', ext: { id: 'forum-3.htm?page=' } },
+    {
+      name: '影视/剧集',
+      ext: { id: 'forum-1.htm?page=' },
+    },
+    {
+      name: '4K专区',
+      ext: { id: 'forum-12.htm?page=' },
+    },
+    {
+      name: '动漫区',
+      ext: { id: 'forum-3.htm?page=' },
+    },
   ],
 };
 
@@ -28,6 +37,7 @@ async function getCards(ext) {
   const { page = 1, id } = ext;
   const url = `${appConfig.site}/${id}${page}`;
   log(`抓取列表: ${url}`);
+
   const { data, status } = await $fetch.get(url, {
     headers: {
       'User-Agent': UA,
@@ -47,6 +57,7 @@ async function getCards(ext) {
     const href = $(el).attr('data-href');
     const title = $(el).find('a').text().trim();
     const postId = href?.match(/thread-(\d+)/)?.[1] || '';
+
     if (href && title) {
       cards.push({
         vod_id: href,
@@ -84,15 +95,17 @@ async function getTracks(ext) {
     return jsonify({ list: [] });
   }
 
+  // 是否需要回复
   if (data.includes('您好，本贴含有特定内容，请回复后再查看')) {
-    log('检测到需要回复，开始自动回复...');
+    log('检测到需要回复，自动回复中...');
     const replySuccess = await autoReply(url, appConfig.cookie, data);
+
     if (!replySuccess) {
       log('自动回复失败');
       return jsonify({ list: [] });
     }
 
-    log('自动回复成功，等待页面刷新...');
+    log('自动回复成功，等待 3 秒...');
     await waitForPageRefresh(3000);
 
     log('重新加载帖子详情...');
@@ -130,16 +143,16 @@ function extractPanLinks(html) {
   const quarkMatches = html.match(quarkRegex) || [];
   const aliyunMatches = html.match(aliyunRegex) || [];
 
-  log(`夸克网盘链接: ${quarkMatches.length}`);
-  log(`阿里云盘链接: ${aliyunMatches.length}`);
+  log(`匹配到 夸克: ${quarkMatches.length} 个, 阿里: ${aliyunMatches.length} 个`);
 
   return quarkMatches.concat(aliyunMatches);
 }
 
 async function autoReply(postUrl, cookie, html) {
   const { formhash, fid, tid } = extractFormhashAndIds(html, postUrl);
+
   if (!formhash || !fid || !tid) {
-    log('自动回复: 缺少 formhash / fid / tid');
+    log('自动回复: 缺少 formhash/fid/tid');
     return false;
   }
 
@@ -176,8 +189,8 @@ function extractFormhashAndIds(html, postUrl) {
   };
 }
 
-function waitForPageRefresh(timeout) {
-  return new Promise(resolve => setTimeout(resolve, timeout));
+function waitForPageRefresh(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function getPlayinfo(ext) {
@@ -189,7 +202,7 @@ async function search(ext) {
   const text = ext.text || '';
   const page = Math.max(1, parseInt(ext.page) || 1);
   if (!text) {
-    log("无关键词");
+    log('搜索关键词为空');
     return jsonify({ list: [] });
   }
 
@@ -214,6 +227,7 @@ async function search(ext) {
   $('li[data-href^="thread-"]').each((i, el) => {
     const href = $(el).attr('data-href');
     const title = $(el).find('a').text().trim();
+
     if (href && title) {
       cards.push({
         vod_id: href,
