@@ -6,7 +6,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社',
   site: 'https://www.wpzysq.com', // 网站URL
-  cookie: 'your_cookie_here', // 替换为你的cookie
+  cookie: 'bbs_sid=e38l80spcgnafbi1lss7v1r345; __mxau__c1-WWwEoLo0=3f12f674-b707-418a-bb0e-5dfbaa51b8b7; __mxaf__c1-WWwEoLo0=1752288379; bbs_token=QZA31B9BZ8CLeeTC8y9Z9qnjfr2hndnHL7JQP8F61oQ91ls4SIXqwfvLvSCXCcKxEkyJXqMttbc1bEt2_2BQztNjjyR8Q_3D; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22acae0f21-25f7-4582-887c-d321a0cd3b13%22%2C%22vd%22%3A1%2C%22stt%22%3A0%2C%22dr%22%3A0%2C%22expires%22%3A1752370189%2C%22ct%22%3A1752368389%7D; __mxav__c1-WWwEoLo0=96', // 替换为你的cookie
   tabs: [
     {
       name: '影视/剧集',
