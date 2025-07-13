@@ -1,11 +1,22 @@
+/**
+ * 【方案 A 加强版】
+ * Discuz! 自动回帖可见 — 分类结构完全一致版
+ * =============================================
+ * - 分类格式完全和最初一致
+ * - formhash 实时抓
+ * - message 随机防刷
+ * - 回帖后最多刷新 5 次
+ * - sleep 防频率封
+ */
+
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
 const appConfig = {
   ver: 1,
-  title: '网盘资源社（自动回帖增强版）',
+  title: '网盘资源社（方案A加强版）',
   site: 'https://www.wpzysq.com',
-  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=33;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22389b0524-8c85-4073-ae4d-48c20c6f1d52%22%2C%22vd%22%3A5%2C%22stt%22%3A1192%2C%22dr%22%3A4%2C%22expires%22%3A1752414237%2C%22ct%22%3A1752412437%7D;',
+  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=35;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22389b0524-8c85-4073-ae4d-48c20c6f1d52%22%2C%22vd%22%3A7%2C%22stt%22%3A2778%2C%22dr%22%3A35%2C%22expires%22%3A1752415823%2C%22ct%22%3A1752414023%7D;', // 必须换！
   tabs: [
     {
       name: '影视/剧集',
@@ -71,7 +82,7 @@ async function getTracks(ext) {
   const { url } = ext;
   if (!url) return jsonify({ list: [] });
 
-  log(`加载帖子: ${url}`);
+  log(`访问帖子: ${url}`);
 
   let { data, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA, 'Cookie': appConfig.cookie },
@@ -84,7 +95,7 @@ async function getTracks(ext) {
   }
 
   if (data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
-    log('检测到锁帖提示，尝试自动回帖');
+    log('检测到锁帖，尝试自动回帖');
 
     const formhash = data.match(/name="formhash" value="(.+?)"/)?.[1];
     const fid = data.match(/fid=(\d+)/)?.[1] || '1';
@@ -95,36 +106,34 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
 
-    const ok = await autoReply(formhash, fid, tid);
+    const ok = await autoReply(formhash, fid, tid, url);
     if (!ok) {
-      log('回帖失败，停止刷新');
+      log('回帖失败，停止');
       return jsonify({ list: [] });
     }
 
-    log('回帖成功，刷新帖子页面');
-
-    // 允许多次刷新尝试拿新内容
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
+      await sleep(2000);
+      log(`第 ${i + 1} 次尝试刷新...`);
       const re = await $fetch.get(url, {
         headers: { 'User-Agent': UA, 'Cookie': appConfig.cookie },
         timeout: 10000,
       });
       if (re.status === 200 && !re.data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
         data = re.data;
-        log(`刷新成功，已解锁`);
+        log('✅ 刷新后已解锁');
         break;
+      } else {
+        log(`仍未解锁`);
       }
-      log(`第 ${i + 1} 次刷新仍未解锁`);
-      await sleep(1000);
     }
 
-    // 最终还没解锁就放弃
     if (data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
-      log('多次刷新后仍未解锁，退出');
+      log('多次刷新仍未解锁，退出');
       return jsonify({ list: [] });
     }
   } else {
-    log('未检测到锁帖提示，直接抓取');
+    log('页面已解锁，直接抓取');
   }
 
   const links = extractPanLinks(data);
@@ -137,25 +146,24 @@ async function getTracks(ext) {
   return jsonify({ list: [{ title: '资源列表', tracks }] });
 }
 
-async function autoReply(formhash, fid, tid) {
+async function autoReply(formhash, fid, tid, referer) {
   const replyUrl = `${appConfig.site}/forum.php?mod=post&action=reply&fid=${fid}&tid=${tid}&replysubmit=yes&infloat=yes&handlekey=fastpost`;
-  const randomTail = Math.random().toString(36).substr(2, 5);
+  const rand = `感谢分享！${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
   const body = new URLSearchParams({
     formhash: formhash,
-    message: `感谢分享！${randomTail}`,
+    message: rand,
     replysubmit: 'yes',
     infloat: 'yes',
     handlekey: 'fastpost',
   }).toString();
-
-  log(`回帖数据: ${body}`);
 
   const { data, status } = await $fetch.post(replyUrl, {
     headers: {
       'User-Agent': UA,
       'Cookie': appConfig.cookie,
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Referer': `${appConfig.site}/thread-${tid}.htm`,
+      'Referer': referer,
+      'Origin': appConfig.site,
     },
     body,
     timeout: 10000,
@@ -163,29 +171,29 @@ async function autoReply(formhash, fid, tid) {
 
   log(`回帖状态: ${status}`);
   if (status === 200 && data.includes('succeedhandle_fastpost')) {
-    log('自动回帖成功 ✅');
+    log(`回帖成功 ✅`);
     return true;
   } else {
-    log(`回帖未成功，返回内容: ${data.slice(0, 200)}`);
+    log(`回帖失败，返回内容: ${data.slice(0, 200)}`);
     return false;
   }
 }
 
 function extractPanLinks(html) {
   const $ = cheerio.load(html);
-  const realLinks = [];
+  const links = [];
   $('a[href]').each((i, el) => {
     const href = $(el).attr('href');
     if (
       href &&
-      /(pan|drive|aliyun|baidu|quark|lanzou|cloud)/.test(href) &&
       href.startsWith('http') &&
+      /(pan|drive|aliyun|baidu|quark|lanzou|cloud)/.test(href) &&
       href.length > 30
     ) {
-      realLinks.push(href);
+      links.push(href);
     }
   });
-  return [...new Set(realLinks)];
+  return [...new Set(links)];
 }
 
 async function getPlayinfo(ext) {
