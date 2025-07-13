@@ -3,9 +3,9 @@ const cheerio = createCheerio();
 
 const appConfig = {
   ver: 1,
-  title: '网盘资源社（自动回帖锁定版）',
+  title: '网盘资源社（自动回帖增强版）',
   site: 'https://www.wpzysq.com',
-  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=33;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22389b0524-8c85-4073-ae4d-48c20c6f1d52%22%2C%22vd%22%3A5%2C%22stt%22%3A1192%2C%22dr%22%3A4%2C%22expires%22%3A1752414237%2C%22ct%22%3A1752412437%7D;', // <<< 必须填你账号的登录Cookie !!!
+  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=33;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22389b0524-8c85-4073-ae4d-48c20c6f1d52%22%2C%22vd%22%3A5%2C%22stt%22%3A1192%2C%22dr%22%3A4%2C%22expires%22%3A1752414237%2C%22ct%22%3A1752412437%7D;',
   tabs: [
     {
       name: '影视/剧集',
@@ -83,9 +83,8 @@ async function getTracks(ext) {
     return jsonify({ list: [] });
   }
 
-  // 精确匹配唯一锁定标识
   if (data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
-    log('匹配到锁定标识 → 自动回帖');
+    log('检测到锁帖提示，尝试自动回帖');
 
     const formhash = data.match(/name="formhash" value="(.+?)"/)?.[1];
     const fid = data.match(/fid=(\d+)/)?.[1] || '1';
@@ -102,19 +101,30 @@ async function getTracks(ext) {
       return jsonify({ list: [] });
     }
 
-    log('回帖成功，开始刷新页面...');
-    const re = await $fetch.get(url, {
-      headers: { 'User-Agent': UA, 'Cookie': appConfig.cookie },
-      timeout: 10000,
-    });
-    if (re.status === 200) {
-      data = re.data;
-    } else {
-      log(`刷新失败: ${re.status}`);
+    log('回帖成功，刷新帖子页面');
+
+    // 允许多次刷新尝试拿新内容
+    for (let i = 0; i < 3; i++) {
+      const re = await $fetch.get(url, {
+        headers: { 'User-Agent': UA, 'Cookie': appConfig.cookie },
+        timeout: 10000,
+      });
+      if (re.status === 200 && !re.data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
+        data = re.data;
+        log(`刷新成功，已解锁`);
+        break;
+      }
+      log(`第 ${i + 1} 次刷新仍未解锁`);
+      await sleep(1000);
+    }
+
+    // 最终还没解锁就放弃
+    if (data.includes('您好，本帖含有特定内容，请回复后再查看。')) {
+      log('多次刷新后仍未解锁，退出');
       return jsonify({ list: [] });
     }
   } else {
-    log('未检测到锁定标识 → 直接抓链接');
+    log('未检测到锁帖提示，直接抓取');
   }
 
   const links = extractPanLinks(data);
@@ -129,13 +139,16 @@ async function getTracks(ext) {
 
 async function autoReply(formhash, fid, tid) {
   const replyUrl = `${appConfig.site}/forum.php?mod=post&action=reply&fid=${fid}&tid=${tid}&replysubmit=yes&infloat=yes&handlekey=fastpost`;
+  const randomTail = Math.random().toString(36).substr(2, 5);
   const body = new URLSearchParams({
     formhash: formhash,
-    message: '感谢分享！',
+    message: `感谢分享！${randomTail}`,
     replysubmit: 'yes',
     infloat: 'yes',
     handlekey: 'fastpost',
   }).toString();
+
+  log(`回帖数据: ${body}`);
 
   const { data, status } = await $fetch.post(replyUrl, {
     headers: {
@@ -150,7 +163,7 @@ async function autoReply(formhash, fid, tid) {
 
   log(`回帖状态: ${status}`);
   if (status === 200 && data.includes('succeedhandle_fastpost')) {
-    log('检测到回帖成功 ✅');
+    log('自动回帖成功 ✅');
     return true;
   } else {
     log(`回帖未成功，返回内容: ${data.slice(0, 200)}`);
@@ -159,9 +172,20 @@ async function autoReply(formhash, fid, tid) {
 }
 
 function extractPanLinks(html) {
-  const quark = html.match(/https?:\/\/pan\.quark\.cn\/[^\s'"]+/g) || [];
-  const aliyun = html.match(/https?:\/\/www\.aliyundrive\.com\/[^\s'"]+/g) || [];
-  return quark.concat(aliyun);
+  const $ = cheerio.load(html);
+  const realLinks = [];
+  $('a[href]').each((i, el) => {
+    const href = $(el).attr('href');
+    if (
+      href &&
+      /(pan|drive|aliyun|baidu|quark|lanzou|cloud)/.test(href) &&
+      href.startsWith('http') &&
+      href.length > 30
+    ) {
+      realLinks.push(href);
+    }
+  });
+  return [...new Set(realLinks)];
 }
 
 async function getPlayinfo(ext) {
@@ -202,4 +226,8 @@ async function search(ext) {
   });
 
   return jsonify({ list: cards });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
