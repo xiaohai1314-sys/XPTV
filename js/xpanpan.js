@@ -1,6 +1,6 @@
 const appConfig = {
   ver: 1,
-  title: '网盘资源社（完全版）',
+  title: '网盘资源社',
   site: 'https://www.wpzysq.com',
   tabs: [
     {
@@ -45,15 +45,13 @@ async function getCards(ext) {
       pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
     }
 
-    const postId = href.match(/thread-(\d+)/)?.[1] || '';
-
     if (href && title) {
       cards.push({
         vod_id: href,
         vod_name: title,
         vod_pic: pic,
         vod_remarks: '',
-        ext: { url: `${appConfig.site}/${href}`, postId },
+        ext: { url: `${appConfig.site}/${href}`, postId: href.match(/thread-(\d+)/)?.[1] || '' },
       });
     }
   });
@@ -67,9 +65,9 @@ async function search(ext) {
   const page = Math.max(1, parseInt(ext.page) || 1);
   if (!text) return jsonify({ list: [] });
 
-  const url = `http://192.168.10.111:3000/api/search?keyword=${encodeURIComponent(text)}&page=${page}`;
+  const api = `http://192.168.10.111:3000/api/search?keyword=${encodeURIComponent(text)}&page=${page}`;
 
-  const { data, status } = await $fetch.get(url, { timeout: 20000 });
+  const { data, status } = await $fetch.get(api, { timeout: 20000 });
   if (status !== 200) return jsonify({ list: [] });
 
   return jsonify(data);
