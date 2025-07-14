@@ -5,15 +5,15 @@ const appConfig = {
   tabs: [
     {
       name: '影视/剧集',
-      ext: { id: 'forum-1.htm?page=' },
+      ext: { id: 'forum-1.htm' },
     },
     {
       name: '4K专区',
-      ext: { id: 'forum-12.htm?page=' },
+      ext: { id: 'forum-12.htm' },
     },
     {
       name: '动漫区',
-      ext: { id: 'forum-3.htm?page=' },
+      ext: { id: 'forum-3.htm' },
     },
   ],
 };
@@ -22,43 +22,20 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
+// 修复分类重复问题
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
-  const url = `${appConfig.site}/${id}${page}`;
+  
+  const api = `http://localhost:3000/api/category?id=${encodeURIComponent(id)}&page=${page}`;
 
-  const { data, status } = await $fetch.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-    timeout: 10000,
-  });
+  const { data, status } = await $fetch.get(api, { timeout: 30000 });
   if (status !== 200) return jsonify({ list: [] });
-
-  const $ = createCheerio().load(data);
-  const cards = [];
-
-  $('li[data-href^="thread-"]').each((i, el) => {
-    const href = $(el).attr('data-href');
-    const title = $(el).find('a').text().trim();
-
-    let pic = $(el).find('img').attr('src') || '';
-    if (pic && !pic.startsWith('http')) {
-      pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
-    }
-
-    if (href && title) {
-      cards.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: pic,
-        vod_remarks: '',
-        ext: { url: `${appConfig.site}/${href}`, postId: href.match(/thread-(\d+)/)?.[1] || '' },
-      });
-    }
-  });
-
-  return jsonify({ list: cards });
+  
+  return jsonify(data);
 }
 
+// 修复搜索功能
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
@@ -67,12 +44,13 @@ async function search(ext) {
 
   const api = `http://192.168.10.111:3000/api/search?keyword=${encodeURIComponent(text)}&page=${page}`;
 
-  const { data, status } = await $fetch.get(api, { timeout: 20000 });
+  const { data, status } = await $fetch.get(api, { timeout: 30000 });
   if (status !== 200) return jsonify({ list: [] });
 
   return jsonify(data);
 }
 
+// 修复网盘链接提取
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -80,7 +58,7 @@ async function getTracks(ext) {
 
   const api = `http://192.168.10.111:3000/api/getTracks?url=${encodeURIComponent(url)}`;
 
-  const { data, status } = await $fetch.get(api, { timeout: 20000 });
+  const { data, status } = await $fetch.get(api, { timeout: 30000 });
   if (status !== 200) return jsonify({ list: [] });
 
   return jsonify(data);
