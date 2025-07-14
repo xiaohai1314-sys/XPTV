@@ -1,9 +1,11 @@
 /**
- * Discuz! 自动回帖可见 — TVBox 插件 完整最终版
+ * Discuz! 自动回帖可见 — TVBox 插件 一刀切万能版
  * =============================================
- * - tabs 分类格式 100% 原样
- * - 分类/搜索/分页/封面/详情页封面
- * - Puppeteer 自动回帖
+ * - 分类 tabs 完全保留
+ * - 分类页/搜索页双选择器
+ * - 封面自适应
+ * - 详情页正文首图封面
+ * - Puppeteer 后端接口
  */
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114 Safari/537.36";
@@ -11,9 +13,9 @@ const cheerio = createCheerio();
 
 const appConfig = {
   ver: 1,
-  title: '网盘资源社（最终完整版）',
+  title: '网盘资源社（万能一刀切）',
   site: 'https://www.wpzysq.com', // TODO: 改成你的域名
-  cookie: '', // 不用填
+  cookie: '', // 不需要，前端不带
   tabs: [
     {
       name: '影视/剧集',
@@ -56,13 +58,9 @@ async function getCards(ext) {
 
     let pic = $(el).find('img').attr('src') || '';
     if (pic && !pic.startsWith('http')) {
-      if (pic.startsWith('/')) {
-        pic = `${appConfig.site}${pic}`;
-      } else {
-        pic = `${appConfig.site}/${pic}`;
-      }
+      pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
     }
-    if (!pic) pic = ''; // 保底
+    if (!pic) pic = '';
 
     const postId = href.match(/thread-(\d+)/)?.[1] || '';
 
@@ -80,7 +78,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// === 搜索 ===
+// === 搜索（双选择器：li + div.pbw） ===
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
@@ -88,42 +86,26 @@ async function search(ext) {
 
   if (!text) return jsonify({ list: [] });
 
-  // 构造搜索 URL
   const url = `${appConfig.site}/search.htm?keyword=${encodeURIComponent(text)}&page=${page}`;
-
-  console.log(`Search URL: ${url}`); // 打印搜索 URL 用于调试
 
   const { data, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
     timeout: 10000,
   });
-
-  console.log(`Search Status: ${status}`); // 打印请求状态码
-
-  if (status !== 200) {
-    console.error(`Search request failed with status: ${status}`);
-    return jsonify({ list: [] });
-  }
+  if (status !== 200) return jsonify({ list: [] });
 
   const $ = cheerio.load(data);
   const cards = [];
 
-  // 根据实际的 HTML 结构调整选择器
-  $('ul.list-unstyled.threadlist > li.media.thread').each((i, el) => {
+  $('li[data-href^="thread-"]').each((i, el) => {
     const href = $(el).attr('data-href');
-    const title = $(el).find('div.media-body > div.style3_subject > a').text().trim();
+    const title = $(el).find('a').text().trim();
 
-    let pic = $(el).find('img.avatar-3').attr('src') || '';
+    let pic = $(el).find('img').attr('src') || '';
     if (pic && !pic.startsWith('http')) {
-      if (pic.startsWith('/')) {
-        pic = `${appConfig.site}${pic}`;
-      } else {
-        pic = `${appConfig.site}/${pic}`;
-      }
+      pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
     }
-    if (!pic) pic = ''; // 保底
-
-    const postId = href.match(/thread-(\d+)/)?.[1] || '';
+    if (!pic) pic = '';
 
     if (href && title) {
       cards.push({
@@ -131,25 +113,37 @@ async function search(ext) {
         vod_name: title,
         vod_pic: pic,
         vod_remarks: '',
-        ext: { url: `${appConfig.site}/${href}`, postId },
+        ext: { url: `${appConfig.site}/${href}` },
       });
     }
   });
 
+  // === 如果 li 没抓到，尝试 div.pbw ===
   if (cards.length === 0) {
-    console.warn('No search results found. Please check the HTML structure and selectors.');
+    $('div.pbw a[href^="thread-"]').each((i, el) => {
+      const href = $(el).attr('href');
+      const title = $(el).text().trim();
+      if (href && title) {
+        cards.push({
+          vod_id: href,
+          vod_name: title,
+          vod_pic: '', // div.pbw 一般没有封面
+          vod_remarks: '',
+          ext: { url: `${appConfig.site}/${href}` },
+        });
+      }
+    });
   }
 
   return jsonify({ list: cards });
 }
 
-// === 详情页：自动回帖 + 正文首图封面 ===
+// === 详情页：正文首图封面 + Puppeteer ===
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
   if (!url) return jsonify({ list: [] });
 
-  // 先抓页面自己解析封面
   const { data, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
     timeout: 10000,
@@ -160,15 +154,10 @@ async function getTracks(ext) {
 
   let pic = $('div#postlist img').first().attr('src') || '';
   if (pic && !pic.startsWith('http')) {
-    if (pic.startsWith('/')) {
-      pic = `${appConfig.site}${pic}`;
-    } else {
-      pic = `${appConfig.site}/${pic}`;
-    }
+    pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
   }
-  if (!pic) pic = ''; // 保底
+  if (!pic) pic = '';
 
-  // === TODO: 改成你的 Puppeteer 后端
   const api = `http://你的服务器IP:3000/api/getTracks?url=${encodeURIComponent(url)}`;
 
   const { data: tracksData, status: apiStatus } = await $fetch.get(api, {
@@ -182,7 +171,7 @@ async function getTracks(ext) {
   });
 }
 
-// === 播放信息（占位） ===
+// === 播放占位 ===
 async function getPlayinfo() {
   return jsonify({ urls: [] });
 }
