@@ -91,12 +91,19 @@ async function search(ext) {
   // 构造搜索 URL
   const url = `${appConfig.site}/search.htm?keyword=${encodeURIComponent(text)}&page=${page}`;
 
+  console.log(`Search URL: ${url}`); // 打印搜索 URL 用于调试
+
   const { data, status } = await $fetch.get(url, {
     headers: { 'User-Agent': UA },
     timeout: 10000,
   });
 
-  if (status !== 200) return jsonify({ list: [] });
+  console.log(`Search Status: ${status}`); // 打印请求状态码
+
+  if (status !== 200) {
+    console.error(`Search request failed with status: ${status}`);
+    return jsonify({ list: [] });
+  }
 
   const $ = cheerio.load(data);
   const cards = [];
@@ -128,6 +135,10 @@ async function search(ext) {
       });
     }
   });
+
+  if (cards.length === 0) {
+    console.warn('No search results found. Please check the HTML structure and selectors.');
+  }
 
   return jsonify({ list: cards });
 }
