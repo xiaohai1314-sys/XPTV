@@ -12,7 +12,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社（最终版）',
   site: 'https://www.wpzysq.com',
-  cookie: '', // 不要填！后端带
+  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=74;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22698dcb85-179f-41e4-8790-8ff6c911b90c%22%2C%22vd%22%3A2%2C%22stt%22%3A6%2C%22dr%22%3A6%2C%22expires%22%3A1752501516%2C%22ct%22%3A1752499716%7D', // 不要填！后端带
   tabs: [
     {
       name: '影视/剧集',
