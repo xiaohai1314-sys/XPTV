@@ -95,6 +95,7 @@ async function search(ext) {
     headers: { 'User-Agent': UA },
     timeout: 10000,
   });
+
   if (status !== 200) return jsonify({ list: [] });
 
   const $ = cheerio.load(data);
