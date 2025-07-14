@@ -77,7 +77,19 @@ async function getCards(ext) {
     }
   });
 
-  return jsonify({ list: cards });
+  // 获取分页信息
+  const pages = [];
+  $('div.pagination a').each((i, el) => {
+    const pageUrl = $(el).attr('href');
+    if (pageUrl) {
+      const match = pageUrl.match(/page=(\d+)/);
+      if (match) {
+        pages.push(parseInt(match[1]));
+      }
+    }
+  });
+
+  return jsonify({ list: cards, pages });
 }
 
 // === 搜索 ===
@@ -131,11 +143,23 @@ async function search(ext) {
     }
   });
 
+  // 获取分页信息
+  const pages = [];
+  $('div.pagination a').each((i, el) => {
+    const pageUrl = $(el).attr('href');
+    if (pageUrl) {
+      const match = pageUrl.match(/page=(\d+)/);
+      if (match) {
+        pages.push(parseInt(match[1]));
+      }
+    }
+  });
+
   if (cards.length === 0) {
     console.warn('No search results found. Please check the HTML structure and selectors.');
   }
 
-  return jsonify({ list: cards });
+  return jsonify({ list: cards, pages });
 }
 
 // === 详情页：自动回帖 + 正文首图封面 ===
