@@ -88,6 +88,7 @@ async function search(ext) {
 
   if (!text) return jsonify({ list: [] });
 
+  // 构造搜索 URL
   const url = `${appConfig.site}/search.htm?keyword=${encodeURIComponent(text)}&page=${page}`;
 
   const { data, status } = await $fetch.get(url, {
@@ -99,11 +100,12 @@ async function search(ext) {
   const $ = cheerio.load(data);
   const cards = [];
 
-  $('li[data-href^="thread-"]').each((i, el) => {
+  // 根据实际的 HTML 结构调整选择器
+  $('ul.list-unstyled.threadlist > li.media.thread').each((i, el) => {
     const href = $(el).attr('data-href');
-    const title = $(el).find('a').text().trim();
+    const title = $(el).find('div.media-body > div.style3_subject > a').text().trim();
 
-    let pic = $(el).find('img').attr('src') || '';
+    let pic = $(el).find('img.avatar-3').attr('src') || '';
     if (pic && !pic.startsWith('http')) {
       if (pic.startsWith('/')) {
         pic = `${appConfig.site}${pic}`;
@@ -113,13 +115,15 @@ async function search(ext) {
     }
     if (!pic) pic = ''; // 保底
 
+    const postId = href.match(/thread-(\d+)/)?.[1] || '';
+
     if (href && title) {
       cards.push({
         vod_id: href,
         vod_name: title,
         vod_pic: pic,
         vod_remarks: '',
-        ext: { url: `${appConfig.site}/${href}` },
+        ext: { url: `${appConfig.site}/${href}`, postId },
       });
     }
   });
