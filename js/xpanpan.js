@@ -15,7 +15,7 @@ const appConfig = {
   ver: 1,
   title: '网盘资源社（万能一刀切）',
   site: 'https://www.wpzysq.com', // TODO: 改成你的域名
-  cookie: '', // 不需要，前端不带
+  cookie: 'bbs_sid=u6q7rpi0p62aobtce1dn1jndml;bbs_token=LPuPN4pJ4Bamk_2B8KJmGgHdh4moFy3UK_2BgfbFFgqeS8UuSRIfpWhtx75xj3AhcenM6a_2B6gpiqj8WPO9bJI5cQyOBJfM0_3D;__mxaf__c1-WWwEoLo0=1752294573;__mxau__c1-WWwEoLo0=9835c974-ddfa-4d60-9411-e4d5652310b6;__mxav__c1-WWwEoLo0=35;__mxas__c1-WWwEoLo0=%7B%22sid%22%3A%22389b0524-8c85-4073-ae4d-48c20c6f1d52%22%2C%22vd%22%3A7%2C%22stt%22%3A2778%2C%22dr%22%3A35%2C%22expires%22%3A1752415823%2C%22ct%22%3A1752414023%7D;', // 不需要，前端不带
   tabs: [
     {
       name: '影视/剧集',
