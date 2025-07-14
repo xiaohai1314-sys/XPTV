@@ -1,18 +1,22 @@
 /**
- * 【网盘资源社】前端 JS
- * - 配套严格后端
- * - 分类格式按你的要求
- * - 搜索调用本地后端
+ * 【Discuz! TVBox 完整示例】
+ * - 分类：前端多页
+ * - 搜索：后端 Puppeteer（自动带 Cookie）
+ * - 详情：后端 Puppeteer（自动回帖）
  */
+
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114 Safari/537.36";
+const cheerio = createCheerio();
 
 const appConfig = {
   ver: 1,
-  title: '网盘资源社（完全版）',
+  title: '网盘资源社（最终版）',
   site: 'https://www.wpzysq.com',
+  cookie: '', // 不要填！后端带
   tabs: [
     {
       name: '影视/剧集',
-      ext: { id: 'forum-1.htm?page=' },
+      ext: { id: 'forum-1.htm?page=' }, // 和你原来一样
     },
     {
       name: '4K专区',
@@ -22,37 +26,40 @@ const appConfig = {
       name: '动漫区',
       ext: { id: 'forum-3.htm?page=' },
     },
-    // 如果有更多区，自行按格式添加
   ],
 };
 
+// === 分类：前端
 async function getConfig() {
   return jsonify(appConfig);
 }
 
 async function getCards(ext) {
   ext = argsify(ext);
-  const { page = 1, id } = ext;
+  const page = parseInt(ext.page) || 1;
+  const id = ext.id;
   const url = `${appConfig.site}/${id}${page}`;
 
   const { data, status } = await $fetch.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
+    headers: { 'User-Agent': UA },
     timeout: 10000,
   });
-  if (status !== 200) return jsonify({ list: [] });
 
-  const $ = createCheerio().load(data);
+  if (status !== 200) return jsonify({ list: [], page: page, pagecount: page });
+
+  const $ = cheerio.load(data);
   const cards = [];
-
-  $('li[data-href^="thread-"]').each((_, el) => {
+  $('li[data-href^="thread-"]').each((i, el) => {
     const href = $(el).attr('data-href');
     const title = $(el).find('a').text().trim();
-
     let pic = $(el).find('img').attr('src') || '';
     if (pic && !pic.startsWith('http')) {
-      pic = pic.startsWith('/') ? `${appConfig.site}${pic}` : `${appConfig.site}/${pic}`;
+      if (pic.startsWith('/')) {
+        pic = `${appConfig.site}${pic}`;
+      } else {
+        pic = `${appConfig.site}/${pic}`;
+      }
     }
-
     if (href && title) {
       cards.push({
         vod_id: href,
@@ -64,30 +71,29 @@ async function getCards(ext) {
     }
   });
 
-  return jsonify({ list: cards });
+  return jsonify({ list: cards, page: page, pagecount: 999 }); // 可翻页
 }
 
+// === 搜索：走后端 Puppeteer
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
-  const page = Math.max(1, parseInt(ext.page) || 1);
-  if (!text) return jsonify({ list: [] });
+  if (!text) return jsonify({ list: [], page: 1, pagecount: 1 });
 
-  const url = `http://192.168.1.6:3000/api/search?keyword=${encodeURIComponent(text)}&page=${page}`;
-
+  const url = `http://192.168.1.6:3000/api/search?q=${encodeURIComponent(text)}`;
   const { data, status } = await $fetch.get(url, { timeout: 20000 });
-  if (status !== 200) return jsonify({ list: [] });
+  if (status !== 200) return jsonify({ list: [], page: 1, pagecount: 1 });
 
   return jsonify(data);
 }
 
+// === 详情：走后端 Puppeteer
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
   if (!url) return jsonify({ list: [] });
 
   const api = `http://192.168.1.6:3000/api/getTracks?url=${encodeURIComponent(url)}`;
-
   const { data, status } = await $fetch.get(api, { timeout: 20000 });
   if (status !== 200) return jsonify({ list: [] });
 
