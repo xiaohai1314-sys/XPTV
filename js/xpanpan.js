@@ -1,6 +1,6 @@
 import { Crypto, load, _ } from 'assets://js/lib/cat.js';
 
-// ✅ 替换成你实际的服务器地址
+// ✅ 改成你的实际服务器地址
 const siteUrl = 'http://192.168.1.6:3000/api';
 
 export default {
@@ -9,19 +9,20 @@ export default {
   },
 
   async home(filter) {
+    // ✅ ✅ ✅ 分类只保留纯 forum 路径，不要带 ?page=
     return {
       class: [
         {
           type_name: '影视/剧集',
-          type_id: 'forum-1.htm?page='
+          type_id: 'forum-1.htm'
         },
         {
           type_name: '4K专区',
-          type_id: 'forum-12.htm?page='
+          type_id: 'forum-12.htm'
         },
         {
           type_name: '动漫区',
-          type_id: 'forum-3.htm?page='
+          type_id: 'forum-3.htm'
         }
       ]
     };
@@ -29,12 +30,12 @@ export default {
 
   async category(tid, pg, filter, extend) {
     const page = pg || 1;
-    // ✅ 注意这里拼出来也要带 page
+    // ✅ 拼 page 只在这里拼，不要在 home 里写死
     const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${page}`);
     return {
       list: res.list || [],
       page: page,
-      pagecount: 10,
+      pagecount: 10, // 你可以改成实际总页数
       limit: 20,
       total: res.total || 200
     };
@@ -67,12 +68,12 @@ export default {
   async play(flag, id, flags) {
     return {
       parse: 1,
-      url: id
+      url: id // 这里就是 detail 里返回的 hidden
     };
   }
 };
 
-// ==============
+// ============= 请求封装 =============
 async function request(url) {
   try {
     const res = await req_fetch(url);
