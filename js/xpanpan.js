@@ -1,7 +1,7 @@
 import { Crypto, load, _ } from 'assets://js/lib/cat.js';
 
 // 注意：替换为你的服务器实际IP和端口（去掉末尾的/api）
-const siteUrl = 'http://192.168.10.111:3000'; // 确保这是可访问的地址
+const siteUrl = 'http://192.168.10.111:3000/api'; // 确保这是可访问的地址
 
 export default {
   async init() {
