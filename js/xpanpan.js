@@ -1,49 +1,51 @@
 /**
- * 网盘资源社 - 前端插件 (最终修复版 v3)
+ * 网盘资源社 - 前端插件 (XPTV App 适配版)
  *
- * 版本说明：
- * - 采用稳定的后端通信框架。
- * - 精确匹配用户原始脚本的 class/tabs 结构 (包含 name 和 ext)。
- * - 移除冗余代码，提升性能和可维护性。
+ * 适配内容：
+ * - 使用 XPTV App 环境提供的 `$fetch` 进行网络请求。
+ * - 使用 XPTV App 环境提供的 `$log` 进行日志输出。
+ * - 使用 XPTV App 环境提供的 `jsonify` 封装返回数据。
+ * - 移除 `cheerio` 依赖，因为后端返回 JSON。
+ * - 移除手动 Cookie 管理，由后端统一处理。
+ * - 保持与 Node.js 后端 API 的通信逻辑。
  */
 
 // --- 配置区 ---
 // 在这里填入你后端服务的实际IP地址和端口
+// 请务必确保这个地址是前端设备可以访问到的！
 const API_BASE_URL = 'http://192.168.1.6:3000/api'; 
 // --- 配置区 ---
 
 /**
- * 打印日志
+ * 打印日志 (适配 XPTV App 的 $log)
  * @param {string} message 日志信息
  */
 function log(message) {
-  console.log(`[网盘资源社插件] ${message}`);
+  try { $log(`[网盘资源社插件] ${message}`); } catch (_) { console.log(`[网盘资源社插件] ${message}`); }
 }
 
 /**
- * 封装网络请求，处理错误和超时
+ * 封装网络请求，处理错误和超时 (适配 XPTV App 的 $fetch)
  * @param {string} url 请求的URL
  * @returns {Promise<object>} 返回解析后的JSON数据或错误对象
  */
 async function request(url) {
   log(`发起请求: ${url}`);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(url, {
-      method: 'GET',
+    // XPTV App 的 $fetch 可能没有 AbortController 和 timeout 选项，
+    // 这里假设它支持 headers 和 timeout。
+    // 如果实际不支持，可能需要更简单的 $fetch.get(url) 调用。
+    const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
-      signal: controller.signal,
+      timeout: 15000, // 15秒超时
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
+    // $fetch 返回的可能是 { data, status } 结构
+    if (response.status !== 200) {
       throw new Error(`HTTP错误! 状态: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = JSON.parse(response.data); // $fetch.get 返回的 data 可能是字符串，需要手动解析
 
     if (data.error) {
       throw new Error(`API返回错误: ${data.error}`);
@@ -64,17 +66,17 @@ export default {
    */
   async init() {
     log(`插件初始化，后端API地址: ${API_BASE_URL}`);
-    await request(`${API_BASE_URL}/health`); // 测试后端连通性
-    return {};
+    // 尝试调用后端健康检查接口，确认连通性
+    await request(`${API_BASE_URL}/health`); 
+    return jsonify({}); // XPTV App 插件需要 jsonify 返回
   },
 
   /**
-   * 获取首页数据（分类）- 按照您指定的 class 结构
+   * 获取首页数据（分类）
    */
   async home() {
     log('获取首页分类数据');
-    return {
-      // **关键修改：完全按照您的要求调整 class 数组的结构**
+    const homeData = {
       class: [
         {
           name: '影视/剧集',
@@ -89,9 +91,9 @@ export default {
           ext: { id: 'forum-3.htm?page=' },
         },
       ],
-      // filters 部分可以保留或移除，取决于您的前端是否使用
       filters: {} 
     };
+    return jsonify(homeData); // XPTV App 插件需要 jsonify 返回
   },
 
   /**
@@ -102,7 +104,6 @@ export default {
    * @param {object} extend 扩展参数
    */
   async category(tid, pg, filter, extend) {
-    // **关键修改：兼容您指定的 class 结构，从 ext 对象中获取 id**
     const type_id = typeof tid === 'object' ? tid.id : tid;
     const page = pg || 1;
     
@@ -111,13 +112,14 @@ export default {
     const url = `${API_BASE_URL}/vod?type_id=${encodeURIComponent(type_id)}&page=${page}`;
     const data = await request(url);
 
-    return {
+    const categoryData = {
       list: data.list || [],
       page: page,
       pagecount: data.total > 0 ? page + 1 : page,
       limit: 20,
       total: data.total || 0,
     };
+    return jsonify(categoryData); // XPTV App 插件需要 jsonify 返回
   },
 
   /**
@@ -129,9 +131,10 @@ export default {
     const url = `${API_BASE_URL}/detail?id=${encodeURIComponent(id)}`;
     const data = await request(url);
     
-    return {
+    const detailData = {
       list: data.list || [],
     };
+    return jsonify(detailData); // XPTV App 插件需要 jsonify 返回
   },
 
   /**
@@ -140,14 +143,15 @@ export default {
    */
   async search(wd) {
     log(`执行搜索: keyword=${wd}`);
-    if (!wd) return { list: [] };
+    if (!wd) return jsonify({ list: [] });
 
     const url = `${API_BASE_URL}/search?keyword=${encodeURIComponent(wd)}`;
     const data = await request(url);
 
-    return {
+    const searchData = {
       list: data.list || [],
     };
+    return jsonify(searchData); // XPTV App 插件需要 jsonify 返回
   },
 
   /**
@@ -157,10 +161,11 @@ export default {
    */
   async play(flag, id) {
     log(`请求播放: flag=${flag}, url=${id}`);
-    return {
+    const playData = {
       parse: 0,
       url: id,
     };
+    return jsonify(playData); // XPTV App 插件需要 jsonify 返回
   },
 };
 
