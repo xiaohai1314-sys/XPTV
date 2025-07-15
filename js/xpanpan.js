@@ -90,7 +90,7 @@ async function getCards(ext) {
     vod_name: item.vod_name,
     vod_pic: item.vod_pic || '',
     vod_remarks: item.vod_remarks || '',
-    ext: { url: item.vod_url }, // 假设后端返回的 vod_url 是详情页的URL
+    ext: { url: item.vod_url || item.vod_id }, // 确保ext.url有值，优先使用vod_url，否则使用vod_id
   }));
 
   return jsonify({ list: cards });
@@ -98,13 +98,13 @@ async function getCards(ext) {
 
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext; // 这里的url是getCards返回的item.vod_url
+  const { url } = ext; // 这里的url是getCards返回的item.vod_url或vod_id
   if (!url) return jsonify({ list: [] });
 
   log(`获取详情数据: url=${url}`);
   // 假设后端detail接口可以直接处理这个url作为id
-  const detailId = url.split('/').pop(); // 提取url的最后一部分作为id
-  const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(detailId)}`;
+  // 如果url是完整的，后端会解析；如果只是vod_id，后端也应该能处理
+  const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
   const data = await request(detailUrl);
 
   const tracks = [];
@@ -112,10 +112,16 @@ async function getTracks(ext) {
     // 假设后端返回的list中第一个元素就是详情数据，且包含play_url
     const detailItem = data.list[0];
     if (detailItem.vod_play_url) {
-      tracks.push({
-        name: '网盘链接',
-        pan: detailItem.vod_play_url,
-        ext: {},
+      // 假设vod_play_url是一个字符串，包含多个链接用$$$分隔
+      const playUrls = detailItem.vod_play_url.split('$$$');
+      playUrls.forEach(playUrl => {
+        if (playUrl.trim()) {
+          tracks.push({
+            name: '网盘链接',
+            pan: playUrl.trim(),
+            ext: {},
+          });
+        }
       });
     }
   }
@@ -133,7 +139,6 @@ async function getPlayinfo(ext) {
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
-  // const page = Math.max(1, parseInt(ext.page) || 1); // 搜索通常不需要分页，后端默认处理
 
   if (!text) return jsonify({ list: [] });
 
@@ -147,7 +152,7 @@ async function search(ext) {
     vod_name: item.vod_name,
     vod_pic: item.vod_pic || '',
     vod_remarks: item.vod_remarks || '',
-    ext: { url: item.vod_url },
+    ext: { url: item.vod_url || item.vod_id },
   }));
 
   return jsonify({ list: cards });
@@ -173,10 +178,9 @@ async function category(tid, pg, filter, extend) {
 }
 
 async function detail(id) {
-  // XPTV App 的 detail 接口传入的id，可能就是getCards返回的vod_id (thread-xxx.htm)
-  // 我们需要将其转换为getTracks需要的url格式
-  const url = `${API_BASE_URL.replace('/api', '')}/${id}`; // 假设后端根URL + vod_id 就是详情页URL
-  return getTracks({ url: url });
+  // XPTV App 的 detail 接口传入的id，通常是getCards返回的vod_id (thread-xxx.htm)
+  // 这里的id就是我们需要的，直接传递给getTracks
+  return getTracks({ url: id });
 }
 
 async function play(flag, id) {
