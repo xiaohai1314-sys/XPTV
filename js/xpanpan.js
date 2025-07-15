@@ -1,6 +1,6 @@
 import { Crypto, load, _ } from 'assets://js/lib/cat.js';
 
-// ✅ 替换为你的实际服务器 IP + 端口
+// ✅ 替换成你实际的服务器地址
 const siteUrl = 'http://192.168.1.6:3000/api';
 
 export default {
@@ -13,26 +13,28 @@ export default {
       class: [
         {
           type_name: '影视/剧集',
-          type_id: 'forum-1.htm'
+          type_id: 'forum-1.htm?page='
         },
         {
           type_name: '4K专区',
-          type_id: 'forum-12.htm'
+          type_id: 'forum-12.htm?page='
         },
         {
           type_name: '动漫区',
-          type_id: 'forum-3.htm'
+          type_id: 'forum-3.htm?page='
         }
       ]
     };
   },
 
   async category(tid, pg, filter, extend) {
-    const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${pg || 1}`);
+    const page = pg || 1;
+    // ✅ 注意这里拼出来也要带 page
+    const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${page}`);
     return {
       list: res.list || [],
-      page: pg || 1,
-      pagecount: 10, // 你可以按需要改
+      page: page,
+      pagecount: 10,
       limit: 20,
       total: res.total || 200
     };
@@ -51,7 +53,7 @@ export default {
     };
   },
 
-  async search(wd, quick) {
+  async search(wd) {
     const res = await request(`${siteUrl}/search?keyword=${encodeURIComponent(wd)}`);
     return {
       list: res.list || [],
@@ -64,13 +66,13 @@ export default {
 
   async play(flag, id, flags) {
     return {
-      parse: 1, // 需要客户端解析
-      url: id   // id 就是 hidden 里的网盘链接
+      parse: 1,
+      url: id
     };
   }
 };
 
-// =========== 请求封装 =============
+// ==============
 async function request(url) {
   try {
     const res = await req_fetch(url);
@@ -85,7 +87,7 @@ async function req_fetch(url) {
   const res = await fetch(url, {
     method: 'GET',
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0',
       'Accept': 'application/json'
     }
   });
