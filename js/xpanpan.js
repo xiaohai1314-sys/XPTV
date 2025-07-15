@@ -1,145 +1,145 @@
-import { Crypto, load, _ } from 'assets://js/lib/cat.js';
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
+const cheerio = createCheerio();
+const site = 'http://192.168.1.6:3000/api'; // 你本地后端地址
 
-const siteUrl = 'http://192.168.1.6:3000/api';
-
-export default {
-  async init() {
-    await logToBackend(`插件初始化，API地址: ${siteUrl}`);
-    return {};
+const tabs = [
+  {
+    name: '影视/剧集',
+    ext: {
+      id: 'forum-1.htm?page=',
+    },
   },
-
-  async home(filter) {
-    await logToBackend(`获取首页分类`);
-    return {
-      class: [
-        {
-          type_name: '影视/剧集',
-          type_id: 'forum-1.htm?page='
-        },
-        {
-          type_name: '4K专区',
-          type_id: 'forum-12.htm?page='
-        },
-        {
-          type_name: '动漫区',
-          type_id: 'forum-3.htm?page='
-        }
-      ]
-    };
+  {
+    name: '4K专区',
+    ext: {
+      id: 'forum-12.htm?page=',
+    },
   },
-
-  async category(tid, pg, filter, extend) {
-    await logToBackend(`获取分类数据: tid=${tid}, pg=${pg}`);
-    const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${pg || 1}`);
-    
-    if (res.error) {
-      await logToBackend(`分类加载失败: ${res.message}`);
-      return {
-        list: [],
-        page: pg || 1,
-        pagecount: 1,
-        limit: 20,
-        total: 0
-      };
-    }
-
-    await logToBackend(`分类数据获取成功，条数: ${res.list?.length || 0}`);
-    return {
-      list: res.list || [],
-      page: pg || 1,
-      pagecount: 10,
-      limit: 20,
-      total: res.total || 200
-    };
+  {
+    name: '动漫区',
+    ext: {
+      id: 'forum-3.htm?page=',
+    },
   },
+];
 
-  async detail(id) {
-    await logToBackend(`获取详情数据: id=${id}`);
-    const res = await request(`${siteUrl}/detail?id=${id}`);
-    
-    if (res.error) {
-      await logToBackend(`详情加载失败: ${res.message}`);
-      return {
-        list: []
-      };
-    }
-
-    await logToBackend(`详情数据获取成功`);
-    return {
-      list: res.list || []
-    };
-  },
-
-  async search(wd, quick) {
-    await logToBackend(`执行搜索: wd=${wd}`);
-    const res = await request(`${siteUrl}/search?keyword=${encodeURIComponent(wd)}`);
-    
-    if (res.error) {
-      await logToBackend(`搜索失败: ${res.message}`);
-      return {
-        list: [],
-        page: 1,
-        pagecount: 1,
-        limit: 20,
-        total: 0
-      };
-    }
-
-    await logToBackend(`搜索数据获取成功，条数: ${res.list?.length || 0}`);
-    return {
-      list: res.list || [],
-      page: 1,
-      pagecount: 1,
-      limit: 20,
-      total: res.total || 0
-    };
-  },
-
-  async play(flag, id, flags) {
-    await logToBackend(`播放请求: flag=${flag}, id=${id}`);
-    return {
-      parse: 1,
-      url: id
-    };
-  }
-};
-
-// ==== 工具方法 ====
-
-async function request(url) {
-  await logToBackend(`发起请求: ${url}`);
-  try {
-    const res = await req_fetch(url);
-    const data = JSON.parse(res);
-    if (data.error) {
-      await logToBackend(`API返回错误: ${data.error}`);
-      return { error: true, message: data.error, list: [], total: 0 };
-    }
-    await logToBackend(`请求成功: ${url}`);
-    return data;
-  } catch (e) {
-    await logToBackend(`请求失败: ${e.message}`);
-    return { error: true, message: e.message || '网络请求失败', list: [], total: 0 };
-  }
+// ✅ 插件配置信息
+async function getConfig() {
+  return jsonify({
+    ver: 1,
+    title: '网盘资源社（走本地后端）',
+    tabs: tabs
+  });
 }
 
-async function req_fetch(url) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await req(url); // 使用 XPTV 原生请求方法
-    clearTimeout(timeoutId);
-    return res;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error.name === 'AbortError' ? new Error('请求超时') : error;
+// ✅ 分类页：走后端 /api/vod
+async function getCards(ext) {
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  const url = `${site}/vod?type_id=${id}&page=${page}`;
+  $log(`[分类] 请求：${url}`);
+
+  const { data, status } = await $fetch.get(url, {
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    timeout: 10000
+  });
+
+  if (status !== 200) {
+    $log(`[分类] 失败：HTTP ${status}`);
+    return jsonify({ list: [] });
   }
+
+  let json;
+  try {
+    json = JSON.parse(data);
+  } catch (e) {
+    $log('[分类] JSON 解析失败');
+    return jsonify({ list: [] });
+  }
+
+  return jsonify({ list: json.list || [] });
 }
 
-async function logToBackend(msg) {
-  try {
-    await req(`${siteUrl.replace('/api', '')}/log?msg=${encodeURIComponent(msg)}`);
-  } catch (e) {
-    // 静默失败不影响主流程
+// ✅ 详情页：走后端 /api/detail
+async function getTracks(ext) {
+  ext = argsify(ext);
+  const { vod_id } = ext;
+  const url = `${site}/detail?id=${vod_id}`;
+  $log(`[详情] 请求：${url}`);
+
+  const { data, status } = await $fetch.get(url, {
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    timeout: 10000
+  });
+
+  if (status !== 200) {
+    $log(`[详情] 失败：HTTP ${status}`);
+    return jsonify({ list: [] });
   }
+
+  let json;
+  try {
+    json = JSON.parse(data);
+  } catch (e) {
+    $log('[详情] JSON 解析失败');
+    return jsonify({ list: [] });
+  }
+
+  const item = json.list?.[0];
+  if (!item || !item.vod_play_url) {
+    return jsonify({ list: [] });
+  }
+
+  return jsonify({
+    list: [
+      {
+        title: item.vod_name,
+        tracks: [
+          {
+            name: "网盘链接",
+            pan: item.vod_play_url,
+            ext: {}
+          }
+        ]
+      }
+    ]
+  });
+}
+
+// ✅ 搜索：走后端 /api/search
+async function search(ext) {
+  ext = argsify(ext);
+  const text = ext.text || '';
+  if (!text) {
+    $log('[搜索] 无关键词');
+    return jsonify({ list: [] });
+  }
+
+  const url = `${site}/search?keyword=${encodeURIComponent(text)}`;
+  $log(`[搜索] 请求：${url}`);
+
+  const { data, status } = await $fetch.get(url, {
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    timeout: 10000
+  });
+
+  if (status !== 200) {
+    $log(`[搜索] 失败：HTTP ${status}`);
+    return jsonify({ list: [] });
+  }
+
+  let json;
+  try {
+    json = JSON.parse(data);
+  } catch (e) {
+    $log('[搜索] JSON 解析失败');
+    return jsonify({ list: [] });
+  }
+
+  return jsonify({ list: json.list || [] });
+}
+
+// ✅ 播放（空实现）
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
 }
