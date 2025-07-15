@@ -1,7 +1,7 @@
 import { Crypto, load, _ } from 'assets://js/lib/cat.js';
 
-// 注意：替换为你的服务器实际IP和端口
-const siteUrl = 'http://192.168.10.111:3000';
+// 注意：替换为你的服务器实际IP和端口（去掉末尾的/api）
+const siteUrl = 'http://192.168.10.111:3000'; // 确保这是可访问的地址
 
 export default {
   async init() {
@@ -32,7 +32,7 @@ export default {
   async category(tid, pg, filter, extend) {
     console.log('获取分类数据:', { tid, pg });
     
-    const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${pg || 1}`);
+    const res = await request(`${siteUrl}/api/vod?type_id=${tid}&page=${pg || 1}`);
     
     // 添加详细的错误处理和日志
     if (res.error) {
@@ -60,7 +60,7 @@ export default {
   async detail(id) {
     console.log('获取详情数据:', { id });
     
-    const res = await request(`${siteUrl}/detail?id=${id}`);
+    const res = await request(`${siteUrl}/api/detail?id=${id}`);
     
     // 添加详细的错误处理和日志
     if (res.error) {
@@ -81,7 +81,7 @@ export default {
     console.log('执行搜索:', { wd, quick });
     
     // 修复：使用正确的参数名 keyword
-    const res = await request(`${siteUrl}/search?keyword=${encodeURIComponent(wd)}`);
+    const res = await request(`${siteUrl}/api/search?keyword=${encodeURIComponent(wd)}`);
     
     // 添加详细的错误处理和日志
     if (res.error) {
@@ -158,9 +158,9 @@ async function req_fetch(url) {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
+        'Accept': 'application/json'
       },
+      credentials: 'include', // 关键：携带cookie
       signal: controller.signal
     });
     
@@ -184,4 +184,3 @@ async function req_fetch(url) {
     throw error;
   }
 }
-
