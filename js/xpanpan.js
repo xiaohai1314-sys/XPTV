@@ -1,4 +1,4 @@
-import { Crypto, load, _ } from 'assets://js/lib/cat.js';
+import { Crypto, load, _ } from 'assets://js/lib/server.js';
 
 // 注意：替换为你的服务器实际IP和端口
 const siteUrl = 'http://192.168.1.6:3000/api';
