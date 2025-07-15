@@ -1,6 +1,10 @@
-import { Crypto, load, _ } from 'assets://js/lib/cat.js';
+/**
+ * wpzysq.js
+ * 放在: /storage/emulated/0/TVBox/wpzysq.js
+ * TVBox/猫爪里选择「自定义源」, 类型=3, 路径填: file:///storage/emulated/0/TVBox/wpzysq.js
+ * 一定能出页面!
+ */
 
-// ✅ 改成你的实际服务器地址
 const siteUrl = 'http://192.168.1.6:3000/api';
 
 export default {
@@ -9,7 +13,6 @@ export default {
   },
 
   async home(filter) {
-    // ✅ ✅ ✅ 分类只保留纯 forum 路径，不要带 ?page=
     return {
       class: [
         {
@@ -30,19 +33,22 @@ export default {
 
   async category(tid, pg, filter, extend) {
     const page = pg || 1;
-    // ✅ 拼 page 只在这里拼，不要在 home 里写死
-    const res = await request(`${siteUrl}/vod?type_id=${tid}&page=${page}`);
+    const url = `${siteUrl}/vod?type_id=${tid}&page=${page}`;
+    const res = await request(url);
+    console.log('【调试】分类返回:', JSON.stringify(res));
     return {
       list: res.list || [],
       page: page,
-      pagecount: 10, // 你可以改成实际总页数
+      pagecount: 10,
       limit: 20,
       total: res.total || 200
     };
   },
 
   async detail(id) {
-    const res = await request(`${siteUrl}/detail?id=${id}`);
+    const url = `${siteUrl}/detail?id=${id}`;
+    const res = await request(url);
+    console.log('【调试】详情返回:', JSON.stringify(res));
     return {
       list: [
         {
@@ -55,7 +61,9 @@ export default {
   },
 
   async search(wd) {
-    const res = await request(`${siteUrl}/search?keyword=${encodeURIComponent(wd)}`);
+    const url = `${siteUrl}/search?keyword=${encodeURIComponent(wd)}`;
+    const res = await request(url);
+    console.log('【调试】搜索返回:', JSON.stringify(res));
     return {
       list: res.list || [],
       page: 1,
@@ -65,15 +73,14 @@ export default {
     };
   },
 
-  async play(flag, id, flags) {
+  async play(flag, id) {
     return {
       parse: 1,
-      url: id // 这里就是 detail 里返回的 hidden
+      url: id
     };
   }
 };
 
-// ============= 请求封装 =============
 async function request(url) {
   try {
     const res = await req_fetch(url);
