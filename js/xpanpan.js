@@ -1,6 +1,6 @@
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-const site = 'http://192.168.1.6:3000/api'; // 你本地后端地址
+const site = 'http://192.168.1.6:3000/api'; // 你的后端地址
 
 const tabs = [
   {
@@ -23,16 +23,16 @@ const tabs = [
   },
 ];
 
-// ✅ 插件配置信息
+// 插件配置
 async function getConfig() {
   return jsonify({
     ver: 1,
-    title: '网盘资源社（走本地后端）',
+    title: '网盘资源社（本地后端）',
     tabs: tabs
   });
 }
 
-// ✅ 分类页：走后端 /api/vod
+// 分类接口
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -45,7 +45,7 @@ async function getCards(ext) {
   });
 
   if (status !== 200) {
-    $log(`[分类] 失败：HTTP ${status}`);
+    $log(`[分类] 请求失败: HTTP ${status}`);
     return jsonify({ list: [] });
   }
 
@@ -60,7 +60,7 @@ async function getCards(ext) {
   return jsonify({ list: json.list || [] });
 }
 
-// ✅ 详情页：走后端 /api/detail
+// 详情接口
 async function getTracks(ext) {
   ext = argsify(ext);
   const { vod_id } = ext;
@@ -73,7 +73,7 @@ async function getTracks(ext) {
   });
 
   if (status !== 200) {
-    $log(`[详情] 失败：HTTP ${status}`);
+    $log(`[详情] 请求失败: HTTP ${status}`);
     return jsonify({ list: [] });
   }
 
@@ -106,7 +106,7 @@ async function getTracks(ext) {
   });
 }
 
-// ✅ 搜索：走后端 /api/search
+// 搜索接口
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
@@ -124,7 +124,7 @@ async function search(ext) {
   });
 
   if (status !== 200) {
-    $log(`[搜索] 失败：HTTP ${status}`);
+    $log(`[搜索] 请求失败: HTTP ${status}`);
     return jsonify({ list: [] });
   }
 
@@ -139,7 +139,7 @@ async function search(ext) {
   return jsonify({ list: json.list || [] });
 }
 
-// ✅ 播放（空实现）
+// 播放接口（占位）
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
