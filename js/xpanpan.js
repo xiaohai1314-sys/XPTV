@@ -180,7 +180,7 @@ function XPTVPluginSimulation() {
           <h2>Tabs</h2>
           <ul>
             {config.tabs.map((tab, index) => (
-              <li key={index} onClick={() => handleTabClick(tab)}>
+              <li key={index} onClick={() => handleTabClick(tab)} style={{ cursor: 'pointer', margin: '5px 0' }}>
                 {tab.name}
               </li>
             ))}
@@ -192,7 +192,7 @@ function XPTVPluginSimulation() {
           <h2>Cards</h2>
           <ul>
             {cards.map((card, index) => (
-              <li key={index} onClick={() => handleCardClick(card)}>
+              <li key={index} onClick={() => handleCardClick(card)} style={{ cursor: 'pointer', margin: '5px 0' }}>
                 {card.vod_name}
               </li>
             ))}
@@ -214,5 +214,3 @@ function XPTVPluginSimulation() {
 }
 
 export default XPTVPluginSimulation;
-
-
