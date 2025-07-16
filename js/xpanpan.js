@@ -1,16 +1,29 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+// --- 配置区 ---
+// 在这里填入你后端服务的实际IP地址和端口
+// 例如，如果后端和App在同一台电脑上运行，可以是 'http://127.0.0.1:3000/api'
+// 如果在局域网内，可以是 'http://192.168.x.x:3000/api'
+const API_BASE_URL = 'http://192.168.10.111:3000/api'; 
+// --- 配置区 ---
 
-const API_BASE_URL = 'http://192.168.10.111:3000/api';
+// 假设这些函数由 XPTV App 环境提供
+// function $log(msg) { console.log(msg); }
+// function jsonify(obj) { return JSON.stringify(obj); }
+// function argsify(ext) { return typeof ext === 'string' ? JSON.parse(ext) : ext; }
+// const $fetch = { get: async (url) => { const res = await fetch(url); return { status: res.status, data: await res.text() }; } };
 
 function log(msg) {
-  console.log(`[网盘资源社插件] ${msg}`);
+  try { $log(`[网盘资源社插件] ${msg}`); } catch (_) { console.log(`[网盘资源社插件] ${msg}`); }
 }
 
+/**
+ * 封装网络请求，处理错误和超时
+ * @param {string} url 请求的URL
+ * @returns {Promise<object>} 返回解析后的JSON数据或错误对象
+ */
 async function request(url) {
   log(`发起请求: ${url}`);
   try {
-    const response = await axios.get(url, {
+    const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
       timeout: 15000, // 15秒超时
     });
@@ -19,7 +32,7 @@ async function request(url) {
       throw new Error(`HTTP错误! 状态: ${response.status}`);
     }
 
-    const data = response.data;
+    const data = JSON.parse(response.data);
 
     if (data.error) {
       throw new Error(`API返回错误: ${data.error}`);
@@ -34,36 +47,28 @@ async function request(url) {
   }
 }
 
+// --- XPTV App 插件入口函数 ---
+
 async function getConfig() {
   log(`插件初始化，后端API地址: ${API_BASE_URL}`);
-  // 尝试调用后端健康检查接口，确认连通性
   await request(`${API_BASE_URL}/health`); 
 
   const appConfig = {
     ver: 1,
     title: '网盘资源社',
-    site: API_BASE_URL, // 这里不再是原始网站，而是后端API地址
-    cookie: '', // 移除手动Cookie，由后端处理
+    site: API_BASE_URL,
+    cookie: '',
     tabs: [
-      {
-        name: '影视/剧集',
-        ext: { id: 'forum-1.htm?page=' },
-      },
-      {
-        name: '4K专区',
-        ext: { id: 'forum-12.htm?page=' },
-      },
-      {
-        name: '动漫区',
-        ext: { id: 'forum-3.htm?page=' },
-      },
+      { name: '影视/剧集', ext: { id: 'forum-1.htm' } },
+      { name: '4K专区', ext: { id: 'forum-12.htm' } },
+      { name: '动漫区', ext: { id: 'forum-3.htm' } },
     ],
   };
-  return appConfig;
+  return jsonify(appConfig);
 }
 
 async function getCards(ext) {
-  ext = argsify(ext); // 确保 ext 被正确解析
+  ext = argsify(ext);
   const { page = 1, id } = ext;
   
   log(`获取分类数据: id=${id}, page=${page}`);
@@ -74,59 +79,59 @@ async function getCards(ext) {
   const cards = (data.list || []).map(item => ({
     vod_id: item.vod_id,
     vod_name: item.vod_name,
-    vod_pic: item.vod_pic || '',
+    vod_pic: item.vod_pic || '', // 使用后端抓取的封面
     vod_remarks: item.vod_remarks || '',
-    ext: { url: item.vod_url || item.vod_id }, // 确保ext.url有值，优先使用vod_url，否则使用vod_id
+    ext: { url: item.vod_id }, // ext.url 使用 vod_id
   }));
 
-  return { list: cards };
+  return jsonify({ list: cards });
 }
 
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext; // 这里的url是getCards返回的item.vod_url或vod_id
-  if (!url) return { list: [] };
+  const { url } = ext;
+  if (!url) return jsonify({ list: [] });
 
   log(`获取详情数据: url=${url}`);
-  // 假设后端detail接口可以直接处理这个url作为id
-  // 如果url是完整的，后端会解析；如果只是vod_id，后端也应该能处理
+  
   const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
   const data = await request(detailUrl);
 
   const tracks = [];
   if (data.list && data.list.length > 0) {
-    // 假设后端返回的list中第一个元素就是详情数据，且包含play_url
     const detailItem = data.list[0];
-    if (detailItem.vod_play_url) {
-      // 假设vod_play_url是一个字符串，包含多个链接用$$$分隔
+    if (detailItem.vod_play_url && detailItem.vod_play_url !== '暂无有效网盘链接') {
       const playUrls = detailItem.vod_play_url.split('$$$');
-      playUrls.forEach(playUrl => {
+      playUrls.forEach((playUrl, index) => {
         if (playUrl.trim()) {
           tracks.push({
-            name: '网盘链接',
+            name: `网盘链接 ${index + 1}`,
             pan: playUrl.trim(),
             ext: {},
           });
         }
       });
+    } else {
+        tracks.push({ name: '暂无资源', pan: '', ext: {} });
     }
   }
 
-  return { list: [{ title: '资源列表', tracks }] };
+  return jsonify({ list: [{ title: '资源列表', tracks }] });
 }
 
 async function getPlayinfo(ext) {
   ext = argsify(ext);
-  const { pan } = ext; // 这里的pan是getTracks返回的网盘链接
+  const { pan } = ext;
   log(`请求播放: url=${pan}`);
-  return { urls: [pan] }; // 直接返回网盘链接让播放器处理
+  if (!pan) return jsonify({ urls: [] });
+  return jsonify({ urls: [pan] });
 }
 
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
 
-  if (!text) return { list: [] };
+  if (!text) return jsonify({ list: [] });
 
   log(`执行搜索: keyword=${text}`);
 
@@ -136,81 +141,35 @@ async function search(ext) {
   const cards = (data.list || []).map(item => ({
     vod_id: item.vod_id,
     vod_name: item.vod_name,
-    vod_pic: item.vod_pic || '',
+    vod_pic: item.vod_pic || '', // 搜索结果暂时无封面，除非后端也二次抓取
     vod_remarks: item.vod_remarks || '',
-    ext: { url: item.vod_url || item.vod_id },
+    ext: { url: item.vod_id },
   }));
 
-  return { list: cards };
+  return jsonify({ list: cards });
 }
 
-function argsify(ext) {
-  return typeof ext === 'string' ? JSON.parse(ext) : ext;
+// --- 兼容旧版 XPTV App 接口 ---
+async function init() {
+  return getConfig();
 }
 
-function XPTVPluginSimulation() {
-  const [config, setConfig] = useState(null);
-  const [cards, setCards] = useState([]);
-  const [tracks, setTracks] = useState([]);
-
-  useEffect(() => {
-    const initPlugin = async () => {
-      const configData = await getConfig();
-      setConfig(configData);
-    };
-
-    initPlugin();
-  }, []);
-
-  const handleTabClick = async (tab) => {
-    const cardData = await getCards(tab.ext);
-    setCards(cardData.list);
-  };
-
-  const handleCardClick = async (card) => {
-    const trackData = await getTracks(card.ext);
-    setTracks(trackData.list[0].tracks);
-  };
-
-  return (
-    <div style={{ padding: '20px' }}>
-      <h1>XPTV Plugin Simulation</h1>
-      {config && (
-        <div>
-          <h2>Tabs</h2>
-          <ul>
-            {config.tabs.map((tab, index) => (
-              <li key={index} onClick={() => handleTabClick(tab)} style={{ cursor: 'pointer', margin: '5px 0' }}>
-                {tab.name}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {cards.length > 0 && (
-        <div>
-          <h2>Cards</h2>
-          <ul>
-            {cards.map((card, index) => (
-              <li key={index} onClick={() => handleCardClick(card)} style={{ cursor: 'pointer', margin: '5px 0' }}>
-                {card.vod_name}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {tracks.length > 0 && (
-        <div>
-          <h2>Tracks</h2>
-          <ul>
-            {tracks.map((track, index) => (
-              <li key={index}>{track.pan}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
+async function home() {
+  const configStr = await getConfig();
+  const config = JSON.parse(configStr);
+  return jsonify({ class: config.tabs, filters: {} });
 }
 
-export default XPTVPluginSimulation;
+async function category(tid, pg, filter, extend) {
+  const id = typeof tid === 'object' ? tid.id : tid;
+  return getCards({ id: id, page: pg });
+}
+
+async function detail(id) {
+  return getTracks({ url: id });
+}
+
+async function play(flag, id) {
+  return getPlayinfo({ pan: id });
+}
+
