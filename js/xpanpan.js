@@ -1,3 +1,7 @@
+/**
+ * XPTV App 插件前端代码 (优化版)
+ */
+
 // --- 配置区 ---
 // 在这里填入你后端服务的实际IP地址和端口
 // 例如，如果后端和App在同一台电脑上运行，可以是 'http://127.0.0.1:3000/api'
@@ -104,27 +108,25 @@ async function getTracks(ext) {
       const playUrls = detailItem.vod_play_url.split('$$$');
       playUrls.forEach((playUrl, index) => {
         if (playUrl.trim()) {
+          // 优化：从链接中提取网盘类型作为名称
+          let panName = `网盘链接 ${index + 1}`;
+          if (playUrl.includes('quark')) panName = `夸克网盘 ${index + 1}`;
+          if (playUrl.includes('baidu')) panName = `百度网盘 ${index + 1}`;
+          if (playUrl.includes('aliyundrive')) panName = `阿里云盘 ${index + 1}`;
+          
           tracks.push({
-            name: `网盘链接 ${index + 1}`,
-            pan: playUrl.trim(),
+            name: panName,
+            pan: playUrl.trim(), // pan 字段包含链接和可能的提取码
             ext: {},
           });
         }
       });
     } else {
-        tracks.push({ name: '暂无资源', pan: '', ext: {} });
+        tracks.push({ name: '暂无资源或解析失败', pan: '', ext: {} });
     }
   }
 
   return jsonify({ list: [{ title: '资源列表', tracks }] });
-}
-
-async function getPlayinfo(ext) {
-  ext = argsify(ext);
-  const { pan } = ext;
-  log(`请求播放: url=${pan}`);
-  if (!pan) return jsonify({ urls: [] });
-  return jsonify({ urls: [pan] });
 }
 
 async function search(ext) {
@@ -172,4 +174,5 @@ async function detail(id) {
 async function play(flag, id) {
   return getPlayinfo({ pan: id });
 }
+
 
