@@ -1,17 +1,18 @@
 /**
- * XPTV App 插件前端代码 (最终修复版 v2)
+ * XPTV App 插件前端代码 (最终修复版 v3)
  * 
  * 功能:
  * - 与后端API交互，获取网盘资源社的内容
  * - 支持分类浏览、搜索、详情查看
  * - 智能识别网盘类型并显示提取码
  * 
- * v2 版本关键修复与优化:
- * 1. 【核心修复】重写 getTracks 函数，增强其容错性，完美处理各种后端返回数据，彻底解决二次打开卡死问题。
- * 2. 【健壮性】getTracks 函数能正确分离链接与提取码，保证点击跳转的URL纯净有效。
- * 3. 【健壮性】智能解析提取码格式，避免前端误判为失效。
- * 4. 【体验优化】当无有效链接时，明确提示用户，而不是空白转圈。
- * 5. 【功能优化】支持更多网盘类型的识别。
+ * v3 版本关键修复与优化:
+ * 1. 【用户体验】在网盘名称中明确提示用户需要手动输入提取码。
+ * 2. 【核心修复】重写 getTracks 函数，增强其容错性，完美处理各种后端返回数据，彻底解决二次打开卡死问题。
+ * 3. 【健壮性】getTracks 函数能正确分离链接与提取码，保证点击跳转的URL纯净有效。
+ * 4. 【健壮性】智能解析提取码格式，避免前端误判为失效。
+ * 5. 【体验优化】当无有效链接时，明确提示用户，而不是空白转圈。
+ * 6. 【功能优化】支持更多网盘类型的识别。
  */
 
 // --- 配置区 ---
@@ -99,7 +100,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取详情和播放链接 - 【v2 核心修复】
+ * 获取详情和播放链接 - 【v3 核心修复】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -148,9 +149,9 @@ async function getTracks(ext) {
         else if (cleanUrl.includes('115')) panName = `115网盘 ${index + 1}`;
         else if (cleanUrl.includes('lanzou')) panName = `蓝奏云 ${index + 1}`;
         
-        // 将提取码附加到名称上用于显示
+        // 【v3 修复】将提取码附加到名称上用于显示，并明确提示手动输入
         if (passCode) {
-          panName += ` [码:${passCode}]`;
+          panName += ` [码:${passCode}] (请手动输入)`;
         }
         
         tracks.push({
@@ -217,6 +218,6 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('网盘资源社插件加载完成 (v2 修复版)');
+log('网盘资源社插件加载完成 (v3 修复版)');
 
 
