@@ -1,76 +1,159 @@
-// 观影网脚本 - TV端终极解决方案
 const cheerio = createCheerio()
-const UA = 'Mozilla/5.0 (Apple; CPU OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) TV Safari/604.1'
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-    ver: 50,
-    title: '观影网',
-    site: 'https://www.gying.org/',
-    tabs: [
-        {
-            name: '电影',
-            ext: {
-                id: 'mv?page=',
-            },
-        },
-        {
-            name: '剧集',
-            ext: {
-                id: 'tv?page=',
-            },
-        },
-        {
-            name: '动漫',
-            ext: {
-                id: 'ac?page=',
-            },
-        }
-    ],
+	ver: 1,
+	title: '观影网',
+	site: 'https://www.gying.org/',
+	tabs: [
+		{
+			name: '电影',
+			ext: {
+				id: 'mv?page=',
+			},
+		},
+		{
+			name: '剧集',
+			ext: {
+				id: 'tv?page=',
+			},
+		},
+		{
+			name: '动漫',
+			ext: {
+				id: 'ac?page=',
+			},
+		}
+		
+	],
 }
 
 async function getConfig() {
-    return jsonify(appConfig)
+	return jsonify(appConfig)
 }
 
 async function getCards(ext) {
-    ext = argsify(ext)
-    let cards = []
-    let { page = 1, id } = ext
-    const url = `${appConfig.site}${id}${page}`
-    
-    try {
-        console.log(`[TV] 正在请求: ${url}`);
-        
-        // 添加详细的调试信息
-        const startTime = Date.now();
-        
-        // 使用代理友好的配置
-        const response = await $fetch.get(url, {
-            headers: { 
-                "User-Agent": UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-                "Connection": "keep-alive",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-                "X-Requested-With": "XMLHttpRequest" // 模拟AJAX请求
-            },
-            timeout: 30000,
-            followRedirects: true,
-            retry: 2 // 失败重试2次
-        });
-        
-        const endTime = Date.now();
-        console.log(`[TV] 收到响应，耗时: ${endTime - startTime}ms`);
-        
-        // 检查响应状态
-        if (response.status !== 200) {
-            console.error(`[TV] 请求失败，状态码: ${response.status}`);
-            return handleError(`网络请求失败，状态码: ${response.status}`);
-        }
-        
-        const data = response.data;
-        
-        // 保存HTML用于调试
-        try {
-            $utils.writeFile("tv_debug.html", data
+	ext = argsify(ext)
+	let cards = []
+	let { page = 1, id } = ext
+	const url = `${appConfig.site}${id}${page}`
+	
+	const { data } = await $fetch.get(url, {
+		headers: { "User-Agent": UA },
+	});
+	const $ = cheerio.load(data)
+	
+	/*
+	  const t1 = $('p.error').text()
+	  if ($('p.error').length > 0) { 
+		// $utils.openSafari(appConfig.site, UA); 
+	  }
+	*/
+	  
+	const scriptContent = $('script').filter((_, script) => {
+		return $(script).html().includes('_obj.header');
+	}).html();
+
+	if (!scriptContent) {
+		console.log("错误：未能从页面中定位到关键的<script>数据。");
+		return jsonify({ list: [] });
+	}
+
+	const jsonStart = scriptContent.indexOf('{');
+	const jsonEnd = scriptContent.lastIndexOf('}') + 1;
+	const jsonString = scriptContent.slice(jsonStart, jsonEnd);
+
+	const inlistMatch = jsonString.match(/_obj\.inlist=({.*});/);
+	if (!inlistMatch) {
+		console.log("错误：解析失败，未找到 _obj.inlist 数据。");
+	} else {
+		const inlistData = JSON.parse(inlistMatch[1]);
+		inlistData["i"].forEach((item, index) => {
+			cards.push({
+				vod_id: item,
+				vod_name: inlistData["t"][index],
+				vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
+				vod_remarks: inlistData["g"][index], 
+				ext: {
+					url: `${appConfig.site}res/downurl/${inlistData["ty"]}/${item}`,
+				},
+			})
+		})	
+	}
+	return jsonify({ list: cards })
+}
+
+async function getTracks(ext) {
+	ext = argsify(ext)
+    let tracks = []
+	let url = ext.url
+
+	const { data } = await $fetch.get(url, {
+		headers: { 'User-Agent': UA },
+	})
+	const respstr = JSON.parse(data)
+
+	if (respstr.hasOwnProperty('panlist')) {
+		const regex = {
+			'中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g,
+			'原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g,
+		};
+		respstr.panlist.url.forEach((item, index) => {
+			let name = ''
+			for (const keyword in regex) {
+				const matches = respstr.panlist.name[index].match(regex[keyword]);
+				if (matches) {
+					name = `${name}${matches[0]} `
+				}
+			}
+			tracks.push({
+				name: name.trim() || respstr.panlist.name[index],
+				pan: item,
+				ext: { url: '' },
+			})
+		})
+	} else if (respstr.hasOwnProperty('file')) {
+		console.log('提示：此资源可能需要网页验证，TV端无法处理。');
+	} else {
+		console.log('提示：没有找到可用的网盘资源。');
+	}
+	return jsonify({
+		list: [ { title: '播放列表', tracks } ],
+	})
+}
+
+async function search(ext) {
+	ext = argsify(ext)
+	let text = encodeURIComponent(ext.text)
+	let page = ext.page || 1
+	let url = `${appConfig.site}/s/1---${page}/${text}`
+
+	const { data } = await $fetch.get(url, {
+	   headers: { "User-Agent": UA },
+	})
+
+	const $ = cheerio.load(data)
+	let cards = []
+	$('.v5d').each((index, element) => {
+		const name = $(element).find('b').text().trim() || 'N/A';
+		const imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || 'N/A';
+		const additionalInfo = $(element).find('p').text().trim() || 'N/A';
+		const pathMatch =  $(element).find('a').attr('href') || 'N/A'
+		cards.push({
+			vod_id: pathMatch,
+			vod_name: name,
+			vod_pic: imgUrl,
+			vod_remarks: additionalInfo,
+			ext: {
+				url: `${appConfig.site}/res/downurl${pathMatch}`,
+			},
+		})
+	});
+	return jsonify({ list: cards })
+}
+
+async function getPlayinfo(ext) {
+	ext = argsify(ext)
+	return jsonify({ urls: [ext.url] })
+}
+
