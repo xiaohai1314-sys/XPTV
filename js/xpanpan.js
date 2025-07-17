@@ -140,7 +140,8 @@ async function getTracks(ext) {
           let passCode = '';
 
           // 尝试从链接中提取提取码，并更新actualUrl
-          const passCodeMatch = actualUrl.match(/\s*提取码[:：]?\s*([a-zA-Z0-9]+)/);
+          // 后端已经处理了提取码的识别和附加，前端只需解析后端返回的格式
+          const passCodeMatch = actualUrl.match(/\s*\(提取码:\s*([a-zA-Z0-9]+)\)$/);
           if (passCodeMatch && passCodeMatch[1]) {
             passCode = passCodeMatch[1];
             actualUrl = actualUrl.replace(passCodeMatch[0], '').trim(); // 移除提取码部分
@@ -157,8 +158,10 @@ async function getTracks(ext) {
             panName = `115网盘 ${index + 1}`;
           } else if (actualUrl.includes('lanzou')) {
             panName = `蓝奏云 ${index + 1}`;
-          } else if (actualUrl.includes('weiyun')) {
-            panName = `微云 ${index + 1}`;
+          } else if (actualUrl.includes('xunlei')) { // 添加迅雷网盘识别
+            panName = `迅雷网盘 ${index + 1}`;
+          } else if (actualUrl.includes('uc.cn')) { // 添加UC网盘识别
+            panName = `UC网盘 ${index + 1}`;
           }
           
           // 重新组合显示名称，确保提取码在名称中显示
@@ -311,5 +314,6 @@ function getPanIcon(url) {
 }
 
 log('网盘资源社插件加载完成');
+
 
 
