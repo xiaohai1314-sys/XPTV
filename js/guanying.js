@@ -1,5 +1,6 @@
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
+const COOKIE = 'BT_auth=2c8fPECC1SI3ZwBxM4x5tAT_o_DUiRHAQnuN3L5H19o6c92YXWfgU7F2cx8v4Mjz4KNpjbmamhfMyg1tLQLR1LcJTD6ygN9NwAZWgSWIZ8EIU9fseUg0Xn-VThtIMdeXTi9wwE_hLjr_myCwNMoaJEwEekaCZVPr-x3MRqV91IbZxEUF9PPXRw;BT_cookietime=bb42AxkxuuufNMDq9B2C9EYsYRCSfb4vWkxzVNsexGTryT4vPnGs;browser_verified=b142dc23ed95f767248f452739a94198;'
 
 const appConfig = {
 	ver: 1,
@@ -39,7 +40,7 @@ async function getCards(ext) {
 	const url = `${appConfig.site}${id}${page}`
 	
 	const { data } = await $fetch.get(url, {
-		headers: { "User-Agent": UA },
+		headers: { "User-Agent": UA, "Cookie": COOKIE },
 	});
 	const $ = cheerio.load(data)
 	
@@ -89,7 +90,7 @@ async function getTracks(ext) {
 	let url = ext.url
 
 	const { data } = await $fetch.get(url, {
-		headers: { 'User-Agent': UA },
+		headers: { 'User-Agent': UA, "Cookie": COOKIE },
 	})
 	const respstr = JSON.parse(data)
 
@@ -129,7 +130,7 @@ async function search(ext) {
 	let url = `${appConfig.site}/s/1---${page}/${text}`
 
 	const { data } = await $fetch.get(url, {
-	   headers: { "User-Agent": UA },
+	   headers: { "User-Agent": UA, "Cookie": COOKIE },
 	})
 
 	const $ = cheerio.load(data)
@@ -142,7 +143,7 @@ async function search(ext) {
 		cards.push({
 			vod_id: pathMatch,
 			vod_name: name,
-			vod_pic: imgUrl,
+				vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
 			vod_remarks: additionalInfo,
 			ext: {
 				url: `${appConfig.site}/res/downurl${pathMatch}`,
@@ -156,4 +157,5 @@ async function getPlayinfo(ext) {
 	ext = argsify(ext)
 	return jsonify({ urls: [ext.url] })
 }
+
 
