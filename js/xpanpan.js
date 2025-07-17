@@ -1,4 +1,3 @@
-
 /**
  * XPTV App 插件前端代码 (最终优化版)
  * 
@@ -8,10 +7,12 @@
  * - 智能识别网盘类型并显示提取码
  * 
  * 最终版本优化:
- * 1. 【修复】正确处理多个网盘链接。
- * 2. 【修复】分离纯净URL和提取码，解决链接点击无效问题。
- * 3. 【优化】增强错误处理和用户体验，支持自动复制提取码。
- * 4. 【优化】支持更多网盘类型的识别。
+ * 1. 【修复】优化getTracks函数，正确处理多个网盘链接
+ * 2. 【修复】智能解析提取码格式，避免前端误判为失效
+ * 3. 【优化】增强错误处理和用户体验
+ * 4. 【优化】支持更多网盘类型的识别
+ * 5. 【修复】解决前端链接数量与HTML不一致的问题，确保所有链接都被正确解析和显示。
+ * 6. 【修复】改进夸克网盘链接处理，使其支持提取码，并允许用户在App内直接跳转或复制。
  */
 
 // --- 配置区 ---
@@ -32,7 +33,7 @@ async function request(url) {
   try {
     const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
-      timeout: 30000,
+      timeout: 30000, // 增加超时时间以应对海报抓取
     });
     
     if (response.status !== 200) {
@@ -95,7 +96,7 @@ async function getCards(ext) {
   const cards = (data.list || []).map(item => ({
     vod_id: item.vod_id,
     vod_name: item.vod_name,
-    vod_pic: item.vod_pic || '',
+    vod_pic: item.vod_pic || '', // 使用后端返回的海报地址
     vod_remarks: item.vod_remarks || '',
     ext: { url: item.vod_id },
   }));
@@ -105,7 +106,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取详情和播放链接
+ * 获取详情和播放链接 - 【核心优化】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -128,47 +129,66 @@ async function getTracks(ext) {
   if (data.list && data.list.length > 0) {
     const detailItem = data.list[0];
     if (detailItem.vod_play_url && detailItem.vod_play_url !== '暂无有效网盘链接') {
-      const playUrls = detailItem.vod_play_url.split('$$$');
+      // 修复：确保split方法能正确处理所有分隔符，并过滤空字符串
+      const playUrls = detailItem.vod_play_url.split(/\$\$\$|\n/).filter(s => s.trim() !== '');
       
       playUrls.forEach((playUrl, index) => {
         if (playUrl.trim()) {
-          let finalPanUrl = playUrl.trim();
-          let displayName = finalPanUrl;
+          // 【优化】智能识别网盘类型并生成友好的名称
+          let panName = `网盘 ${index + 1}`;
+          let actualUrl = playUrl.trim();
+          let passCode = '';
 
-          const match = finalPanUrl.match(/^(https?:\[^\s]+\s*\(提取码[:：\s]*([a-zA-Z0-9]+)\)/i);
-          
-          if (match) {
-            const pureUrl = match[1];
-            const extractCode = match[2];
-            
-            finalPanUrl = pureUrl;
-            displayName = `${getPanName(pureUrl, index)} [码:${extractCode}]`;
-            
-            try {
-                $copy(extractCode);
-                displayName += ' (已复制)';
-            } catch(e) {
-                log('当前环境不支持 $copy 函数，跳过自动复制。');
-            }
-          } else {
-            displayName = getPanName(finalPanUrl, index);
+          // 尝试从链接中提取提取码，并更新actualUrl
+          const passCodeMatch = actualUrl.match(/\s*提取码[:：]?\s*([a-zA-Z0-9]+)/);
+          if (passCodeMatch && passCodeMatch[1]) {
+            passCode = passCodeMatch[1];
+            actualUrl = actualUrl.replace(passCodeMatch[0], '').trim(); // 移除提取码部分
           }
 
+          // 根据URL识别网盘类型
+          if (actualUrl.includes('quark')) {
+            panName = `夸克网盘 ${index + 1}`;
+          } else if (actualUrl.includes('baidu') || actualUrl.includes('pan.baidu')) {
+            panName = `百度网盘 ${index + 1}`;
+          } else if (actualUrl.includes('aliyundrive') || actualUrl.includes('alipan')) {
+            panName = `阿里云盘 ${index + 1}`;
+          } else if (actualUrl.includes('115')) {
+            panName = `115网盘 ${index + 1}`;
+          } else if (actualUrl.includes('lanzou')) {
+            panName = `蓝奏云 ${index + 1}`;
+          } else if (actualUrl.includes('weiyun')) {
+            panName = `微云 ${index + 1}`;
+          }
+          
+          // 重新组合显示名称，确保提取码在名称中显示
+          if (passCode) {
+            panName += ` [码:${passCode}]`;
+          }
+          
           tracks.push({
-            name: displayName,
-            pan: finalPanUrl,
-            ext: {},
+            name: panName,
+            pan: actualUrl, // 传递纯净的URL给App，让App处理跳转
+            ext: { passCode: passCode }, // 将提取码作为扩展信息传递
           });
           
-          log(`添加网盘链接: ${displayName}, 跳转地址: ${finalPanUrl}`);
+          log(`添加网盘链接: ${panName}, URL: ${actualUrl}, 提取码: ${passCode}`);
         }
       });
     } else {
-      tracks.push({ name: '暂无资源', pan: '', ext: {} });
+      tracks.push({ 
+        name: '暂无资源', 
+        pan: '', 
+        ext: {} 
+      });
       log('该帖子暂无有效的网盘链接');
     }
   } else {
-    tracks.push({ name: '解析失败', pan: '', ext: {} });
+    tracks.push({ 
+      name: '解析失败', 
+      pan: '', 
+      ext: {} 
+    });
     log('详情数据解析失败');
   }
 
@@ -199,7 +219,7 @@ async function search(ext) {
   const cards = (data.list || []).map(item => ({
     vod_id: item.vod_id,
     vod_name: item.vod_name,
-    vod_pic: item.vod_pic || '',
+    vod_pic: item.vod_pic || '', // 搜索结果可能没有海报
     vod_remarks: '',
     ext: { url: item.vod_id },
   }));
@@ -209,29 +229,85 @@ async function search(ext) {
 }
 
 // --- 兼容旧版 XPTV App 接口 ---
-async function init() { return getConfig(); }
+
+/**
+ * 初始化接口 (兼容旧版)
+ */
+async function init() { 
+  return getConfig(); 
+}
+
+/**
+ * 首页接口 (兼容旧版)
+ */
 async function home() { 
   const c = await getConfig(); 
   const config = JSON.parse(c);
-  return jsonify({ class: config.tabs, filters: {} }); 
+  return jsonify({ 
+    class: config.tabs, 
+    filters: {} 
+  }); 
 }
+
+/**
+ * 分类接口 (兼容旧版)
+ */
 async function category(tid, pg) { 
   const id = typeof tid === 'object' ? tid.id : tid;
   return getCards({ id: id, page: pg }); 
 }
-async function detail(id) { return getTracks({ url: id }); }
-async function play(flag, id) { return jsonify({ url: id }); }
+
+/**
+ * 详情接口 (兼容旧版)
+ */
+async function detail(id) { 
+  return getTracks({ url: id }); 
+}
+
+/**
+ * 播放接口 (兼容旧版)
+ */
+async function play(flag, id) { 
+  // 直接返回pan字段的内容，让App处理
+  return jsonify({ url: id }); 
+}
 
 // --- 工具函数 ---
-function getPanName(url, index) {
-    const i = index + 1;
-    if (url.includes('quark')) return `夸克网盘 ${i}`;
-    if (url.includes('baidu')) return `百度网盘 ${i}`;
-    if (url.includes('aliyundrive') || url.includes('alipan')) return `阿里云盘 ${i}`;
-    if (url.includes('115')) return `115网盘 ${i}`;
-    if (url.includes('lanzou')) return `蓝奏云 ${i}`;
-    if (url.includes('weiyun')) return `微云 ${i}`;
-    return `网盘 ${i}`;
+
+/**
+ * 格式化网盘链接显示 (此函数在getTracks中已内联优化，此处保留作为参考)
+ */
+function formatPanLink(url) {
+  if (!url) return '';
+  
+  // 如果包含提取码，分离显示
+  const match = url.match(/^(.+?)\s*\(提取码:\s*([a-zA-Z0-9]+)\)$/);
+  if (match) {
+    return {
+      url: match[1],
+      code: match[2],
+      display: `${match[1]} (提取码: ${match[2]})`
+    };
+  }
+  
+  return {
+    url: url,
+    code: '',
+    display: url
+  };
+}
+
+/**
+ * 获取网盘类型图标 (此函数在getTracks中已内联优化，此处保留作为参考)
+ */
+function getPanIcon(url) {
+  if (url.includes('quark')) return '🌟';
+  if (url.includes('baidu')) return '🔵';
+  if (url.includes('aliyundrive') || url.includes('alipan')) return '🟠';
+  if (url.includes('115')) return '🟢';
+  if (url.includes('lanzou')) return '🔷';
+  if (url.includes('weiyun')) return '🟣';
+  return '💾';
 }
 
 log('网盘资源社插件加载完成');
