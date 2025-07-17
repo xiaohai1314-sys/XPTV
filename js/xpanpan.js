@@ -8,7 +8,7 @@
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://localhost:3000/api'; // 请替换为你的后端服务地址
+const API_BASE_URL = 'http://192.168.1.6:3000/api'; // 请替换为你的后端服务地址
 // --- 配置区 ---
 
 // XPTV App 环境函数
