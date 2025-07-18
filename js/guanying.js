@@ -1,198 +1,222 @@
 /**
- * =======================================================================
- * ==                                                                   ==
- * ==                   观影网 - 前端脚本 (局域网版) - 优化版               ==
- * ==                                                                   ==
- * 功能:
- * - 与局域网内的后端API交互，获取观影网的内容
- * - 支持分类浏览、搜索、详情查看
- * - 完全兼容现有手机App环境
+ * XPTV App 插件前端代码 (v8 - 钻取式两级筛选版)
  *
- * ===================== 修正日志 (由 Manus AI 完成) =====================
- * 1. [优化] 增加了更详细的日志输出，方便调试前端数据处理过程。
- * 2. [优化] 确保数据字段的兼容性，防止因字段缺失导致前端渲染失败。
- * 3. [修复] 修复了 getTracks 中可能存在的 pan 字段为空导致的问题。
- * =======================================================================
+ * 功能:
+ * - 完美适配 gying-backend v8 后端。
+ * - 实现了详情页内"钻取式"的两级筛选功能。
+ * - 筛选关键字和大小写处理均已按最终要求配置。
  */
 
 // --- 配置区 ---
-// 请将此地址替换为您电脑上运行的后端服务地址
-// 例如：如果您的电脑IP是 192.168.1.100，则设置为 'http://192.168.1.100:3001/api'
-const API_BASE_URL = 'http://192.168.1.6:3001/api'; 
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 请务必替换为你的后端服务实际地址
+const PAN_TYPE_MAP = {0: '百度', 1: '迅雷', 2: '夸克', 3: '阿里', 4: '天翼', 5: '115', 6: 'UC'};
+const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
 // --- 配置区 ---
 
-const appConfig = {
-	ver: 1,
-	title: '观影网',
-	site: API_BASE_URL,
-	tabs: [
-		{ name: '电影', ext: { id: 'mv?page=' } },
-		{ name: '剧集', ext: { id: 'tv?page=' } },
-		{ name: '动漫', ext: { id: 'ac?page=' } }
-	],
+// XPTV App 环境函数
+function log(msg) {
+  console.log(`[Gying] ${msg}`);
 }
 
+async function request(url) {
+  try {
+    const response = await fetch(url);
+    return await response.json();
+  } catch (error) {
+    log(`请求失败: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+function jsonify(obj) {
+  return JSON.stringify(obj);
+}
+
+function argsify(str) {
+  if (typeof str === 'object') return str;
+  try {
+    return JSON.parse(str);
+  } catch {
+    return {};
+  }
+}
+
+// --- 缓存区 ---
+let fullResourceCache = []; // 用于缓存详情页的全部资源
+let currentPanTypeFilter = 'all'; // 当前网盘类型筛选
+let currentKeywordFilter = 'all'; // 当前关键字筛选
+
+// --- XPTV App 插件入口函数 ---
+
 async function getConfig() {
-	console.log('getConfig called');
-	return jsonify(appConfig);
+  log(`插件初始化，后端API地址: ${API_BASE_URL}`);
+  return jsonify({
+    ver: 1,
+    title: 'Gying',
+    site: API_BASE_URL,
+    tabs: [
+      { name: '剧集', ext: { id: 'tv' } },
+      { name: '电影', ext: { id: 'mv' } },
+      { name: '动漫', ext: { id: 'ac' } },
+    ],
+  });
 }
 
 async function getCards(ext) {
-	console.log('getCards called with ext:', ext);
-	ext = argsify(ext);
-	let { page = 1, id } = ext;
-	
-	if (!id) {
-		console.log('getCards: Missing id parameter');
-		return jsonify({ list: [] });
-	}
+  ext = argsify(ext);
+  const { id, page = 1 } = ext;
+  if (!id) return jsonify({ list: [] });
 
-	try {
-		const url = `${API_BASE_URL}/vod?type_id=${encodeURIComponent(id)}&page=${page}`;
-		console.log('getCards: Requesting URL:', url);
-		const { data } = await $fetch.get(url, {
-			headers: { 'Accept': 'application/json' },
-			timeout: 30000,
-		});
-		
-		const result = JSON.parse(data);
-		console.log('getCards: Backend raw response:', result);
-		
-		if (result.error) {
-			console.log(`getCards: Backend error: ${result.error}`);
-			return jsonify({ list: [] });
-		}
-		
-		const cards = (result.list || []).map(item => ({
-			vod_id: item.vod_id || '',
-			vod_name: item.vod_name || 'N/A',
-			vod_pic: item.vod_pic || '',
-			vod_remarks: item.vod_remarks || '',
-			ext: { url: item.vod_id || '' }, // 确保 ext.url 是完整的 vod_id
-		}));
-		
-		console.log('getCards: Processed cards:', cards);
-		return jsonify({ list: cards });
-		
-	} catch (error) {
-		console.log(`getCards: Failed to fetch category data: ${error.message}`);
-		return jsonify({ list: [] });
-	}
-}
+  log(`获取分类数据: id=${id}, page=${page}`);
+  const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
+  const data = await request(url);
 
-async function getTracks(ext) {
-	console.log('getTracks called with ext:', ext);
-	ext = argsify(ext);
-	let { url } = ext; // url 现在是完整的 vod_id, e.g., "tv/X93Y"
-	
-	if (!url) {
-		console.log('getTracks: Missing URL parameter');
-		return jsonify({ list: [] });
-	}
-	
-	// [已修复] 不再需要清理ID，直接使用完整的url作为id传给后端
-	console.log(`getTracks: Requesting detail for ID: ${url}`);
+  if (data.error) {
+    return jsonify({ list: [], total: 0 });
+  }
 
-	try {
-		const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
-		console.log('getTracks: Requesting detail URL:', detailUrl);
-		const { data } = await $fetch.get(detailUrl, {
-			headers: { 'Accept': 'application/json' },
-			timeout: 30000,
-		});
-		
-		const result = JSON.parse(data);
-		console.log('getTracks: Backend raw detail response:', result);
-		
-		if (result.error || !result.list || result.list.length === 0) {
-			console.log(`getTracks: Failed to get detail data: ${result.error || 'No valid list'}`);
-			return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '获取资源失败', pan: '', ext: {} }] }] });
-		}
-		
-		const detailItem = result.list[0];
-		const playFrom = detailItem.vod_play_from ? detailItem.vod_play_from.split('$$$') : [];
-		const playUrlGroups = detailItem.vod_play_url ? detailItem.vod_play_url.split('$$$') : [];
-		
-		const trackGroups = [];
-
-		playFrom.forEach((from, i) => {
-			const tracks = [];
-			const urlGroup = playUrlGroups[i];
-			if (urlGroup) {
-				urlGroup.split('#').forEach(playUrl => {
-					if (playUrl.trim()) {
-						const urlParts = playUrl.split('$');
-						const panName = urlParts[0] || '未知资源';
-						const cleanUrl = urlParts[1] || '';
-						tracks.push({ name: panName, pan: cleanUrl, ext: {} });
-					}
-				});
-			}
-			if (tracks.length > 0) {
-				trackGroups.push({ title: from, tracks: tracks });
-			}
-		});
-		
-		console.log('getTracks: Processed track groups:', trackGroups);
-		if (trackGroups.length === 0) {
-			return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '暂无有效资源链接', pan: '', ext: {} }] }] });
-		}
-		
-		return jsonify({ list: trackGroups });
-		
-	} catch (error) {
-		console.log(`getTracks: Failed to get detail: ${error.message}`);
-		return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '网络请求失败', pan: '', ext: {} }] }] });
-	}
+  log(`成功获取 ${data.list.length} 条数据`);
+  return jsonify(data);
 }
 
 async function search(ext) {
-	console.log('search called with ext:', ext);
-	ext = argsify(ext);
-	let text = ext.text || '';
-	
-	if (!text) {
-		console.log('search: Missing keyword');
-		return jsonify({ list: [] });
-	}
-	
-	try {
-		const url = `${API_BASE_URL}/search?keyword=${encodeURIComponent(text)}`;
-		console.log('search: Requesting URL:', url);
-		const { data } = await $fetch.get(url, {
-			headers: { 'Accept': 'application/json' },
-			timeout: 30000,
-		});
-		
-		const result = JSON.parse(data);
-		console.log('search: Backend raw response:', result);
-		
-		if (result.error) {
-			console.log(`search: Backend error: ${result.error}`);
-			return jsonify({ list: [] });
-		}
-		
-		const cards = (result.list || []).map(item => ({
-			vod_id: item.vod_id || '',
-			vod_name: item.vod_name || 'N/A',
-			vod_pic: item.vod_pic || '',
-			vod_remarks: item.vod_remarks || '',
-			ext: { url: item.vod_id || '' }, // 确保 ext.url 是完整的 vod_id
-		}));
-		
-		console.log('search: Processed cards:', cards);
-		return jsonify({ list: cards });
-		
-	} catch (error) {
-		console.log(`search: Failed to search: ${error.message}`);
-		return jsonify({ list: [] });
-	}
+  ext = argsify(ext);
+  const { text } = ext;
+  if (!text) return jsonify({ list: [] });
+
+  log(`搜索: ${text}`);
+  const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`;
+  const data = await request(url);
+
+  if (data.error) {
+    return jsonify({ list: [] });
+  }
+
+  log(`搜索到 ${data.list.length} 条结果`);
+  return jsonify(data);
 }
 
-async function getPlayinfo(ext) {
-	console.log('getPlayinfo called with ext:', ext);
-	ext = argsify(ext);
-	return jsonify({ urls: [ext.url] });
+/**
+ * 获取详情 - 【v8核心】实现钻取式两级筛选
+ */
+async function getTracks(ext) {
+  ext = argsify(ext);
+  const { url, pan_type, keyword, action } = ext;
+
+  // 步骤1: 数据获取与缓存
+  if (action === 'init' || fullResourceCache.length === 0) {
+    log(`首次加载或强制刷新: url=${url}`);
+    const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
+    const data = await request(detailUrl);
+    
+    if (data.error || !data.list || data.list.length === 0) {
+      return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+    }
+    
+    const playUrlString = data.list[0].vod_play_url;
+    if (!playUrlString || playUrlString === '暂无任何网盘资源') {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
+    }
+
+    // 解析后端数据并存入缓存
+    fullResourceCache = playUrlString.split('$$$').map(item => {
+        const parts = item.split('$');
+        return { type: parts[0], title: parts[1], link: parts[2] };
+    });
+    currentPanTypeFilter = 'all';
+    currentKeywordFilter = 'all';
+  }
+
+  // 步骤2: 处理用户操作，更新筛选状态
+  if (action === 'filter') {
+    if (pan_type) currentPanTypeFilter = pan_type;
+    if (keyword) currentKeywordFilter = keyword;
+  }
+
+  // 步骤3: 根据当前筛选状态，生成UI数据
+  let resourcesToShow = [...fullResourceCache];
+
+  // 应用第一级：网盘类型筛选
+  if (currentPanTypeFilter !== 'all') {
+    resourcesToShow = resourcesToShow.filter(r => r.type === currentPanTypeFilter);
+  }
+
+  // 应用第二级：关键字筛选
+  if (currentKeywordFilter !== 'all') {
+    const lowerKeyword = currentKeywordFilter.toLowerCase();
+    if (lowerKeyword === '其他') {
+        resourcesToShow = resourcesToShow.filter(r => {
+            const lowerTitle = r.title.toLowerCase();
+            // 检查是否不包含任何其他预设关键字
+            return KEYWORD_FILTERS.slice(0, -1).every(kw => !lowerTitle.includes(kw.toLowerCase()));
+        });
+    } else {
+        resourcesToShow = resourcesToShow.filter(r => r.title.toLowerCase().includes(lowerKeyword));
+    }
+  }
+
+  // 步骤4: 构建要渲染的按钮列表
+  const resultLists = [];
+  
+  // 构建第一层：网盘分类按钮
+  const panTypeCounts = fullResourceCache.reduce((acc, r) => {
+      acc[r.type] = (acc[r.type] || 0) + 1;
+      return acc;
+  }, {});
+  const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all` }];
+  Object.keys(panTypeCounts).forEach(typeCode => {
+      const typeName = PAN_TYPE_MAP[typeCode] || `类型${typeCode}`;
+      panTypeButtons.push({ name: `${typeName} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}` });
+  });
+  resultLists.push({ title: '网盘分类', tracks: panTypeButtons });
+
+  // 构建第二层：关键字筛选按钮
+  const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all` }];
+  KEYWORD_FILTERS.forEach(kw => {
+      keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}` });
+  });
+  resultLists.push({ title: '关键字筛选', tracks: keywordButtons });
+
+  // 构建第三层：资源列表
+  if (resourcesToShow.length > 0) {
+      const resourceTracks = resourcesToShow.map(r => ({
+          name: `[${PAN_TYPE_MAP[r.type] || '未知'}] ${r.title}`,
+          pan: r.link
+      }));
+      resultLists.push({ title: '资源列表', tracks: resourceTracks });
+  } else {
+      resultLists.push({ title: '资源列表', tracks: [{ name: '在当前筛选条件下无结果', pan: '' }] });
+  }
+
+  log(`UI刷新: 网盘类型='${currentPanTypeFilter}', 关键字='${currentKeywordFilter}', 显示${resourcesToShow.length}条`);
+  return jsonify({ list: resultLists });
 }
 
+// --- 兼容旧版 XPTV App 接口 ---
+async function init() { return getConfig(); }
+async function home() { 
+  const c = await getConfig(); 
+  const config = JSON.parse(c);
+  return jsonify({ class: config.tabs, filters: {} }); 
+}
+async function category(tid, pg) { 
+  const id = typeof tid === 'object' ? tid.id : tid;
+  return getCards({ id: id, page: pg }); 
+}
+// 关键：重写detail的调用方式，首次加载时带上action=init
+async function detail(id) { 
+    fullResourceCache = []; // 清空上一部影片的缓存
+    return getTracks({ url: id, action: 'init' }); 
+}
+// 关键：重写play的调用方式，用于处理自定义的筛选指令
+async function play(flag, id) {
+    if (id.startsWith('custom:')) {
+        // 这是我们的自定义筛选指令，重新调用getTracks进行刷新
+        const params = new URLSearchParams(id.replace('custom:', ''));
+        const ext = Object.fromEntries(params.entries());
+        return getTracks(ext);
+    }
+    // 否则是普通链接，正常播放
+    return jsonify({ url: id });
+}
 
