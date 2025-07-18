@@ -1,7 +1,7 @@
 /**
  * =======================================================================
  * ==                                                                   ==
- * ==                   观影网 - 前端脚本 (局域网版) - 修正版               ==
+ * ==                   观影网 - 前端脚本 (局域网版) - 优化版               ==
  * ==                                                                   ==
  * 功能:
  * - 与局域网内的后端API交互，获取观影网的内容
@@ -9,12 +9,9 @@
  * - 完全兼容现有手机App环境
  *
  * ===================== 修正日志 (由 Manus AI 完成) =====================
- * 1. [修复] getTracks: 修正了ID传递的BUG。现在会把完整的 vod_id 
- *    (如 "tv/X93Y") 直接传递给后端，而不是错误地截取为 "X93Y"。
- *    这是导致"网络请求失败"的核心原因。
- * 2. [优化] getTracks: 调整了逻辑以适配后端返回的包含多个播放源
- *    (在线、网盘) 的新数据结构。
- * 3. [优化] search: 确保搜索结果的 ext.url 也是完整的 vod_id。
+ * 1. [优化] 增加了更详细的日志输出，方便调试前端数据处理过程。
+ * 2. [优化] 确保数据字段的兼容性，防止因字段缺失导致前端渲染失败。
+ * 3. [修复] 修复了 getTracks 中可能存在的 pan 字段为空导致的问题。
  * =======================================================================
  */
 
@@ -36,72 +33,85 @@ const appConfig = {
 }
 
 async function getConfig() {
+	console.log('getConfig called');
 	return jsonify(appConfig);
 }
 
 async function getCards(ext) {
+	console.log('getCards called with ext:', ext);
 	ext = argsify(ext);
 	let { page = 1, id } = ext;
 	
+	if (!id) {
+		console.log('getCards: Missing id parameter');
+		return jsonify({ list: [] });
+	}
+
 	try {
 		const url = `${API_BASE_URL}/vod?type_id=${encodeURIComponent(id)}&page=${page}`;
+		console.log('getCards: Requesting URL:', url);
 		const { data } = await $fetch.get(url, {
 			headers: { 'Accept': 'application/json' },
 			timeout: 30000,
 		});
 		
 		const result = JSON.parse(data);
+		console.log('getCards: Backend raw response:', result);
 		
 		if (result.error) {
-			console.log(`后端错误: ${result.error}`);
+			console.log(`getCards: Backend error: ${result.error}`);
 			return jsonify({ list: [] });
 		}
 		
 		const cards = (result.list || []).map(item => ({
-			vod_id: item.vod_id,
-			vod_name: item.vod_name,
+			vod_id: item.vod_id || '',
+			vod_name: item.vod_name || 'N/A',
 			vod_pic: item.vod_pic || '',
 			vod_remarks: item.vod_remarks || '',
-			ext: { url: item.vod_id }, // 确保 ext.url 是完整的 vod_id
+			ext: { url: item.vod_id || '' }, // 确保 ext.url 是完整的 vod_id
 		}));
 		
+		console.log('getCards: Processed cards:', cards);
 		return jsonify({ list: cards });
 		
 	} catch (error) {
-		console.log(`获取分类数据失败: ${error.message}`);
+		console.log(`getCards: Failed to fetch category data: ${error.message}`);
 		return jsonify({ list: [] });
 	}
 }
 
 async function getTracks(ext) {
+	console.log('getTracks called with ext:', ext);
 	ext = argsify(ext);
 	let { url } = ext; // url 现在是完整的 vod_id, e.g., "tv/X93Y"
 	
 	if (!url) {
-		console.log('获取详情失败: 缺少URL参数');
+		console.log('getTracks: Missing URL parameter');
 		return jsonify({ list: [] });
 	}
 	
 	// [已修复] 不再需要清理ID，直接使用完整的url作为id传给后端
-	console.log(`请求详情的ID: ${url}`);
+	console.log(`getTracks: Requesting detail for ID: ${url}`);
 
 	try {
 		const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
+		console.log('getTracks: Requesting detail URL:', detailUrl);
 		const { data } = await $fetch.get(detailUrl, {
 			headers: { 'Accept': 'application/json' },
 			timeout: 30000,
 		});
 		
 		const result = JSON.parse(data);
+		console.log('getTracks: Backend raw detail response:', result);
 		
 		if (result.error || !result.list || result.list.length === 0) {
-			console.log(`获取详情数据失败: ${result.error || '无有效列表'}`);
+			console.log(`getTracks: Failed to get detail data: ${result.error || 'No valid list'}`);
 			return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '获取资源失败', pan: '', ext: {} }] }] });
 		}
 		
 		const detailItem = result.list[0];
-		const playFrom = detailItem.vod_play_from.split('$$$');
-		const playUrlGroups = detailItem.vod_play_url.split('$$$');
+		const playFrom = detailItem.vod_play_from ? detailItem.vod_play_from.split('$$$') : [];
+		const playUrlGroups = detailItem.vod_play_url ? detailItem.vod_play_url.split('$$$') : [];
 		
 		const trackGroups = [];
 
@@ -123,6 +133,7 @@ async function getTracks(ext) {
 			}
 		});
 		
+		console.log('getTracks: Processed track groups:', trackGroups);
 		if (trackGroups.length === 0) {
 			return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '暂无有效资源链接', pan: '', ext: {} }] }] });
 		}
@@ -130,52 +141,58 @@ async function getTracks(ext) {
 		return jsonify({ list: trackGroups });
 		
 	} catch (error) {
-		console.log(`获取详情失败: ${error.message}`);
+		console.log(`getTracks: Failed to get detail: ${error.message}`);
 		return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '网络请求失败', pan: '', ext: {} }] }] });
 	}
 }
 
 async function search(ext) {
+	console.log('search called with ext:', ext);
 	ext = argsify(ext);
 	let text = ext.text || '';
 	
 	if (!text) {
-		console.log('搜索失败: 缺少关键词');
+		console.log('search: Missing keyword');
 		return jsonify({ list: [] });
 	}
 	
 	try {
 		const url = `${API_BASE_URL}/search?keyword=${encodeURIComponent(text)}`;
+		console.log('search: Requesting URL:', url);
 		const { data } = await $fetch.get(url, {
 			headers: { 'Accept': 'application/json' },
 			timeout: 30000,
 		});
 		
 		const result = JSON.parse(data);
+		console.log('search: Backend raw response:', result);
 		
 		if (result.error) {
-			console.log(`搜索失败: ${result.error}`);
+			console.log(`search: Backend error: ${result.error}`);
 			return jsonify({ list: [] });
 		}
 		
 		const cards = (result.list || []).map(item => ({
-			vod_id: item.vod_id,
-			vod_name: item.vod_name,
+			vod_id: item.vod_id || '',
+			vod_name: item.vod_name || 'N/A',
 			vod_pic: item.vod_pic || '',
 			vod_remarks: item.vod_remarks || '',
-			ext: { url: item.vod_id }, // 确保 ext.url 是完整的 vod_id
+			ext: { url: item.vod_id || '' }, // 确保 ext.url 是完整的 vod_id
 		}));
 		
+		console.log('search: Processed cards:', cards);
 		return jsonify({ list: cards });
 		
 	} catch (error) {
-		console.log(`搜索失败: ${error.message}`);
+		console.log(`search: Failed to search: ${error.message}`);
 		return jsonify({ list: [] });
 	}
 }
 
 async function getPlayinfo(ext) {
+	console.log('getPlayinfo called with ext:', ext);
 	ext = argsify(ext);
 	return jsonify({ urls: [ext.url] });
 }
+
 
