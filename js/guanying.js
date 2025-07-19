@@ -8,7 +8,7 @@
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://localhost:3001/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 请务必替换为你的后端服务实际地址
 const PAN_TYPE_MAP = {0: '百度', 1: '迅雷', 2: '夸克', 3: '阿里', 4: '天翼', 5: '115', 6: 'UC'};
 const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
 // --- 配置区 ---
