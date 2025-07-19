@@ -8,7 +8,7 @@
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://localhost:3001/api'; // 请务必替换为你的后端服务实际地址
 const PAN_TYPE_MAP = {0: '百度', 1: '迅雷', 2: '夸克', 3: '阿里', 4: '天翼', 5: '115', 6: 'UC'};
 const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
 // --- 配置区 ---
@@ -20,16 +20,8 @@ function log(msg) {
 
 async function request(url) {
   try {
-    // 增强日志：记录请求URL
-    log(`发送请求: ${url}`);
-    
     const response = await fetch(url);
-    const data = await response.json();
-    
-    // 增强日志：记录响应关键信息
-    log(`收到响应: status=${response.status}, keys=${Object.keys(data).join(', ')}, list_count=${data.list?.length || 0}`);
-    
-    return data;
+    return await response.json();
   } catch (error) {
     log(`请求失败: ${error.message}`);
     return { error: error.message };
@@ -227,3 +219,4 @@ async function play(flag, id) {
     // 否则是普通链接，正常播放
     return jsonify({ url: id });
 }
+
