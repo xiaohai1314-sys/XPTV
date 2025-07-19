@@ -1,36 +1,35 @@
 /**
- * XPTV App 插件前端代码 (v8.1 - 健壮性修复版)
+ * XPTV App 插件前端代码 (v8 - 钻取式两级筛选版)
  *
- * --- 版本说明 ---
- * - 基于 v8 版本，集成了由用户发现并提出的关键性修复。
- * - [核心修复] 重写了 `category` 函数，增加了对传入参数 `tid` 的健壮性检查。
- * - [功能增强] 当 `category` 函数接收到无效的 `tid` (如 undefined, null, 空值) 时，
- *   不再导致请求失败，而是会自动回退到默认分类 'tv'，并打印警告日志，
- *   从根本上解决了"有分类无内容"的问题。
- * - 其他功能 (如详情页筛选、搜索等) 保持不变。
+ * 功能:
+ * - 完美适配 gying-backend v8 后端。
+ * - 实现了详情页内"钻取式"的两级筛选功能。
+ * - 筛选关键字和大小写处理均已按最终要求配置。
  */
 
 // --- 配置区 ---
-// !!! 重要：请务必将这里的 IP 地址替换为您后端服务所在的电脑的局域网IP !!!
-const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 示例IP，请务必修改
-
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 请务必替换为你的后端服务实际地址
 const PAN_TYPE_MAP = {0: '百度', 1: '迅雷', 2: '夸克', 3: '阿里', 4: '天翼', 5: '115', 6: 'UC'};
 const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
 // --- 配置区 ---
 
-// --- XPTV App 环境函数 (保持不变) ---
+// XPTV App 环境函数
 function log(msg) {
   console.log(`[Gying] ${msg}`);
 }
 
 async function request(url) {
   try {
+    // 增强日志：记录请求URL
+    log(`发送请求: ${url}`);
+    
     const response = await fetch(url);
-    if (!response.ok) {
-        log(`网络错误: HTTP ${response.status} - ${response.statusText}`);
-        return { error: `HTTP ${response.status}` };
-    }
-    return await response.json();
+    const data = await response.json();
+    
+    // 增强日志：记录响应关键信息
+    log(`收到响应: status=${response.status}, keys=${Object.keys(data).join(', ')}, list_count=${data.list?.length || 0}`);
+    
+    return data;
   } catch (error) {
     log(`请求失败: ${error.message}`);
     return { error: error.message };
@@ -50,7 +49,7 @@ function argsify(str) {
   }
 }
 
-// --- 缓存区 (保持不变) ---
+// --- 缓存区 ---
 let fullResourceCache = []; // 用于缓存详情页的全部资源
 let currentPanTypeFilter = 'all'; // 当前网盘类型筛选
 let currentKeywordFilter = 'all'; // 当前关键字筛选
@@ -74,18 +73,13 @@ async function getConfig() {
 async function getCards(ext) {
   ext = argsify(ext);
   const { id, page = 1 } = ext;
-  if (!id) {
-      log("错误: getCards 调用时 id 为空，已中止。");
-      return jsonify({ list: [], total: 0 });
-  }
+  if (!id) return jsonify({ list: [] });
 
   log(`获取分类数据: id=${id}, page=${page}`);
   const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
-  log(`即将请求的URL: ${url}`);
   const data = await request(url);
 
-  if (data.error || !data.list) {
-    log(`获取分类数据失败或返回数据格式不正确。错误信息: ${data.error || '无'}`);
+  if (data.error) {
     return jsonify({ list: [], total: 0 });
   }
 
@@ -102,19 +96,22 @@ async function search(ext) {
   const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`;
   const data = await request(url);
 
-  if (data.error || !data.list) {
-    log(`搜索失败或返回数据格式不正确。错误信息: ${data.error || '无'}`);
-    return jsonify({ list: [], total: 0 });
+  if (data.error) {
+    return jsonify({ list: [] });
   }
 
   log(`搜索到 ${data.list.length} 条结果`);
   return jsonify(data);
 }
 
+/**
+ * 获取详情 - 【v8核心】实现钻取式两级筛选
+ */
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url, pan_type, keyword, action } = ext;
 
+  // 步骤1: 数据获取与缓存
   if (action === 'init' || fullResourceCache.length === 0) {
     log(`首次加载或强制刷新: url=${url}`);
     const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
@@ -129,6 +126,7 @@ async function getTracks(ext) {
         return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
     }
 
+    // 解析后端数据并存入缓存
     fullResourceCache = playUrlString.split('$$$').map(item => {
         const parts = item.split('$');
         return { type: parts[0], title: parts[1], link: parts[2] };
@@ -137,22 +135,27 @@ async function getTracks(ext) {
     currentKeywordFilter = 'all';
   }
 
+  // 步骤2: 处理用户操作，更新筛选状态
   if (action === 'filter') {
     if (pan_type) currentPanTypeFilter = pan_type;
     if (keyword) currentKeywordFilter = keyword;
   }
 
+  // 步骤3: 根据当前筛选状态，生成UI数据
   let resourcesToShow = [...fullResourceCache];
 
+  // 应用第一级：网盘类型筛选
   if (currentPanTypeFilter !== 'all') {
     resourcesToShow = resourcesToShow.filter(r => r.type === currentPanTypeFilter);
   }
 
+  // 应用第二级：关键字筛选
   if (currentKeywordFilter !== 'all') {
     const lowerKeyword = currentKeywordFilter.toLowerCase();
     if (lowerKeyword === '其他') {
         resourcesToShow = resourcesToShow.filter(r => {
             const lowerTitle = r.title.toLowerCase();
+            // 检查是否不包含任何其他预设关键字
             return KEYWORD_FILTERS.slice(0, -1).every(kw => !lowerTitle.includes(kw.toLowerCase()));
         });
     } else {
@@ -160,8 +163,10 @@ async function getTracks(ext) {
     }
   }
 
+  // 步骤4: 构建要渲染的按钮列表
   const resultLists = [];
   
+  // 构建第一层：网盘分类按钮
   const panTypeCounts = fullResourceCache.reduce((acc, r) => {
       acc[r.type] = (acc[r.type] || 0) + 1;
       return acc;
@@ -173,12 +178,14 @@ async function getTracks(ext) {
   });
   resultLists.push({ title: '网盘分类', tracks: panTypeButtons });
 
+  // 构建第二层：关键字筛选按钮
   const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all` }];
   KEYWORD_FILTERS.forEach(kw => {
       keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}` });
   });
   resultLists.push({ title: '关键字筛选', tracks: keywordButtons });
 
+  // 构建第三层：资源列表
   if (resourcesToShow.length > 0) {
       const resourceTracks = resourcesToShow.map(r => ({
           name: `[${PAN_TYPE_MAP[r.type] || '未知'}] ${r.title}`,
@@ -195,53 +202,28 @@ async function getTracks(ext) {
 
 // --- 兼容旧版 XPTV App 接口 ---
 async function init() { return getConfig(); }
-
 async function home() { 
   const c = await getConfig(); 
   const config = JSON.parse(c);
   return jsonify({ class: config.tabs, filters: {} }); 
 }
-
-/**
- * 分类页 - 【已采纳您的修复建议】
- * 增加了对传入参数 tid 的健壮性检查。
- * 当 tid 无效时，默认使用第一个分类 'tv' 作为ID，
- * 从而防止向后端请求一个 undefined 的分类地址。
- */
-async function category(tid, pg) {
-  let id;
-
-  // 检查 tid 是否是一个包含有效 id 属性的对象
-  if (typeof tid === 'object' && tid && tid.id) {
-    id = tid.id;
-  }
-  // 检查 tid 是否是一个非空字符串
-  else if (typeof tid === 'string' && tid) {
-    id = tid;
-  }
-  // 如果以上条件都不满足，说明传入的 tid 有问题
-  else {
-    // 打印警告日志，方便调试
-    log(`警告: category 调用收到的 tid 无效 (值为: ${JSON.stringify(tid)}), 已自动修正为默认分类 "tv"`);
-    // 设置一个默认的、有效的分类ID
-    id = 'tv';
-  }
-
-  // 使用修正后 (或原本就有效) 的 id 去调用 getCards 函数
-  return getCards({ id: id, page: pg });
+async function category(tid, pg) { 
+  const id = typeof tid === 'object' ? tid.id : tid;
+  return getCards({ id: id, page: pg }); 
 }
-
+// 关键：重写detail的调用方式，首次加载时带上action=init
 async function detail(id) { 
-    fullResourceCache = [];
+    fullResourceCache = []; // 清空上一部影片的缓存
     return getTracks({ url: id, action: 'init' }); 
 }
-
+// 关键：重写play的调用方式，用于处理自定义的筛选指令
 async function play(flag, id) {
     if (id.startsWith('custom:')) {
+        // 这是我们的自定义筛选指令，重新调用getTracks进行刷新
         const params = new URLSearchParams(id.replace('custom:', ''));
         const ext = Object.fromEntries(params.entries());
         return getTracks(ext);
     }
+    // 否则是普通链接，正常播放
     return jsonify({ url: id });
 }
-
