@@ -1,16 +1,57 @@
-// ================== Gying 插件 for XPTV App - V24-兼容修复版 ==================
-// 版本: v24-compat-fix
+// ================== Gying 插件 for XPTV App - V25-App完全兼容版 ==================
+// 版本: v25-app-compat
 // 修复内容: 
-// 1. 【核心修复】重写插件接口，完全兼容只支持 (tid, pg) 参数的旧版App规范。
-// 2. 【核心修复】确保分类ID (tid) 能被正确接收并传递给后端，解决 id=undefined 问题。
-// 3. 【功能保留】完整保留V23版本的详情页筛选、资源缓存等全部高级功能。
-// 4. 【代码整合】将所有业务逻辑集中到核心函数，兼容接口只负责调用。
+// 1. 【核心修复】完全适配App的插件加载规范，包括 `getConfig()` 入口和 `appConfig` 结构。
+// 2. 【核心修复】引入 `jsonify()` 和 `argsify()` 辅助函数，确保App环境兼容性。
+// 3. 【功能保留】完整保留V24兼容版的所有功能，包括详情页筛选、资源缓存等。
 // ========================================================================
 
-// --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】您的局域网后端地址
-const PLUGIN_NAME = 'Gying观影';
-const PLUGIN_VERSION = 'v24-compat-fix';
+// --- App环境预定义函数 (从网盘资源社插件中提取) ---
+// 假设App环境提供了 $fetch, createCheerio, $log
+
+// 辅助函数：将JS对象转换为JSON字符串，并确保App能正确处理
+function jsonify(obj) {
+  return JSON.stringify(obj);
+}
+
+// 辅助函数：解析App传递的参数，确保兼容性
+function argsify(ext) {
+  if (typeof ext === 'string') {
+    try {
+      return JSON.parse(ext);
+    } catch (e) {
+      // 如果是字符串但不是JSON，则尝试作为ID处理
+      return { id: ext };
+    }
+  } else if (typeof ext === 'object' && ext !== null) {
+    return ext;
+  }
+  return {};
+}
+
+// --- 插件配置 (适配App的appConfig结构) ---
+const appConfig = {
+  ver: 1,
+  title: 'Gying观影',
+  site: 'http://192.168.1.6:3001/api', // 【重要】您的局域网后端API基地址
+  cookie: '', // 此处不需要cookie，但保留结构以兼容App
+  tabs: [
+    {
+      name: '剧集',
+      ext: { id: 'tv' },
+    },
+    {
+      name: '电影',
+      ext: { id: 'mv' },
+    },
+    {
+      name: '动漫',
+      ext: { id: 'ac' },
+    },
+  ],
+  supportSearch: true,
+  supportDetail: true
+};
 
 // --- 全局状态管理 (用于筛选逻辑) ---
 let fullResourceCache = [];
@@ -18,9 +59,12 @@ let currentPanTypeFilter = 'all';
 let currentKeywordFilter = 'all';
 
 // --- 工具函数 ---
-function log(message) {
-  if (typeof console !== 'undefined' && console.log) {
-    console.log(`[${PLUGIN_NAME}] ${message}`);
+function log(msg) {
+  try { $log(`[${appConfig.title}] ${msg}`); } catch (_) {
+    // 如果 $log 不存在，退回到 console.log
+    if (typeof console !== 'undefined' && console.log) {
+      console.log(`[${appConfig.title}] ${msg}`);
+    }
   }
 }
 
@@ -28,15 +72,15 @@ async function request(url) {
   log(`发起请求: ${url}`);
   try {
     let response;
-    if (typeof $fetch !== 'undefined') {
-      const res = await $fetch.get(url, { headers: { 'Accept': 'application/json' }, timeout: 30000 });
-      if (res.status !== 200) throw new Error(`HTTP错误! 状态: ${res.status}`);
-      response = JSON.parse(res.data);
-    } else {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP错误! 状态: ${res.status}`);
-      response = await res.json();
-    }
+    // 假设App环境提供了 $fetch
+    const res = await $fetch.get(url, {
+      headers: { 'Accept': 'application/json' },
+      timeout: 30000,
+    });
+
+    if (res.status !== 200) throw new Error(`HTTP错误! 状态: ${res.status}`);
+    response = JSON.parse(res.data);
+    
     if (response.error) throw new Error(`API返回错误: ${response.error}`);
     log(`请求成功, 收到 ${response.list?.length || 0} 条数据`);
     return response;
@@ -53,20 +97,20 @@ async function doCardsLogic(id, page = 1, keyword = '') {
   log(`核心逻辑: 获取卡片 - id=${id}, page=${page}, keyword=${keyword}`);
   if (!id && !keyword) {
       log("错误: ID和关键字均为空，无法获取卡片。");
-      return JSON.stringify({ list: [], hasMore: false });
+      return { list: [], hasMore: false };
   }
   
   let apiUrl;
   if (keyword) {
-    apiUrl = `${API_BASE_URL}/search?wd=${encodeURIComponent(keyword)}&page=${page}`; // 【关键修改】使用 'wd' 参数匹配后端
+    apiUrl = `${appConfig.site}/search?wd=${encodeURIComponent(keyword)}&page=${page}`;
   } else {
-    apiUrl = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
+    apiUrl = `${appConfig.site}/vod?id=${id}&page=${page}`;
   }
   
   const data = await request(apiUrl);
   
   if (data.error || !data.list) {
-    return JSON.stringify({ list: [], hasMore: false });
+    return { list: [], hasMore: false };
   }
   
   const cards = data.list.map(item => ({
@@ -76,10 +120,7 @@ async function doCardsLogic(id, page = 1, keyword = '') {
     remarks: String(item.vod_remarks || ''),
   }));
   
-  return JSON.stringify({
-    list: cards,
-    hasMore: cards.length >= 20,
-  });
+  return { list: cards, hasMore: cards.length >= 20 };
 }
 
 // 核心获取详情与筛选函数
@@ -90,16 +131,16 @@ async function doTracksLogic(vod_id) {
     currentPanTypeFilter = 'all';
     currentKeywordFilter = 'all';
 
-    const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`; // 【关键修改】使用 'ids' 参数匹配后端
+    const detailUrl = `${appConfig.site}/detail?ids=${encodeURIComponent(vod_id)}`;
     const data = await request(detailUrl);
 
     if (data.error || !data.list || data.list.length === 0) {
-        return JSON.stringify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+        return { list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] };
     }
 
     const playUrlString = data.list[0].vod_play_url;
     if (!playUrlString || playUrlString === '暂无任何网盘资源') {
-        return JSON.stringify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
+        return { list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] };
     }
 
     // 解析并缓存所有资源
@@ -156,57 +197,54 @@ function filterAndBuildTracks() {
         tracks: resourceTracks.length > 0 ? resourceTracks : [{ name: '无匹配资源', pan: '' }]
     });
 
-    return JSON.stringify(result);
+    return result;
 }
 
+// --- App 兼容接口层 (与网盘资源社插件保持一致) ---
 
-// --- App 兼容接口层 ---
-// App会调用这里的函数，我们再转去调用核心逻辑函数
-
-async function init() {
-    log(`插件初始化: ${PLUGIN_NAME} ${PLUGIN_VERSION}`);
-    const config = {
-        name: PLUGIN_NAME,
-        version: PLUGIN_VERSION,
-        author: 'Gying Team',
-        description: '观影网站资源聚合插件 - 兼容修复版',
-        tabs: [
-            { name: '剧集', ext: { id: 'tv' } },
-            { name: '电影', ext: { id: 'mv' } },
-            { name: '动漫', ext: { id: 'ac' } },
-        ],
-        supportSearch: true,
-        supportDetail: true
-    };
-    return JSON.stringify(config);
+// App的入口函数，返回插件配置
+async function getConfig() {
+  log(`插件初始化: ${appConfig.title}`);
+  return jsonify(appConfig);
 }
 
+// App调用首页数据
 async function home() {
-    // 旧版App的home通常是返回分类列表
-    log("兼容接口: home() 被调用, 返回分类列表");
-    const config = JSON.parse(await init());
-    return JSON.stringify({ class: config.tabs, filters: {} });
+    log("兼容接口: home() 被调用");
+    // App的home()通常会返回分类列表，这里直接调用doCardsLogic获取默认分类
+    const cardsResult = await doCardsLogic(appConfig.tabs[0].ext.id, 1); // 默认加载第一个分类
+    return jsonify({ list: cardsResult.list, hasMore: cardsResult.hasMore });
 }
 
-async function category(tid, pg) {
-    // 【核心兼容点】使用 (tid, pg) 参数
-    log(`兼容接口: category(tid, pg) 被调用 - tid=${tid}, pg=${pg}`);
-    // 旧版App的tid可能直接就是我们需要的id，比如'tv'
-    return doCardsLogic(tid, pg);
+// App调用分类列表数据
+async function category(ext) {
+    ext = argsify(ext);
+    const { id, page = 1 } = ext;
+    log(`兼容接口: category(ext) 被调用 - id=${id}, page=${page}`);
+    const cardsResult = await doCardsLogic(id, page);
+    return jsonify({ list: cardsResult.list, hasMore: cardsResult.hasMore });
 }
 
-async function detail(id) {
-    // 【核心兼容点】这里的id是影片ID
-    log(`兼容接口: detail(id) 被调用 - id=${id}`);
-    return doTracksLogic(id);
+// App调用详情页数据
+async function detail(ext) {
+    ext = argsify(ext);
+    const { id } = ext; // App可能传递 {id: 'vod_id'} 或直接 'vod_id'
+    log(`兼容接口: detail(ext) 被调用 - id=${id}`);
+    const tracksResult = await doTracksLogic(id);
+    return jsonify(tracksResult);
 }
 
-async function search(wd, quick) {
-    // 【核心兼容点】使用 (wd) 参数
-    log(`兼容接口: search(wd) 被调用 - wd=${wd}`);
-    return doCardsLogic(null, 1, wd);
+// App调用搜索数据
+async function search(ext) {
+    ext = argsify(ext);
+    const text = ext.text || '';
+    const page = Math.max(1, parseInt(ext.page) || 1);
+    log(`兼容接口: search(ext) 被调用 - text=${text}, page=${page}`);
+    const cardsResult = await doCardsLogic(null, page, text);
+    return jsonify({ list: cardsResult.list, hasMore: cardsResult.hasMore });
 }
 
+// App调用播放链接或筛选指令
 async function play(flag, id, flags) {
     log(`兼容接口: play() 被调用 - id=${id}`);
     if (id.startsWith('filter://')) {
@@ -214,10 +252,11 @@ async function play(flag, id, flags) {
         if (params.has('pan_type')) currentPanTypeFilter = params.get('pan_type');
         if (params.has('keyword')) currentKeywordFilter = params.get('keyword');
         
-        // 刷新指令对于旧版App可能无效，但我们依然返回
-        // 更好的做法是，如果筛选功能不工作，需要进一步适配
-        return JSON.stringify({ url: '', refresh: true, message: '筛选已更新' });
+        // 重新构建并返回筛选后的资源列表
+        const filteredTracks = filterAndBuildTracks();
+        return jsonify({ list: filteredTracks.list, refresh: true, message: '筛选已更新' });
     }
-    return JSON.stringify({ url: id });
+    return jsonify({ url: id });
 }
+
 
