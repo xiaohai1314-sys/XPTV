@@ -7,7 +7,7 @@
 // ========================================================================
 
 // --- 配置区 ---
-const API_BASE_URL = 'https://192.168.1.6:3001/api'; // 【重要】请替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请替换为你的后端服务实际地址
 const PLUGIN_NAME = 'Gying观影';
 const PLUGIN_VERSION = 'v23-final-fix';
 
