@@ -1,16 +1,17 @@
 /**
- * Gying 前端插件 - 最终融合版 v1.1
+ * Gying 前端插件 - 最终融合版 v1.2
  * 
  * 功能特性:
  * - 完美适配 XPTV App 环境，借鉴"网盘资源社"脚本的成功经验
  * - 与 Gying 后端服务完美配合，支持钻取式两级筛选功能
  * - [v1.1] 修复了详情页ID传递时可能为[object Object]的致命错误
  * - [v1.1] 优化了日志输出，更易于调试
+ * - [v1.2] 优化了getTracks函数中vod_id的提取逻辑，使其更健壮
  * - 强大的错误处理和用户体验优化
  * - 支持分类浏览、搜索、详情查看等完整功能
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.1 (2025年最终修复版)
+ * 版本: v1.2 (2025年最终修复版)
  */
 
 // ==================== 配置区 ====================
@@ -110,18 +111,27 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     
-    // 【v1.1 核心修复】增强影片ID的提取逻辑，防止传入 [object Object]
+    // 【v1.2 优化】更健壮的影片ID提取逻辑
     let vod_id;
     if (typeof ext === 'string') {
         vod_id = ext;
     } else if (typeof ext === 'object' && ext !== null) {
-        vod_id = ext.url || ext.id;
-        if (typeof vod_id === 'object' && vod_id !== null) {
-            vod_id = vod_id.id;
+        // 尝试从 ext.url 或 ext.id 获取，并确保是字符串
+        if (typeof ext.url === 'string' && ext.url) {
+            vod_id = ext.url;
+        } else if (typeof ext.id === 'string' && ext.id) {
+            vod_id = ext.id;
+        } else if (typeof ext.id === 'object' && ext.id !== null && typeof ext.id.id === 'string' && ext.id.id) {
+            // 兼容 ext.id 也是对象的情况，例如 {id: 'mv/12345'}
+            vod_id = ext.id.id;
+        } else {
+            // 最终尝试将整个 ext 对象转换为字符串，作为备用方案
+            vod_id = String(ext);
         }
     }
     
-    if (typeof vod_id !== 'string' || !vod_id) {
+    // 最终检查，确保 vod_id 是一个非空字符串，且不是 '[object Object]'
+    if (typeof vod_id !== 'string' || !vod_id || vod_id === '[object Object]') {
         log(`错误：无法从参数中提取有效的影片ID。收到的参数: ${JSON.stringify(ext)}`);
         return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的影片ID', pan: '' }] }] });
     }
@@ -227,5 +237,5 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.1');
+log('Gying前端插件加载完成 v1.2');
 
