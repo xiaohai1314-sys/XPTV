@@ -1,15 +1,16 @@
 /**
- * Gying 前端插件 - 最终融合版 v1.0
+ * Gying 前端插件 - 最终融合版 v1.1
  * 
  * 功能特性:
  * - 完美适配 XPTV App 环境，借鉴"网盘资源社"脚本的成功经验
  * - 与 Gying 后端服务完美配合，支持钻取式两级筛选功能
  * - 修复了前后端接口参数和数据格式不匹配的问题
+ * - 【重要修复】解决了 vod_id 参数可能传递为对象导致后端URL错误的问题
  * - 强大的错误处理和用户体验优化
  * - 支持分类浏览、搜索、详情查看等完整功能
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0 (2024年最终版)
+ * 版本: v1.1 (2024年最终版)
  */
 
 // ==================== 配置区 ====================
@@ -197,14 +198,28 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     
-    // 兼容不同的参数传递方式
-    let vod_id = ext.url || ext.id || ext;
-    if (typeof ext === 'string') {
-        vod_id = ext;
+    // 【关键修复】确保 vod_id 始终是字符串，并进行有效性检查
+    let vod_id_raw = ext.url || ext.id || ext; // 原始获取的 vod_id
+    let vod_id = '';
+
+    if (typeof vod_id_raw === 'string' && vod_id_raw.length > 0) {
+        vod_id = vod_id_raw; // 如果是有效字符串，直接使用
+    } else if (typeof vod_id_raw === 'object' && vod_id_raw !== null && (vod_id_raw.url || vod_id_raw.id)) {
+        // 如果是对象，且包含 url 或 id 属性，则取其值
+        vod_id = vod_id_raw.url || vod_id_raw.id;
+    } else {
+        log('警告: 接收到无效的 vod_id 参数类型或值。');
+        // 返回错误提示，或者使用默认值
+        return jsonify({
+            list: [{
+                title: '错误',
+                tracks: [{ name: '影片ID参数无效，无法获取资源', pan: '' }]
+            }]
+        });
     }
-    
+
     const { pan_type, keyword, action = 'init' } = ext;
-    
+
     log(`getTracks调用: vod_id=${vod_id}, action=${action}, pan_type=${pan_type}, keyword=${keyword}`);
     
     // 步骤1: 数据获取与缓存管理
@@ -448,7 +463,7 @@ async function play(ext) {
 // 插件状态检查函数（调试用）
 function getPluginStatus() {
     return {
-        version: '1.0',
+        version: '1.1',
         apiBaseUrl: API_BASE_URL,
         cacheSize: fullResourceCache.length,
         currentFilters: {
@@ -468,5 +483,5 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getPluginStatus };
 }
 
-log('Gying前端插件加载完成 v1.0');
+log('Gying前端插件加载完成 v1.1');
 
