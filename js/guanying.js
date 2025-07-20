@@ -1,14 +1,15 @@
-// ================== Gying 插件 for XPTV App - 最终修复版 v1 ==================
-// 版本: v18-final-fix
+// ================== Gying 插件 for XPTV App - 最终修复版 v6 ==================
+// 版本: v23-final-fix
 // 修复内容: 
-// 1. 确保getCards函数返回的分类列表数据结构完全符合App预期，解决分类列表不显示问题。
-// 2. 恢复并优化筛选功能，将其完全封装在getTracks中，避免影响分类列表。
+// 1. 进一步加强category函数中ext参数解析的健壮性，确保分类ID正确传递。
+// 2. 确保getCards函数返回的分类列表数据结构完全符合App预期，解决分类列表不显示问题。
+// 3. 恢复并优化筛选功能，将其完全封装在getTracks中，避免影响分类列表。
 // ========================================================================
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请替换为你的后端服务实际地址
+const API_BASE_URL = 'https://192.168.1.6:3001/api'; // 【重要】请替换为你的后端服务实际地址
 const PLUGIN_NAME = 'Gying观影';
-const PLUGIN_VERSION = 'v18-final-fix';
+const PLUGIN_VERSION = 'v23-final-fix';
 
 // --- 全局状态管理 (仅用于getTracks内部的筛选逻辑) ---
 let fullResourceCache = []; // 缓存完整的资源列表
@@ -78,6 +79,7 @@ async function getConfig() {
  */
 async function home() {
   log('加载首页内容');
+  // 首页默认加载剧集分类
   return getCards({ id: 'tv', page: 1 });
 }
 
@@ -85,8 +87,35 @@ async function home() {
  * 获取分类内容
  */
 async function category(ext) {
-  const { id, page = 1 } = JSON.parse(JSON.stringify(ext));
-  log(`加载分类: id=${id}, page=${page}`);
+  let id = 'tv'; // 默认分类ID，以防万一
+  let page = 1;
+
+  log(`category函数原始ext参数: ${JSON.stringify(ext)}`);
+
+  try {
+    // XPTV App在调用category时，ext可能直接是分类ID字符串，也可能是包含id和page的对象
+    // 尝试解析ext，兼容多种App传递参数的方式
+    const parsedExt = JSON.parse(JSON.stringify(ext));
+    
+    if (typeof parsedExt === 'object' && parsedExt !== null) {
+      // 如果ext是对象，尝试从id和page属性中获取
+      if (parsedExt.id !== undefined && parsedExt.id !== null) {
+        id = String(parsedExt.id);
+      }
+      if (parsedExt.page !== undefined && parsedExt.page !== null) {
+        page = Number(parsedExt.page);
+      }
+    } else if (typeof parsedExt === 'string' && parsedExt.length > 0) {
+      // 如果ext直接是ID字符串，例如 'tv', 'mv', 'ac'
+      id = parsedExt;
+    } else {
+      log(`警告: category函数收到未知或无效ext类型/值: ${typeof parsedExt}, ext: ${JSON.stringify(parsedExt)}`);
+    }
+  } catch (e) {
+    log(`解析category ext参数失败: ${e.message}, ext: ${JSON.stringify(ext)}`);
+  }
+
+  log(`加载分类: 解析后id=${id}, page=${page}`);
   return getCards({ id, page });
 }
 
@@ -298,7 +327,7 @@ async function getTracks(ext) {
 /**
  * 获取详情信息
  */
-async function detail(id) { 
+async function detail(id) {
   log(`获取详情信息: id=${id}`);
   // 清空缓存，重新开始
   fullResourceCache = [];
