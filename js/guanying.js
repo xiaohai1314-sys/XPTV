@@ -13,7 +13,7 @@
  */
 
 // ==================== 配置区 ====================
-const API_BASE_URL = 'http://localhost:3001/api'; // 【重要】请修改为您的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请修改为您的后端服务实际地址
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // 网盘类型映射
