@@ -1,5 +1,5 @@
 /**
- * Gying 前端插件 - 终极融合版 v1.0
+ * Gying 前端插件 - 终极融合版 v1.1
  *
  * 功能特性:
  * - 完美适配 XPTV App 环境，兼容手机与TV端。
@@ -9,7 +9,7 @@
  * - 支持分类浏览、搜索、详情查看等完整功能。
  *
  * 作者: Manus (根据用户需求整合优化)
- * 版本: v1.0 (2025年最终版)
+ * 版本: v1.1 (2025年最终版)
  */
 
 // ==================== 配置区 ====================
@@ -45,22 +45,28 @@ async function getTracks(ext) {
     ext = argsify(ext);
 
     // 【关键修复】从App传入的参数中，正确提取出影片的ID字符串
-    let vod_id;
-    if (typeof ext === 'string') { vod_id = ext; } 
-    else if (ext && ext.vod_id) { vod_id = ext.vod_id; } 
-    else { vod_id = ext.url || ext.id; }
+    // App传入的ext可能是一个对象，也可能直接是ID字符串，需要做兼容处理。
+    const vod_id = ext.vod_id || ext.id || (typeof ext === 'string' ? ext : null);
 
     if (!vod_id || typeof vod_id !== 'string') {
         log(`无效的详情ID，收到参数: ${JSON.stringify(ext)}`);
         return jsonify({ list: [{ title: '错误', tracks: [{ name: '无法获取有效的影片ID', pan: '' }] }] });
     }
 
+    // 从 ext 中提取筛选参数
     const { pan_type, keyword, action = 'init' } = ext;
     log(`getTracks调用: vod_id=${vod_id}, action=${action}, pan_type=${pan_type}, keyword=${keyword}`);
 
+    // --- 后续逻辑保持不变 ---
+
     if (action === 'init' || fullResourceCache.length === 0 || currentVodId !== vod_id) {
-        fullResourceCache = []; currentPanTypeFilter = 'all'; currentKeywordFilter = 'all'; currentVodId = vod_id;
+        fullResourceCache = []; 
+        currentPanTypeFilter = 'all'; 
+        currentKeywordFilter = 'all'; 
+        currentVodId = vod_id;
         log(`首次加载详情: ${vod_id}`);
+        
+        // 【重要】确保这里使用的是修正后的 vod_id
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         const data = await request(detailUrl);
 
@@ -78,7 +84,8 @@ async function getTracks(ext) {
         log(`开始解析资源字符串，长度: ${playUrlString.length}`);
         fullResourceCache = playUrlString.split('#').map(item => {
             const parts = item.split('$');
-            const title = parts[0] || ''; const link = parts[1] || '';
+            const title = parts[0] || ''; 
+            const link = parts[1] || '';
             if (!title || !link) { return null; }
             return { type: detectPanType(title), title: title.trim(), link: link.trim() };
         }).filter(item => item !== null);
@@ -102,12 +109,12 @@ async function getTracks(ext) {
     const resultLists = [];
     const panTypeCounts = {};
     fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
-    const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all&url=${encodeURIComponent(vod_id)}` }];
-    Object.keys(panTypeCounts).forEach(typeCode => { panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || '未知'} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}` }); });
+    const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all&vod_id=${encodeURIComponent(vod_id)}` }];
+    Object.keys(panTypeCounts).forEach(typeCode => { panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || '未知'} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&vod_id=${encodeURIComponent(vod_id)}` }); });
     resultLists.push({ title: '🗂️ 网盘分类', tracks: panTypeButtons });
 
-    const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all&url=${encodeURIComponent(vod_id)}` }];
-    KEYWORD_FILTERS.forEach(kw => { keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}&url=${encodeURIComponent(vod_id)}` }); });
+    const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all&vod_id=${encodeURIComponent(vod_id)}` }];
+    KEYWORD_FILTERS.forEach(kw => { keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}&vod_id=${encodeURIComponent(vod_id)}` }); });
     resultLists.push({ title: '🔍 关键字筛选', tracks: keywordButtons });
 
     if (filteredResources.length > 0) {
@@ -143,5 +150,6 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0');
+log('Gying前端插件加载完成 v1.1');
+
 
