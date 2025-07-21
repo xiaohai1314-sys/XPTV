@@ -1,5 +1,5 @@
 /**
- * Gying 前端插件 - 最终融合版 v1.0
+ * Gying 前端插件 - 最终修复版 v3.0
  * 
  * 功能特性:
  * - 完美适配 XPTV App 环境，借鉴"网盘资源社"脚本的成功经验
@@ -7,9 +7,11 @@
  * - 修复了前后端接口参数和数据格式不匹配的问题
  * - 强大的错误处理和用户体验优化
  * - 支持分类浏览、搜索、详情查看等完整功能
+ * - 修复了网盘资源显示在错误位置的问题
+ * - 进一步优化了vod_id的获取逻辑，确保前端请求的正确性
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0 (2024年最终版)
+ * 版本: v3.0 (2024年最终修复版)
  */
 
 // ==================== 配置区 ====================
@@ -197,13 +199,14 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     
-    // ====================【代码修改处】====================
+    // ====================【代码修改处 - 修复vod_id获取】====================
     // 【最终修复】更稳定地获取 vod_id，防止其成为一个对象
     let vod_id = '';
     if (typeof ext === 'string') {
         vod_id = ext;
     } else if (ext && typeof ext === 'object') {
-        vod_id = ext.url || ext.id || ''; // 从对象的属性中获取
+        // 优先从 vod_id 属性获取，然后是 url、id
+        vod_id = ext.vod_id || ext.url || ext.id || '';
     }
 
     const { pan_type, keyword, action = 'init' } = ext;
@@ -212,7 +215,12 @@ async function getTracks(ext) {
 
     if (!vod_id) {
         log('错误：无法获取有效的 vod_id');
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无法获取影片ID', pan: '' }] }] });
+        return jsonify({ 
+            list: [{ 
+                title: '云盘', 
+                tracks: [{ name: '无法获取影片ID', pan: '' }] 
+            }] 
+        });
     }
     // ====================【代码修改结束】====================
     
@@ -233,7 +241,7 @@ async function getTracks(ext) {
             log(`详情获取失败: ${data.error}`);
             return jsonify({
                 list: [{
-                    title: '错误',
+                    title: '云盘',
                     tracks: [{ name: '获取资源失败，请检查网络连接', pan: '' }]
                 }]
             });
@@ -243,7 +251,7 @@ async function getTracks(ext) {
             log('详情数据为空');
             return jsonify({
                 list: [{
-                    title: '提示',
+                    title: '云盘',
                     tracks: [{ name: '未找到相关资源', pan: '' }]
                 }]
             });
@@ -254,7 +262,7 @@ async function getTracks(ext) {
             log('无有效资源链接');
             return jsonify({
                 list: [{
-                    title: '提示',
+                    title: '云盘',
                     tracks: [{ name: '暂无任何网盘资源', pan: '' }]
                 }]
             });
@@ -318,57 +326,11 @@ async function getTracks(ext) {
         }
     }
     
-    // 步骤4: 构建UI数据
+    // ====================【代码修改处 - 修复UI显示】====================
+    // 步骤4: 构建UI数据 - 简化为单一云盘列表，不显示筛选按钮
     const resultLists = [];
     
-    // 网盘类型筛选按钮
-    const panTypeCounts = {};
-    fullResourceCache.forEach(r => {
-        panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1;
-    });
-    
-    const panTypeButtons = [
-        { 
-            name: `全部 (${fullResourceCache.length})`, 
-            pan: `custom:action=filter&pan_type=all&url=${encodeURIComponent(vod_id)}` 
-        }
-    ];
-    
-    Object.keys(panTypeCounts).forEach(typeCode => {
-        const typeName = PAN_TYPE_MAP[typeCode] || `类型${typeCode}`;
-        const count = panTypeCounts[typeCode];
-        panTypeButtons.push({
-            name: `${typeName} (${count})`,
-            pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}`
-        });
-    });
-    
-    resultLists.push({
-        title: '🗂️ 网盘分类',
-        tracks: panTypeButtons
-    });
-    
-    // 关键字筛选按钮
-    const keywordButtons = [
-        { 
-            name: '全部', 
-            pan: `custom:action=filter&keyword=all&url=${encodeURIComponent(vod_id)}` 
-        }
-    ];
-    
-    KEYWORD_FILTERS.forEach(kw => {
-        keywordButtons.push({
-            name: kw,
-            pan: `custom:action=filter&keyword=${kw}&url=${encodeURIComponent(vod_id)}`
-        });
-    });
-    
-    resultLists.push({
-        title: '🔍 关键字筛选',
-        tracks: keywordButtons
-    });
-    
-    // 资源列表
+    // 直接显示资源列表，不添加筛选按钮
     if (filteredResources.length > 0) {
         const resourceTracks = filteredResources.map(r => {
             const panTypeName = PAN_TYPE_MAP[r.type] || '未知';
@@ -379,17 +341,18 @@ async function getTracks(ext) {
         });
         
         resultLists.push({
-            title: `📁 资源列表 (${filteredResources.length}条)`,
+            title: '云盘',
             tracks: resourceTracks
         });
     } else {
         resultLists.push({
-            title: '📁 资源列表',
-            tracks: [{ name: '当前筛选条件下无结果', pan: '' }]
+            title: '云盘',
+            tracks: [{ name: '暂无任何网盘资源', pan: '' }]
         });
     }
+    // ====================【代码修改结束】====================
     
-    log(`UI构建完成: 网盘='${currentPanTypeFilter}', 关键字='${currentKeywordFilter}', 显示${filteredResources.length}/${fullResourceCache.length}条`);
+    log(`UI构建完成: 显示${filteredResources.length}条资源`);
     
     return jsonify({ list: resultLists });
 }
@@ -455,7 +418,7 @@ async function play(ext) {
 // 插件状态检查函数（调试用）
 function getPluginStatus() {
     return {
-        version: '1.0',
+        version: '3.0',
         apiBaseUrl: API_BASE_URL,
         cacheSize: fullResourceCache.length,
         currentFilters: {
@@ -475,6 +438,5 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getPluginStatus };
 }
 
-log('Gying前端插件加载完成 v1.0');
-
+log('Gying前端插件加载完成 v3.0');
 
