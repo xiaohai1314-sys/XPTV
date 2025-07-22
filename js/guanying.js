@@ -1,12 +1,10 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.0.3
- * 
- * 核心思路: 100% 保持原始 v1.0 的代码逻辑和结构，仅修正一个API参数名。
+ * Gying 前端插件 - 完美复刻修正版 v1.0.4
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0.3 (最终稳定版)
+ * 版本: v1.0.4 (最终调试版)
  * 更新日志:
- * v1.0.3: 修复了 getTracks 函数在处理播放器环境传入的对象参数时，无法正确提取 vod_id 的问题，从根本上解决了 [object Object] 错误。
+ * v1.0.4: 增加关键日志，用于打印播放器环境传入的完整参数，以确定真实的ID属性名。
  */
 
 // ==================== 配置区 ====================
@@ -33,26 +31,24 @@ async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text
 
 // ==================== 【核心修正函数】 ====================
 async function getTracks(ext) {
-    // 【最终修正版】精准提取 vod_id，杜绝 [object Object]
-    let vod_id;
-    const raw_ext = argsify(ext); // 1. 标准化传入的参数
+    const raw_ext = argsify(ext);
 
-    // 2. 核心提取逻辑：
-    //    - 如果传入的是对象，就从对象的 'vod_id' 属性里取值。
-    //    - 如果传入的直接就是字符串，就直接用。
+    // 【！！！关键调试代码！！！】
+    // 这行日志会把播放器传过来的所有东西都打印出来
+    log('getTracks接收到的完整参数: ' + JSON.stringify(raw_ext));
+
+    let vod_id;
     if (raw_ext && typeof raw_ext === 'object' && raw_ext.vod_id) {
         vod_id = raw_ext.vod_id;
     } else if (typeof raw_ext === 'string') {
         vod_id = raw_ext;
     }
 
-    // 3. 终极安全检查：如果经过上述步骤，vod_id 仍然不是一个有效的字符串，则中止。
     if (typeof vod_id !== 'string' || vod_id.length === 0) {
-        log('严重错误：未能从调用参数中提取出有效的 vod_id 字符串。收到的原始参数: ' + JSON.stringify(ext));
+        log('严重错误：未能从调用参数中提取出有效的 vod_id 字符串。');
         return jsonify({ list: [{ title: '错误', tracks: [{ name: '前端插件内部参数解析失败', pan: '' }] }] });
     }
 
-    // 4. 从这里开始，vod_id 100% 是我们期望的字符串，例如 "mv/JzJv"
     const { pan_type, keyword, action = 'init' } = (typeof raw_ext === 'object' ? raw_ext : {});
     log(`getTracks调用成功: vod_id=${vod_id}, action=${action}`);
 
@@ -63,31 +59,18 @@ async function getTracks(ext) {
         currentVodId = vod_id;
         log(`首次加载详情, ID: ${vod_id}`);
         
-        // 这里的请求现在绝对是正确的
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         
         const data = await request(detailUrl);
         if (data.error) { log(`详情获取失败: ${data.error}`); return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败，请检查网络连接', pan: '' }] }] }); }
         if (!data.list || data.list.length === 0) { log('详情数据为空'); return jsonify({ list: [{ title: '提示', tracks: [{ name: '未找到相关资源', pan: '' }] }] }); }
-        
         const playUrlString = data.list[0].vod_play_url;
-        if (!playUrlString || playUrlString === '暂无任何网盘资源') {
-            log('无有效资源链接');
-            return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
-        }
-        
+        if (!playUrlString || playUrlString === '暂无任何网盘资源') { log('无有效资源链接'); return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] }); }
         log(`开始解析资源字符串，长度: ${playUrlString.length}`);
-        fullResourceCache = playUrlString.split('#').map(item => {
-            const parts = item.split('$');
-            const title = parts[0] || '';
-            const link = parts[1] || '';
-            if (!title || !link) { return null; }
-            return { type: detectPanType(title), title: title.trim(), link: link.trim() };
-        }).filter(item => item !== null);
+        fullResourceCache = playUrlString.split('#').map(item => { const parts = item.split('$'); const title = parts[0] || ''; const link = parts[1] || ''; if (!title || !link) { return null; } return { type: detectPanType(title), title: title.trim(), link: link.trim() }; }).filter(item => item !== null);
         log(`资源解析完成，共 ${fullResourceCache.length} 条有效资源`);
     }
     
-    // ...后续所有UI构建代码都和原来一样，无需改动...
     if (pan_type !== undefined) { currentPanTypeFilter = pan_type; }
     if (keyword !== undefined) { currentKeywordFilter = keyword; }
     let filteredResources = [...fullResourceCache];
@@ -115,4 +98,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0.3 (最终稳定版)');
+log('Gying前端插件加载完成 v1.0.4 (最终调试版)');
