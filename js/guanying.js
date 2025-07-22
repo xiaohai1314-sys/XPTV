@@ -11,23 +11,14 @@
 const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
-// 网盘类型映射
-const PAN_TYPE_MAP = {
-    '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里',
-    '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知'
-};
-
-// 关键字筛选选项
-const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
-
-// ==================== 工具函数区 (保持 v1.0 原样) ====================
+// ... (所有工具函数、配置、缓存区都与v1.0完全相同) ...
 function log(msg) { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } }
 async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功: 获取到 ${result.list ? result.list.length : 0} 条数据`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功: 获取到 ${result.list ? result.list.length : 0} 条数据`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
 function detectPanType(title) { const lowerTitle = title.toLowerCase(); if (lowerTitle.includes('百度')) return '0'; if (lowerTitle.includes('迅雷')) return '1'; if (lowerTitle.includes('夸克')) return '2'; if (lowerTitle.includes('阿里')) return '3'; if (lowerTitle.includes('天翼')) return '4'; if (lowerTitle.includes('115')) return '5'; if (lowerTitle.includes('uc')) return '6'; return 'unknown'; }
-
-// ==================== 缓存区 (保持 v1.0 原样) ====================
+const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里', '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知' };
+const KEYWORD_FILTERS = ['4K', 'Remux', '高码', '原盘', '杜比', '1080', '其他'];
 let fullResourceCache = [];
 let currentPanTypeFilter = 'all';
 let currentKeywordFilter = 'all';
@@ -40,6 +31,7 @@ async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text
 
 async function getTracks(ext) {
     ext = argsify(ext);
+    // 【保持 v1.0 的“灵活”ID获取逻辑】
     let vod_id = ext.url || ext.id || ext;
     if (typeof ext === 'string') { vod_id = ext; }
     const { pan_type, keyword, action = 'init' } = ext;
@@ -51,7 +43,7 @@ async function getTracks(ext) {
         currentVodId = vod_id;
         log(`首次加载详情: ${vod_id}`);
         
-        // 【最终修正点】
+        // 【使用修正后的参数名 'ids'】
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         
         const data = await request(detailUrl);
@@ -75,6 +67,7 @@ async function getTracks(ext) {
         }).filter(item => item !== null);
         log(`资源解析完成，共 ${fullResourceCache.length} 条有效资源`);
     }
+    // ... (后续UI构建逻辑完全保持 v1.0 原样) ...
     if (pan_type !== undefined) { currentPanTypeFilter = pan_type; }
     if (keyword !== undefined) { currentKeywordFilter = keyword; }
     let filteredResources = [...fullResourceCache];
