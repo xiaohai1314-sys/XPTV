@@ -1,8 +1,8 @@
 /**
- * Gying 前端插件 - URL编码终极版 v1.0.10
+ * Gying 前端插件 - Base64终极版 v1.0.11
  * 
  * --- 更新日志 ---
- * v1.0.10: 终极解决方案。后端将真实ID和名称编码进vod_id。前端在详情页解码vod_id，拿到真实ID后再请求详情。此方案完全不依赖APP的任何传递机制。
+ * v1.0.11: 最终解决方案。后端使用Base64对ID进行安全编码，前端在详情页进行Base64解码。此方案解决了特殊字符导致APP渲染失败的问题，同时实现了跨页面ID传递。
  */
 
 // ==================== 配置区 ====================
@@ -50,17 +50,29 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
 
-    // ---【前端修改点】---
+    // ---【前端修改点 v1.0.11】---
     // APP会将列表项的整个对象作为ext传入，我们从ext.vod_id中解码
     const encoded_id = ext.vod_id;
-    if (!encoded_id || !encoded_id.includes('||')) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的影片ID格式', pan: '' }] }] });
+    if (!encoded_id) {
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '未获取到影片ID', pan: '' }] }] });
     }
 
-    const parts = encoded_id.split('||');
-    const real_vod_id = parts[0];
-    const vod_name = parts[1];
-    log(`解码成功: 真实ID=${real_vod_id}, 名称=${vod_name}`);
+    let real_vod_id;
+    let vod_name;
+    try {
+        // Base64解码
+        const decoded_info = $base64.decode(encoded_id);
+        if (!decoded_info.includes('||')) {
+            throw new Error('解码后的ID格式不正确');
+        }
+        const parts = decoded_info.split('||');
+        real_vod_id = parts[0];
+        vod_name = parts[1];
+        log(`Base64解码成功: 真实ID=${real_vod_id}, 名称=${vod_name}`);
+    } catch (e) {
+        log('Base64解码失败: ' + e.message);
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '解码影片ID失败', pan: '' }] }] });
+    }
     // ---【修改结束】---
 
     const { pan_type, keyword, action = 'init' } = ext;
@@ -102,4 +114,48 @@ async function getTracks(ext) {
     
     let filteredResources = [...fullResourceCache];
     if (currentPanTypeFilter !== 'all') { filteredResources = filteredResources.filter(r => r.type === currentPanTypeFilter); }
-    if (currentKeywordFilter !==
+    if (currentKeywordFilter !== 'all') { 
+        const lowerKeyword = currentKeywordFilter.toLowerCase(); 
+        if (lowerKeyword === '其他') { 
+            filteredResources = filteredResources.filter(r => { 
+                const lowerTitle = r.title.toLowerCase(); 
+                return KEYWORD_FILTERS.slice(0, -1).every(kw => !lowerTitle.includes(kw.toLowerCase())); 
+            }); 
+        } else { 
+            filteredResources = filteredResources.filter(r => r.title.toLowerCase().includes(lowerKeyword)); 
+        } 
+    }
+    
+    const resultLists = [];
+    const panTypeCounts = {};
+    fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
+    
+    const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all&url=${encodeURIComponent(real_vod_id)}` }];
+    Object.keys(panTypeCounts).sort().forEach(typeCode => { 
+        panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || `类型${typeCode}`} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(real_vod_id)}` }); 
+    });
+    resultLists.push({ title: '🗂️ 网盘分类', tracks: panTypeButtons });
+    
+    const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all&url=${encodeURIComponent(real_vod_id)}` }];
+    KEYWORD_FILTERS.forEach(kw => { keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}&url=${encodeURIComponent(real_vod_id)}` }); });
+    resultLists.push({ title: '🔍 关键字筛选', tracks: keywordButtons });
+    
+    if (filteredResources.length > 0) { 
+        const resourceTracks = filteredResources.map(r => { 
+            const panTypeName = PAN_TYPE_MAP[r.type] || '未知'; 
+            return { name: `[${panTypeName}] ${r.title}`, pan: r.link }; 
+        }); 
+        resultLists.push({ title: `📁 资源列表 (${filteredResources.length}条)`, tracks: resourceTracks }); 
+    } else { 
+        resultLists.push({ title: '📁 资源列表', tracks: [{ name: '当前筛选条件下无结果', pan: '' }] }); 
+    }
+    
+    log(`UI构建完成: 网盘='${currentPanTypeFilter}', 关键字='${currentKeywordFilter}', 显示${filteredResources.length}/${fullResourceCache.length}条`);
+    return jsonify({ list: resultLists });
+}
+
+async function getPlayinfo(ext) { 
+    ext = argsify(ext); 
+    const panUrl = ext.pan || ext.url || ''; 
+    if (panUrl.startsWith('custom:')) { 
+        log(`处理筛选指令: ${pan
