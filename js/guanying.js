@@ -1,10 +1,13 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.0.4
+ * Gying 前端插件 - 完美复刻修正版 v1.0.5
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0.4 (最终调试版)
+ * 版本: v1.0.5 (终极容错版)
  * 更新日志:
- * v1.0.4: 增加关键日志，用于打印播放器环境传入的完整参数，以确定真实的ID属性名。
+ * v1.0.5: 采用终极容错逻辑。
+ * 1. 不再尝试序列化可能导致崩溃的完整参数对象。
+ * 2. 逐一、安全地检查所有可能的ID属性名 ('vod_id', 'id', 'url', 'vid')。
+ * 3. 确保任何情况下都不会因参数问题而导致整个函数崩溃。
  */
 
 // ==================== 配置区 ====================
@@ -12,8 +15,8 @@ const API_BASE_URL = 'http://192.168.10.111:3001/api'; // 【重要】请再次�
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // ==================== 工具函数、配置、缓存区 (与原版完全相同) ====================
-function log(msg) { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } }
-async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功: 获取到 ${result.list ? result.list.length : 0} 条数据`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功: 获取到 ${result.list ? result.list.length : 0} 条数据`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
+function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } } catch (e) { console.log(`[Gying-ERROR] log function failed: ${e}`) } }
+async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
 function detectPanType(title) { const lowerTitle = title.toLowerCase(); if (lowerTitle.includes('百度')) return '0'; if (lowerTitle.includes('迅雷')) return '1'; if (lowerTitle.includes('夸克')) return '2'; if (lowerTitle.includes('阿里')) return '3'; if (lowerTitle.includes('天翼')) return '4'; if (lowerTitle.includes('115')) return '5'; if (lowerTitle.includes('uc')) return '6'; return 'unknown'; }
@@ -31,21 +34,27 @@ async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text
 
 // ==================== 【核心修正函数】 ====================
 async function getTracks(ext) {
+    let vod_id;
     const raw_ext = argsify(ext);
 
-    // 【！！！关键调试代码！！！】
-    // 这行日志会把播放器传过来的所有东西都打印出来
-    log('getTracks接收到的完整参数: ' + JSON.stringify(raw_ext));
-
-    let vod_id;
-    if (raw_ext && typeof raw_ext === 'object' && raw_ext.vod_id) {
-        vod_id = raw_ext.vod_id;
+    // 终极容错提取逻辑
+    if (raw_ext && typeof raw_ext === 'object') {
+        // 逐一安全地检查每一个可能的属性
+        const potentialKeys = ['vod_id', 'id', 'url', 'vid']; // 包含了所有常见命名
+        for (const key of potentialKeys) {
+            const value = raw_ext[key];
+            if (value && typeof value === 'string') {
+                vod_id = value;
+                log(`成功从属性 '${key}' 中提取到ID: ${vod_id}`);
+                break; // 找到第一个就跳出循环
+            }
+        }
     } else if (typeof raw_ext === 'string') {
         vod_id = raw_ext;
     }
 
     if (typeof vod_id !== 'string' || vod_id.length === 0) {
-        log('严重错误：未能从调用参数中提取出有效的 vod_id 字符串。');
+        log('严重错误：尝试了所有已知属性，仍未能提取出有效的 vod_id 字符串。');
         return jsonify({ list: [{ title: '错误', tracks: [{ name: '前端插件内部参数解析失败', pan: '' }] }] });
     }
 
@@ -98,4 +107,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0.4 (最终调试版)');
+log('Gying前端插件加载完成 v1.0.5 (终极容错版)');
