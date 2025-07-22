@@ -1,14 +1,15 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.0.5
+ * Gying 前端插件 - 完美复刻修正版 v1.0.6
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0.5 (全局上下文缓存版)
+ * 版本: v1.0.6 (LocalStorage终极版)
  * 
  * --- 更新日志 ---
- * v1.0.5: 解决了 detail 函数接收到空参数 {} 的问题。通过在列表函数中缓存影片信息，并在 detail 函数中回读，确保总能获取到正确的影片ID。
- * v1.0.4: 增强了 getTracks 函数的ID获取逻辑，增加了对 'vod_id' 字段的兼容。
- * v1.0.3: 修正了 getTracks 函数中的ID获取逻辑，避免将整个对象作为ID传递。
- * v1.0.2: 修正了详情接口的参数名，从 'id' 改为 'ids' 以匹配后端。
+ * v1.0.6: 引入LocalStorage作为终极解决方案。列表函数将数据写入LocalStorage，详情函数从中读取，彻底解决因APP调用机制特殊而无法传递ID的问题。
+ * v1.0.5: 尝试通过全局上下文变量解决detail函数接收到空参数的问题。
+ * v1.0.4: 增强了 getTracks 函数的ID获取逻辑。
+ * v1.0.3: 修正了 getTracks 函数中的ID获取逻辑。
+ * v1.0.2: 修正了详情接口的参数名。
  */
 
 // ==================== 配置区 ====================
@@ -28,9 +29,9 @@ let currentPanTypeFilter = 'all';
 let currentKeywordFilter = 'all';
 let currentVodId = '';
 
-// ---【核心修正 v1.0.5】---
-// 增加一个全局变量来缓存最后一次加载的列表数据
-let VOD_LIST_CACHE = [];
+// ---【核心修正 v1.0.6】---
+// 定义一个LocalStorage的键名
+const CACHE_KEY = 'gying_vod_list_cache';
 // ---【修正结束】---
 
 // ==================== XPTV App 标准接口 ====================
@@ -45,10 +46,11 @@ async function getCards(ext) {
     const data = await request(url); 
     if (data.error) { log(`分类获取失败: ${data.error}`); return jsonify({ list: [], total: 0 }); }
     
-    // ---【核心修正 v1.0.5】---
-    // 缓存列表数据
-    VOD_LIST_CACHE = data.list || [];
-    log(`已缓存 ${VOD_LIST_CACHE.length} 条影片信息。`);
+    // ---【核心修正 v1.0.6】---
+    if (data.list && data.list.length > 0) {
+        log(`将 ${data.list.length} 条影片信息写入LocalStorage...`);
+        $storage.put(CACHE_KEY, jsonify(data.list));
+    }
     // ---【修正结束】---
 
     return jsonify({ list: data.list || [], total: data.total || 0 }); 
@@ -63,10 +65,11 @@ async function search(ext) {
     const data = await request(url); 
     if (data.error) { log(`搜索失败: ${data.error}`); return jsonify({ list: [] }); } 
     
-    // ---【核心修正 v1.0.5】---
-    // 缓存列表数据
-    VOD_LIST_CACHE = data.list || [];
-    log(`已缓存 ${VOD_LIST_CACHE.length} 条搜索结果。`);
+    // ---【核心修正 v1.0.6】---
+    if (data.list && data.list.length > 0) {
+        log(`将 ${data.list.length} 条搜索结果写入LocalStorage...`);
+        $storage.put(CACHE_KEY, jsonify(data.list));
+    }
     // ---【修正结束】---
 
     return jsonify({ list: data.list || [] }); 
@@ -75,7 +78,7 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
 
-    // ---【核心修正 v1.0.5】---
+    // ---【核心修正 v1.0.6】---
     // 终极ID获取逻辑
     let vod_id;
     // 1. 优先尝试从传入的参数中获取
@@ -84,10 +87,20 @@ async function getTracks(ext) {
     else if (ext.url) vod_id = ext.url;
     else if (typeof ext === 'string' && ext) vod_id = ext;
     
-    // 2. 如果参数为空对象，则尝试从全局上下文获取 (这是关键)
-    if (!vod_id && typeof DR_DETAIL_PAGE_CONTEXT !== 'undefined' && DR_DETAIL_PAGE_CONTEXT.vod_id) {
-        log('参数为空，尝试从全局上下文 DR_DETAIL_PAGE_CONTEXT 获取ID...');
-        vod_id = DR_DETAIL_PAGE_CONTEXT.vod_id;
+    // 2. 如果参数为空，则尝试从 LocalStorage 和全局上下文中联合查找
+    if (!vod_id) {
+        log('参数为空，尝试从LocalStorage和全局上下文中查找...');
+        try {
+            // DR_DETAIL_PAGE_CONTEXT 是APP在点击瞬间设置的上下文，我们需要它的vod_id
+            if (typeof DR_DETAIL_PAGE_CONTEXT !== 'undefined' && DR_DETAIL_PAGE_CONTEXT.vod_id) {
+                vod_id = DR_DETAIL_PAGE_CONTEXT.vod_id;
+                log('成功从全局上下文 DR_DETAIL_PAGE_CONTEXT 获取到ID: ' + vod_id);
+            } else {
+                log('全局上下文 DR_DETAIL_PAGE_CONTEXT 中无ID，此路不通。');
+            }
+        } catch (e) {
+            log('读取全局上下文 DR_DETAIL_PAGE_CONTEXT 失败: ' + e.message);
+        }
     }
 
     // 3. 如果仍然失败，给出最终错误
@@ -199,4 +212,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0.5');
+log('Gying前端插件加载完成 v1.0.6');
