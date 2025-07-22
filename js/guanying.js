@@ -1,8 +1,9 @@
 /**
- * Gying 前端插件 - Base64终极版 v1.0.11
+ * Gying 前端插件 - 自定义字段终极版 v1.0.12
  * 
  * --- 更新日志 ---
- * v1.0.11: 最终解决方案。后端使用Base64对ID进行安全编码，前端在详情页进行Base64解码。此方案解决了特殊字符导致APP渲染失败的问题，同时实现了跨页面ID传递。
+ * v1.0.12: 最终解决方案。保持所有标准字段纯净，将需要传递的信息通过Base64编码后，放入自定义的 ext.gying_info 字段中。
+ * 此方案彻底规避了APP对标准字段的格式限制，解决了列表页空白问题，同时实现了可靠的跨页面ID传递。
  */
 
 // ==================== 配置区 ====================
@@ -50,31 +51,36 @@ async function search(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
 
-    // ---【前端修改点 v1.0.11】---
-    // APP会将列表项的整个对象作为ext传入，我们从ext.vod_id中解码
-    const encoded_id = ext.vod_id;
-    if (!encoded_id) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '未获取到影片ID', pan: '' }] }] });
+    // ---【前端修改点 v1.0.12】---
+    // 从自定义的 ext.gying_info 字段中解码
+    const encoded_info = ext.gying_info;
+    if (!encoded_info) {
+        // 如果自定义字段不存在，尝试回退到使用vod_id（为了兼容可能从历史记录等其他入口进入的情况）
+        log('未找到自定义信息字段，尝试使用vod_id作为真实ID...');
+        const real_vod_id = ext.vod_id;
+        if (!real_vod_id) {
+            return jsonify({ list: [{ title: '错误', tracks: [{ name: '无法获取任何有效的影片ID', pan: '' }] }] });
+        }
+        return await fetchAndProcessDetails(real_vod_id, ext);
     }
 
     let real_vod_id;
-    let vod_name;
     try {
-        // Base64解码
-        const decoded_info = $base64.decode(encoded_id);
-        if (!decoded_info.includes('||')) {
-            throw new Error('解码后的ID格式不正确');
-        }
+        const decoded_info = $base64.decode(encoded_info);
         const parts = decoded_info.split('||');
         real_vod_id = parts[0];
-        vod_name = parts[1];
-        log(`Base64解码成功: 真实ID=${real_vod_id}, 名称=${vod_name}`);
+        log(`解码成功: 真实ID=${real_vod_id}`);
     } catch (e) {
-        log('Base64解码失败: ' + e.message);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '解码影片ID失败', pan: '' }] }] });
+        log('解码自定义信息失败: ' + e.message);
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '解码影片信息失败', pan: '' }] }] });
     }
     // ---【修改结束】---
+    
+    return await fetchAndProcessDetails(real_vod_id, ext);
+}
 
+// 将详情获取和处理逻辑封装成一个可复用函数
+async function fetchAndProcessDetails(real_vod_id, ext) {
     const { pan_type, keyword, action = 'init' } = ext;
     log(`getTracks调用: vod_id=${real_vod_id}, action=${action}, pan_type=${pan_type}, keyword=${keyword}`);
 
@@ -158,4 +164,22 @@ async function getPlayinfo(ext) {
     ext = argsify(ext); 
     const panUrl = ext.pan || ext.url || ''; 
     if (panUrl.startsWith('custom:')) { 
-        log(`处理筛选指令: ${pan
+        log(`处理筛选指令: ${panUrl}`); 
+        const paramsStr = panUrl.replace('custom:', ''); 
+        const params = new URLSearchParams(paramsStr); 
+        const filterExt = Object.fromEntries(params.entries()); 
+        setTimeout(() => { getTracks(filterExt); }, 100); 
+        return jsonify({ urls: [] }); 
+    } 
+    log(`准备播放: ${panUrl}`); 
+    return jsonify({ urls: [{ name: '点击播放', url: panUrl }] }); 
+}
+
+// ==================== 标准入口函数映射 ====================
+async function init() { return await getConfig(); }
+async function home(ext) { return await getCards(ext); }
+async function category(ext) { return await getCards(ext); }
+async function detail(id) { return await getTracks(id); }
+async function play(ext) { return await getPlayinfo(ext); }
+
+log('Gying前端插件加载完成 v1.0.12');
