@@ -1,13 +1,11 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.0.5
+ * Gying 前端插件 - 完美复刻修正版 v1.0.7
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0.5 (终极容错版)
+ * 版本: v1.0.7 (完美复刻版)
  * 更新日志:
- * v1.0.5: 采用终极容错逻辑。
- * 1. 不再尝试序列化可能导致崩溃的完整参数对象。
- * 2. 逐一、安全地检查所有可能的ID属性名 ('vod_id', 'id', 'url', 'vid')。
- * 3. 确保任何情况下都不会因参数问题而导致整个函数崩溃。
+ * v1.0.7: 吸收了参考代码的精髓，在 getCards 和 search 函数中为播放器App明确构建 ext 对象，
+ *         从根源上确保了传递给 getTracks 的参数格式是标准且可控的。
  */
 
 // ==================== 配置区 ====================
@@ -27,38 +25,65 @@ let currentPanTypeFilter = 'all';
 let currentKeywordFilter = 'all';
 let currentVodId = '';
 
-// ==================== XPTV App 标准接口 (保持 v1.0 原样) ====================
+// ==================== XPTV App 标准接口 ====================
 async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (钻取筛选版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
-async function getCards(ext) { ext = argsify(ext); const { id, page = 1 } = ext; if (!id) { log('缺少分类ID参数'); return jsonify({ list: [] }); } log(`获取分类: ${id}, 页码: ${page}`); const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`; const data = await request(url); if (data.error) { log(`分类获取失败: ${data.error}`); return jsonify({ list: [], total: 0 }); } return jsonify({ list: data.list || [], total: data.total || 0 }); }
-async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text) { log('搜索关键词为空'); return jsonify({ list: [] }); } log(`搜索: ${text}`); const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`; const data = await request(url); if (data.error) { log(`搜索失败: ${data.error}`); return jsonify({ list: [] }); } return jsonify({ list: data.list || [] }); }
 
-// ==================== 【核心修正函数】 ====================
+// --- 【核心修改点 1】 ---
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { id, page = 1 } = ext;
+    if (!id) { log('缺少分类ID参数'); return jsonify({ list: [] }); }
+    log(`获取分类: ${id}, 页码: ${page}`);
+    const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
+    const data = await request(url);
+    if (data.error) { log(`分类获取失败: ${data.error}`); return jsonify({ list: [], total: 0 }); }
+
+    // 模仿完美代码，手动构建每一个 card 对象，特别是 ext 字段
+    const cards = (data.list || []).map(item => ({
+        vod_id: item.vod_id,
+        vod_name: item.vod_name,
+        vod_pic: item.vod_pic,
+        vod_remarks: item.vod_remarks,
+        ext: { url: item.vod_id } // 【关键】为播放器准备好后续要用的 ext 对象
+    }));
+
+    return jsonify({ list: cards, total: data.total || 0 });
+}
+
+// --- 【核心修改点 2】 ---
+async function search(ext) {
+    ext = argsify(ext);
+    const { text } = ext;
+    if (!text) { log('搜索关键词为空'); return jsonify({ list: [] }); }
+    log(`搜索: ${text}`);
+    const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`;
+    const data = await request(url);
+    if (data.error) { log(`搜索失败: ${data.error}`); return jsonify({ list: [] }); }
+
+    // 同样，为搜索结果构建标准的 card 对象
+    const cards = (data.list || []).map(item => ({
+        vod_id: item.vod_id,
+        vod_name: item.vod_name,
+        vod_pic: item.vod_pic,
+        vod_remarks: item.vod_remarks,
+        ext: { url: item.vod_id } // 【关键】为播放器准备好后续要用的 ext 对象
+    }));
+
+    return jsonify({ list: cards });
+}
+
+// --- 【核心修改点 3】 ---
 async function getTracks(ext) {
-    let vod_id;
-    const raw_ext = argsify(ext);
-
-    // 终极容错提取逻辑
-    if (raw_ext && typeof raw_ext === 'object') {
-        // 逐一安全地检查每一个可能的属性
-        const potentialKeys = ['vod_id', 'id', 'url', 'vid']; // 包含了所有常见命名
-        for (const key of potentialKeys) {
-            const value = raw_ext[key];
-            if (value && typeof value === 'string') {
-                vod_id = value;
-                log(`成功从属性 '${key}' 中提取到ID: ${vod_id}`);
-                break; // 找到第一个就跳出循环
-            }
-        }
-    } else if (typeof raw_ext === 'string') {
-        vod_id = raw_ext;
-    }
+    ext = argsify(ext);
+    // 现在我们可以非常自信地直接从 ext.url 中取值
+    const vod_id = ext.url;
 
     if (typeof vod_id !== 'string' || vod_id.length === 0) {
-        log('严重错误：尝试了所有已知属性，仍未能提取出有效的 vod_id 字符串。');
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '前端插件内部参数解析失败', pan: '' }] }] });
+        log('严重错误：getTracks未能接收到有效的url参数。收到的ext: ' + JSON.stringify(ext));
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '前端插件参数传递异常', pan: '' }] }] });
     }
 
-    const { pan_type, keyword, action = 'init' } = (typeof raw_ext === 'object' ? raw_ext : {});
+    const { pan_type, keyword, action = 'init' } = ext;
     log(`getTracks调用成功: vod_id=${vod_id}, action=${action}`);
 
     if (action === 'init' || fullResourceCache.length === 0 || currentVodId !== vod_id) {
@@ -107,4 +132,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0.5 (终极容错版)');
+log('Gying前端插件加载完成 v1.0.7 (完美复刻版)');
