@@ -1,21 +1,27 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.2.0
+ * Gying 前端插件 - 完美复刻修正版 v1.3.0
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.2.0 (回归初心最终版)
+ * 版本: v1.3.0 (最终修复版)
  * 更新日志:
+ * v1.3.0:
+ * 1. 【核心修复】重构了 play 和 getPlayinfo 函数的逻辑，彻底解决了二级钻取筛选功能不生效的问题。
+ * 2. play 函数现在作为指令分发中心，正确地将筛选指令转发给 getTracks 函数，并返回其结果以刷新UI。
+ * 3. getPlayinfo 函数回归其本职，仅处理真实的播放链接。
+ * 4. 优化了部分代码，增加了对空参数的健壮性处理。
+ * 5. 这是经过问题分析后，可以直接使用的最终版本。
+ * 
  * v1.2.0: 终极版。
  * 1. 严格遵循用户最初的“两步走”设计：detail函数只返回一个加载按钮，点击按钮才真正触发getTracks。
  * 2. 保留了已验证成功的、在getCards/search中构建标准ext对象的做法。
  * 3. 完整恢复了二级钻取筛选功能，并确保所有参数在流程中正确传递。
- * 4. 这次，它将如您所愿地工作。
  */
 
 // ==================== 配置区 ====================
 const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
-// ==================== 工具函数、配置、缓存区 (与原版完全相同) ====================
+// ==================== 工具函数、配置、缓存区 ====================
 function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } } catch (e) { console.log(`[Gying-ERROR] log function failed: ${e}`) } }
 async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
 function jsonify(obj) { return JSON.stringify(obj); }
@@ -70,7 +76,7 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【第2步: 恢复最初的 detail 函数，只返回一个加载按钮】 ---
+// --- 【第2步: 详情页只返回一个加载按钮】 ---
 async function detail(id) {
     const ext = argsify(id);
     const vod_id = ext.url;
@@ -90,7 +96,7 @@ async function detail(id) {
     });
 }
 
-// --- 【第3步: 恢复最初的 getTracks 和 getPlayinfo 逻辑】 ---
+// --- 【第3步: 资源获取与筛选逻辑】 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const vod_id = ext.url;
@@ -108,7 +114,7 @@ async function getTracks(ext) {
         currentPanTypeFilter = 'all';
         currentKeywordFilter = 'all';
         currentVodId = vod_id;
-        log(`首次加载详情, ID: ${vod_id}`);
+        log(`首次加载或切换影片, 清空缓存并重新获取, ID: ${vod_id}`);
         
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         
@@ -132,7 +138,7 @@ async function getTracks(ext) {
     const panTypeCounts = {};
     fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
     const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all&url=${encodeURIComponent(vod_id)}` }];
-    Object.keys(panTypeCounts).forEach(typeCode => { panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || `类型${typeCode}`} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}` }); });
+    Object.keys(panTypeCounts).sort().forEach(typeCode => { panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || `类型${typeCode}`} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}` }); });
     resultLists.push({ title: '🗂️ 网盘分类', tracks: panTypeButtons });
     const keywordButtons = [{ name: '全部', pan: `custom:action=filter&keyword=all&url=${encodeURIComponent(vod_id)}` }];
     KEYWORD_FILTERS.forEach(kw => { keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}&url=${encodeURIComponent(vod_id)}` }); });
@@ -143,29 +149,50 @@ async function getTracks(ext) {
     return jsonify({ list: resultLists });
 }
 
-async function getPlayinfo(ext) {
+// ==================== 【核心修复区】标准接口转发 ====================
+
+async function init() { return await getConfig(); }
+async function home(ext) { return await getCards(ext); }
+async function category(ext) { return await getCards(ext); }
+
+/**
+ * 【play 函数 - 指令分发中心】
+ * 这是修复二级钻取的关键。它会检查被点击的链接（panUrl）。
+ * - 如果是 'custom:' 开头的指令，它会解析指令并直接调用 getTracks 函数，
+ *   然后返回 getTracks 生成的新列表，从而实现UI刷新（筛选）。
+ * - 如果是普通的播放链接，它会把它交给 getPlayinfo 函数处理。
+ */
+async function play(ext) {
     ext = argsify(ext);
-    const panUrl = ext.pan || ext.url || '';
+    const panUrl = (ext && (ext.pan || ext.url)) || '';
+
     if (panUrl.startsWith('custom:')) {
-        log(`处理指令: ${panUrl}`);
+        log(`play函数拦截到指令，直接转发给getTracks: ${panUrl}`);
+        
         const paramsStr = panUrl.replace('custom:', '');
         const params = new URLSearchParams(paramsStr);
         const filterExt = {};
         for (const [key, value] of params.entries()) {
             filterExt[key] = value;
         }
-        setTimeout(() => { getTracks(filterExt); }, 100);
-        return jsonify({ urls: [] });
+        
+        // 核心：直接调用并返回 getTracks 的结果，让APP用新列表刷新UI
+        return await getTracks(filterExt); 
     }
+
+    log(`play函数检测到真实链接，交给getPlayinfo处理: ${panUrl}`);
+    return await getPlayinfo(ext);
+}
+
+/**
+ * 【getPlayinfo 函数 - 最终播放处理器】
+ * 这个函数现在只负责一件事：接收一个真实的播放链接，并将其包装成APP可以播放的格式。
+ */
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const panUrl = (ext && (ext.pan || ext.url)) || '';
     log(`准备播放: ${panUrl}`);
     return jsonify({ urls: [{ name: '点击播放', url: panUrl }] });
 }
 
-// ==================== 标准接口转发 ====================
-async function init() { return await getConfig(); }
-async function home(ext) { return await getCards(ext); }
-async function category(ext) { return await getCards(ext); }
-// play 函数现在只处理真实播放链接，所有指令都在 getPlayinfo 中处理
-async function play(ext) { return await getPlayinfo(ext); }
-
-log('Gying前端插件加载完成 v1.2.0 (回归初心最终版)');
+log('Gying前端插件加载完成 v1.3.0 (最终修复版)');
