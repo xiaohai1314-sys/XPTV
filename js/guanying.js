@@ -1,16 +1,18 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.1.1
+ * Gying 前端插件 - 完美复刻修正版 v1.2.0
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.1.1 (终极修正版)
+ * 版本: v1.2.0 (回归初心最终版)
  * 更新日志:
- * v1.1.1: 釜底抽薪，彻底修复二级钻取失败问题。
- * 1. 在 getTracks 函数入口处，采用最直接、最可靠的方式提取出纯净的 vod_id 字符串。
- * 2. 确保了在后续构建筛选指令时，url 参数不会被污染成 [object Object]，从而保证了二级钻取流程的完整性。
+ * v1.2.0: 终极版。
+ * 1. 严格遵循用户最初的“两步走”设计：detail函数只返回一个加载按钮，点击按钮才真正触发getTracks。
+ * 2. 保留了已验证成功的、在getCards/search中构建标准ext对象的做法。
+ * 3. 完整恢复了二级钻取筛选功能，并确保所有参数在流程中正确传递。
+ * 4. 这次，它将如您所愿地工作。
  */
 
 // ==================== 配置区 ====================
-const API_BASE_URL = 'http://192.168.10.111:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
+const API_BASE_URL = 'http://192.168.1.6:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // ==================== 工具函数、配置、缓存区 (与原版完全相同) ====================
@@ -29,6 +31,7 @@ let currentVodId = '';
 // ==================== XPTV App 标准接口 ====================
 async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (钻取筛选版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 
+// --- 【第1步: 稳定可靠的列表获取】 ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { id, page = 1 } = ext;
@@ -67,18 +70,34 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
+// --- 【第2步: 恢复最初的 detail 函数，只返回一个加载按钮】 ---
+async function detail(id) {
+    const ext = argsify(id);
+    const vod_id = ext.url;
+    log(`进入详情页，准备加载按钮，ID: ${vod_id}`);
+    
+    // 构建一个特殊的 "pan" 链接，用于在 play 函数中识别并触发 getTracks
+    const triggerUrl = `custom:action=init&url=${encodeURIComponent(vod_id)}`;
+
+    return jsonify({
+        list: [{
+            title: '资源列表',
+            tracks: [{
+                name: '➡️ 点击加载资源列表 (支持筛选)',
+                pan: triggerUrl,
+            }]
+        }]
+    });
+}
+
+// --- 【第3步: 恢复最初的 getTracks 和 getPlayinfo 逻辑】 ---
 async function getTracks(ext) {
     ext = argsify(ext);
-    
-    // --- 【终极修正】 ---
-    // 无论 ext 是什么结构，都只从 ext.url 中取值。
-    // 这样可以保证无论是从 detail(id) 还是从 getPlayinfo(filterExt) 调用，
-    // vod_id 都是一个纯净的字符串。
     const vod_id = ext.url;
     const { pan_type, keyword, action = 'init' } = ext;
 
     if (typeof vod_id !== 'string' || vod_id.length === 0) {
-        log('严重错误：getTracks未能接收到有效的url参数。收到的ext: ' + JSON.stringify(ext));
+        log('严重错误：getTracks未能接收到有效的url参数。');
         return jsonify({ list: [{ title: '错误', tracks: [{ name: '前端插件参数传递异常', pan: '' }] }] });
     }
 
@@ -94,11 +113,11 @@ async function getTracks(ext) {
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         
         const data = await request(detailUrl);
-        if (data.error) { log(`详情获取失败: ${data.error}`); return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] }); }
-        if (!data.list || data.list.length === 0) { log('详情数据为空'); return jsonify({ list: [{ title: '提示', tracks: [{ name: '未找到相关资源', pan: '' }] }] }); }
+        if (data.error) { return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] }); }
+        if (!data.list || data.list.length === 0) { return jsonify({ list: [{ title: '提示', tracks: [{ name: '未找到相关资源', pan: '' }] }] }); }
         const playUrlString = data.list[0].vod_play_url;
-        if (!playUrlString || playUrlString === '暂无任何网盘资源') { log('无有效资源链接'); return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] }); }
-        log(`开始解析资源字符串，长度: ${playUrlString.length}`);
+        if (!playUrlString || playUrlString === '暂无任何网盘资源') { return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] }); }
+        
         fullResourceCache = playUrlString.split('#').map(item => { const parts = item.split('$'); const title = parts[0] || ''; const link = parts[1] || ''; if (!title || !link) { return null; } return { type: detectPanType(title), title: title.trim(), link: link.trim() }; }).filter(item => item !== null);
         log(`资源解析完成，共 ${fullResourceCache.length} 条有效资源`);
     }
@@ -108,10 +127,10 @@ async function getTracks(ext) {
     let filteredResources = [...fullResourceCache];
     if (currentPanTypeFilter !== 'all') { filteredResources = filteredResources.filter(r => r.type === currentPanTypeFilter); }
     if (currentKeywordFilter !== 'all') { const lowerKeyword = currentKeywordFilter.toLowerCase(); if (lowerKeyword === '其他') { filteredResources = filteredResources.filter(r => { const lowerTitle = r.title.toLowerCase(); return KEYWORD_FILTERS.slice(0, -1).every(kw => !lowerTitle.includes(kw.toLowerCase())); }); } else { filteredResources = filteredResources.filter(r => r.title.toLowerCase().includes(lowerKeyword)); } }
+    
     const resultLists = [];
     const panTypeCounts = {};
     fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
-    // 【修正】这里的 vod_id 现在保证是纯净的字符串，构建的指令不会再损坏
     const panTypeButtons = [{ name: `全部 (${fullResourceCache.length})`, pan: `custom:action=filter&pan_type=all&url=${encodeURIComponent(vod_id)}` }];
     Object.keys(panTypeCounts).forEach(typeCode => { panTypeButtons.push({ name: `${PAN_TYPE_MAP[typeCode] || `类型${typeCode}`} (${panTypeCounts[typeCode]})`, pan: `custom:action=filter&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}` }); });
     resultLists.push({ title: '🗂️ 网盘分类', tracks: panTypeButtons });
@@ -119,6 +138,7 @@ async function getTracks(ext) {
     KEYWORD_FILTERS.forEach(kw => { keywordButtons.push({ name: kw, pan: `custom:action=filter&keyword=${kw}&url=${encodeURIComponent(vod_id)}` }); });
     resultLists.push({ title: '🔍 关键字筛选', tracks: keywordButtons });
     if (filteredResources.length > 0) { const resourceTracks = filteredResources.map(r => { const panTypeName = PAN_TYPE_MAP[r.type] || '未知'; return { name: `[${panTypeName}] ${r.title}`, pan: r.link }; }); resultLists.push({ title: `📁 资源列表 (${filteredResources.length}条)`, tracks: resourceTracks }); } else { resultLists.push({ title: '📁 资源列表', tracks: [{ name: '当前筛选条件下无结果', pan: '' }] }); }
+    
     log(`UI构建完成: 网盘='${currentPanTypeFilter}', 关键字='${currentKeywordFilter}', 显示${filteredResources.length}/${fullResourceCache.length}条`);
     return jsonify({ list: resultLists });
 }
@@ -127,7 +147,7 @@ async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panUrl = ext.pan || ext.url || '';
     if (panUrl.startsWith('custom:')) {
-        log(`处理筛选指令: ${panUrl}`);
+        log(`处理指令: ${panUrl}`);
         const paramsStr = panUrl.replace('custom:', '');
         const params = new URLSearchParams(paramsStr);
         const filterExt = {};
@@ -141,11 +161,11 @@ async function getPlayinfo(ext) {
     return jsonify({ urls: [{ name: '点击播放', url: panUrl }] });
 }
 
-// ==================== 标准接口转发 (保持原样) ====================
+// ==================== 标准接口转发 ====================
 async function init() { return await getConfig(); }
 async function home(ext) { return await getCards(ext); }
 async function category(ext) { return await getCards(ext); }
-async function detail(id) { return await getTracks(id); }
+// play 函数现在只处理真实播放链接，所有指令都在 getPlayinfo 中处理
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.1.1 (终极修正版)');
+log('Gying前端插件加载完成 v1.2.0 (回归初心最终版)');
