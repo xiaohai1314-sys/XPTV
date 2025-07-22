@@ -1,14 +1,14 @@
 /**
- * Gying 前端插件 - v2.1 最终正确版
+ * Gying 前端插件 - v3.0 单入口最终版
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v2.1
+ * 版本: v3.0
  * 更新日志:
- * v2.1: 终极版。修复了 v2.0 中 play 函数调用链中断的致命错误。
- * 1. detail 函数现在返回一个调用 play 函数的指令。
- * 2. play 函数现在是所有二级钻取操作的总指挥，负责请求数据和调用 getTracks 刷新UI。
- * 3. getTracks 函数回归纯粹的UI构建角色。
- * 4. 这次，它真的可以了。
+ * v3.0: 最终版。根据播放器直接调用 play 函数的行为模式进行重构。
+ * 1. 确认播放器在详情页直接调用 play 函数，废弃 detail 函数的逻辑。
+ * 2. play 函数现在是获取资源和处理筛选的唯一入口。
+ * 3. 完整保留了二级钻取筛选功能，并确保在正确的函数中执行。
+ * 4. 这次，它将完全匹配播放器的运行逻辑。
  */
 
 // ==================== 配置区 ====================
@@ -53,27 +53,74 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【第1步: detail函数返回一个调用play的指令】 ---
+// 【关键修正】detail 函数现在是空的，因为播放器不调用它
 async function detail(ext) {
-    ext = argsify(ext);
-    const vod_id = ext.vod_id;
-    log(`进入详情页，准备加载按钮，ID: ${vod_id}`);
-    
-    // 【关键修正】这个按钮的指令是调用 play 函数，并告诉它这是初始化操作
-    const triggerUrl = `custom:action=init&vod_id=${encodeURIComponent(vod_id)}`;
-
-    return jsonify({
-        list: [{
-            title: '在线播放',
-            tracks: [{
-                name: '➡️ 点击加载资源列表 (支持筛选)',
-                pan: triggerUrl,
-            }]
-        }]
-    });
+    log("detail函数被调用（理论上不会发生）。");
+    return jsonify({ list: [] });
 }
 
-// --- 【第2步: getTracks只负责构建UI】 ---
+// 【关键修正】play 函数现在是所有详情页逻辑的唯一入口
+async function play(ext) {
+    ext = argsify(ext);
+    
+    // 检查 ext 中是否包含 pan 属性，如果有，说明是筛选或播放操作
+    if (ext.pan) {
+        const panUrl = ext.pan;
+        if (panUrl.startsWith('custom:')) {
+            // 这是筛选指令
+            log(`处理筛选指令: ${panUrl}`);
+            const paramsStr = panUrl.replace('custom:', '');
+            const params = new URLSearchParams(paramsStr);
+            const filterExt = Object.fromEntries(params.entries());
+            const { vod_id, pan_type, keyword } = filterExt;
+
+            if (pan_type !== undefined) currentPanTypeFilter = pan_type;
+            if (keyword !== undefined) currentKeywordFilter = keyword;
+
+            // 直接构建并返回新的UI，因为数据已在缓存中
+            return buildTracksUI(vod_id);
+        } else {
+            // 这是真实的播放链接
+            log(`准备播放: ${panUrl}`);
+            return jsonify({ url: panUrl });
+        }
+    }
+
+    // 如果 ext 中没有 pan 属性，说明是第一次进入详情页
+    const vod_id = ext.vod_id;
+    if (!vod_id) {
+        log("play函数首次调用失败：缺少vod_id。");
+        return jsonify({ list: [] });
+    }
+
+    log(`play函数首次加载详情, ID: ${vod_id}`);
+    currentVodId = vod_id;
+    currentPanTypeFilter = 'all';
+    currentKeywordFilter = 'all';
+
+    const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
+    const data = await request(detailUrl);
+
+    if (data.error || !data.list || data.list.length === 0) {
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+    }
+    const playUrlString = data.list[0].vod_play_url;
+    if (!playUrlString || playUrlString === '暂无任何网盘资源') {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
+    }
+
+    fullResourceCache = playUrlString.split('#').map(item => {
+        const parts = item.split('$');
+        if (!parts[0] || !parts[1]) return null;
+        return { type: detectPanType(parts[0]), title: (parts[0] || '').trim(), link: (parts[1] || '').trim() };
+    }).filter(item => item !== null);
+    log(`资源解析完成，共 ${fullResourceCache.length} 条有效资源`);
+
+    // 获取并缓存数据后，构建二级钻取UI并返回
+    return buildTracksUI(vod_id);
+}
+
+// 辅助函数：构建二级钻取UI
 function buildTracksUI(vod_id) {
     log(`buildTracksUI刷新UI: vod_id=${vod_id}`);
     
@@ -104,59 +151,7 @@ function buildTracksUI(vod_id) {
         resultLists.push({ title: '📁 资源列表', tracks: [{ name: '当前筛选条件下无结果', pan: '' }] });
     }
     
-    // 【关键修正】让播放器用新的UI来刷新界面
-    if (typeof $ui === 'object' && typeof $ui.update === 'function') {
-        $ui.update(jsonify({ list: resultLists }));
-    }
-}
-
-// --- 【第3步: play函数是总指挥】 ---
-async function play(ext) {
-    ext = argsify(ext);
-    const panUrl = ext.pan || ext.url || '';
-
-    if (panUrl.startsWith('custom:')) {
-        log(`处理指令: ${panUrl}`);
-        const paramsStr = panUrl.replace('custom:', '');
-        const params = new URLSearchParams(paramsStr);
-        const filterExt = Object.fromEntries(params.entries());
-        const { action, vod_id, pan_type, keyword } = filterExt;
-
-        if (action === 'init') {
-            log(`首次加载详情, ID: ${vod_id}`);
-            currentVodId = vod_id;
-            currentPanTypeFilter = 'all';
-            currentKeywordFilter = 'all';
-            
-            const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
-            const data = await request(detailUrl);
-
-            if (data.error || !data.list || data.list.length === 0) { /* 错误处理 */ return jsonify({url:''}); }
-            const playUrlString = data.list[0].vod_play_url;
-            if (!playUrlString || playUrlString === '暂无任何网盘资源') { /* 错误处理 */ return jsonify({url:''}); }
-            
-            fullResourceCache = playUrlString.split('#').map(item => {
-                const parts = item.split('$');
-                if (!parts[0] || !parts[1]) return null;
-                return { type: detectPanType(parts[0]), title: (parts[0] || '').trim(), link: (parts[1] || '').trim() };
-            }).filter(item => item !== null);
-            log(`资源解析完成，共 ${fullResourceCache.length} 条有效资源`);
-            
-            buildTracksUI(vod_id);
-
-        } else if (action === 'filter') {
-            log(`筛选操作: pan_type=${pan_type}, keyword=${keyword}`);
-            if (pan_type !== undefined) currentPanTypeFilter = pan_type;
-            if (keyword !== undefined) currentKeywordFilter = keyword;
-            buildTracksUI(vod_id);
-        }
-        
-        // 告诉播放器，我们已经处理了指令，不需要播放
-        return jsonify({ url: '' });
-    }
-    
-    log(`准备播放: ${panUrl}`);
-    return jsonify({ url: panUrl });
+    return jsonify({ list: resultLists });
 }
 
 // --- 标准接口转发 ---
