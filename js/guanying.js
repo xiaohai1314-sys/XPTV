@@ -1,13 +1,12 @@
 /**
- * Gying 前端插件 - 完美复刻修正版 v1.0.3
- * 
- * 核心思路: 100% 保持原始 v1.0 的代码逻辑和结构，仅修正一个API参数名和一个ID获取逻辑。
+ * Gying 前端插件 - 完美复刻修正版 v1.0.4
  * 
  * 作者: 基于用户提供的脚本整合优化
- * 版本: v1.0.3 (ID获取修正版)
+ * 版本: v1.0.4 (增强ID兼容性版)
  * 
  * --- 更新日志 ---
- * v1.0.3: 修正了 getTracks 函数中的ID获取逻辑，避免将整个对象作为ID传递，解决了无法加载详情页资源的问题。
+ * v1.0.4: 增强了 getTracks 函数的ID获取逻辑，增加了对 'vod_id' 字段的兼容。当无法获取ID时，返回更详细的错误信息以方便调试。
+ * v1.0.3: 修正了 getTracks 函数中的ID获取逻辑，避免将整个对象作为ID传递。
  * v1.0.2: 修正了详情接口的参数名，从 'id' 改为 'ids' 以匹配后端。
  */
 
@@ -36,20 +35,22 @@ async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text
 async function getTracks(ext) {
     ext = argsify(ext);
 
-    // ---【核心修正点 v1.0.3】---
-    // 修正ID的获取逻辑。APP通常在ext对象中通过 id 或 url 字段传递影片ID。
-    // 我们需要明确地从这些字段中获取，如果它们不存在，再考虑ext本身是否为字符串ID。
+    // ---【核心修正点 v1.0.4】---
+    // 增强ID获取逻辑，按优先级尝试从多个可能的字段获取ID。
     let vod_id;
     if (ext.id) {
         vod_id = ext.id;
+    } else if (ext.vod_id) { // 新增对 'vod_id' 字段的兼容
+        vod_id = ext.vod_id;
     } else if (ext.url) {
         vod_id = ext.url;
-    } else if (typeof ext === 'string') {
+    } else if (typeof ext === 'string' && ext) { // 确保字符串不为空
         vod_id = ext;
     } else {
-        // 如果都找不到，记录错误并返回，避免向后端发送无效请求
-        log('严重错误: 在getTracks中无法从传入的参数中解析出有效的vod_id。收到的参数: ' + JSON.stringify(ext));
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '插件内部错误：无法获取影片ID', pan: '' }] }] });
+        // 如果都找不到，记录错误并返回带调试信息的错误提示
+        const error_msg = '插件错误: 无法获取ID。收到的参数: ' + JSON.stringify(ext).slice(0, 100);
+        log('严重错误: ' + error_msg);
+        return jsonify({ list: [{ title: '调试信息', tracks: [{ name: error_msg, pan: '' }] }] });
     }
     // ---【修正结束】---
 
@@ -63,7 +64,6 @@ async function getTracks(ext) {
         currentVodId = vod_id;
         log(`首次加载详情: ${vod_id}`);
         
-        // 【v1.0.2 修正】使用 'ids' 参数名以匹配后端
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         
         const data = await request(detailUrl);
@@ -141,7 +141,6 @@ async function getPlayinfo(ext) {
         const paramsStr = panUrl.replace('custom:', ''); 
         const params = new URLSearchParams(paramsStr); 
         const filterExt = Object.fromEntries(params.entries()); 
-        // 使用setTimeout确保UI有时间响应
         setTimeout(() => { getTracks(filterExt); }, 100); 
         return jsonify({ urls: [] }); 
     } 
@@ -156,4 +155,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.0.3');
+log('Gying前端插件加载完成 v1.0.4');
