@@ -70,21 +70,23 @@ async function getTracks(ext) {
   const uniqueLinks = new Set()
 
   try {
-    console.log(`正在加载资源页面: ${detailUrl}`)
-    
-    const { data } = await $fetch.get(detailUrl, {
+    // --- 关键改动点 1：请求详情页，并捕获响应头 ---
+    const response = await $fetch.get(detailUrl, {
       headers: {
         'Referer': appConfig.site,
         'User-Agent': UA,
       }
     })
     
+    const data = response.data
+    // --- 关键改动点 2：从响应头中提取并处理Cookie ---
+    const setCookieHeader = response.headers['set-cookie']
+    const cookie = Array.isArray(setCookieHeader) ? setCookieHeader.map(c => c.split(';')[0]).join('; ') : ''
+    
     const $ = cheerio.load(data)
     const title = $('h1').text().trim() || "网盘资源"
-    console.log(`页面标题: ${title}`)
 
-    // --- 策略一：优先处理“直达链接”按钮 ---
-    console.log("策略一：正在尝试查找 '直达链接' 按钮...")
+    // 策略一：优先处理“直达链接”按钮
     const redirectButton = $('a.btn-primary:contains("直达链接")')
     if (redirectButton.length > 0) {
         const redirectHref = redirectButton.attr('href')
@@ -92,8 +94,13 @@ async function getTracks(ext) {
             const redirectUrl = new URL(redirectHref, appConfig.site).toString()
             let finalPanUrl = ''
             try {
+                // --- 关键改动点 3：携带Cookie和正确的Referer去请求跳转链接 ---
                 await $fetch.get(redirectUrl, {
-                    headers: { 'Referer': detailUrl, 'User-Agent': UA },
+                    headers: {
+                        'User-Agent': UA,
+                        'Referer': detailUrl, // Referer是详情页
+                        'Cookie': cookie,     // 携带获取到的Cookie
+                    },
                     maxRedirects: 0,
                 })
             } catch (e) {
@@ -103,58 +110,47 @@ async function getTracks(ext) {
             }
 
             if (finalPanUrl && isValidPanUrl(finalPanUrl)) {
-                console.log(`通过“直达链接”按钮成功获取链接: ${finalPanUrl}`)
                 let accessCode = ''
                 const codeMatch = $('body').text().match(/(?:访问码|密码|提取码)[:：]?\s*([a-z0-9]{4,6})\b/i)
                 if (codeMatch) accessCode = codeMatch[1]
                 
                 tracks.push({ name: title, pan: finalPanUrl, ext: { accessCode } })
-                
-                // 成功获取，直接返回，不再执行后续老逻辑
                 return jsonify({ list: [{ title: "资源列表", tracks }] })
             }
         }
     }
 
-    // --- 策略二：如果策略一未成功，则无缝回退到您的原始扫描逻辑 ---
+    // 策略二：如果策略一未成功，则无缝回退到您的原始扫描逻辑
     console.log("策略一未生效，执行原始扫描逻辑...")
-    
+    // (您的原始逻辑保持不变)
     let globalAccessCode = ''
     const globalCodeMatch = $('body').text().match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i)
-    if (globalCodeMatch) {
-      globalAccessCode = globalCodeMatch[1]
-      console.log(`全局访问码: ${globalAccessCode}`)
-    }
+    if (globalCodeMatch) globalAccessCode = globalCodeMatch[1]
     
     $('a, button').each((i, el) => {
       const $el = $(el)
       const text = $el.text().trim().toLowerCase()
-      
       if (text.includes('资源链接') || text.includes('下载链接') || text.includes('网盘链接')) {
         const href = $el.attr('href')
         if (href && isValidPanUrl(href)) {
           const normalizedUrl = normalizePanUrl(href)
           if (uniqueLinks.has(normalizedUrl)) return
           uniqueLinks.add(normalizedUrl)
-          
           let accessCode = globalAccessCode
           const contextText = $el.closest('div').text() + $el.next().text()
           const localCode = extractAccessCode(contextText)
           if (localCode) accessCode = localCode
-          
           tracks.push({ name: title, pan: href, ext: { accessCode } })
         }
       }
     })
     
     if (tracks.length === 0) {
-      console.log("未找到特定按钮，扫描整个页面内容")
       const fullText = $('body').text()
       scanForLinks(fullText, tracks, globalAccessCode, uniqueLinks, title)
     }
     
     if (tracks.length === 0) {
-      console.log("常规方法未找到资源，启动深度扫描...")
       const fullText = $('body').text()
       const deepPattern = /(https?:\/\/ )?cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
       let match
@@ -169,7 +165,6 @@ async function getTracks(ext) {
       }
     }
     
-    console.log(`共找到 ${tracks.length} 个资源`)
     return jsonify({ list: [{ title: "资源列表", tracks }] })
     
   } catch (e) {
@@ -178,42 +173,34 @@ async function getTracks(ext) {
   }
 }
 
+// (您的所有辅助函数保持不变)
 function scanForLinks(text, tracks, globalAccessCode, uniqueLinks, title) {
   if (!text) return
   const panMatches = []
   const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<)]+/gi
   let match
   while ((match = urlPattern.exec(text)) !== null) { panMatches.push(match[0]) }
-  
   const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi
   while ((match = shortPattern.exec(text)) !== null) { panMatches.push('https://' + match[0] ) }
-  
   const uniquePanMatches = [...new Set(panMatches)]
-  
   uniquePanMatches.forEach(panUrl => {
     if (!isValidPanUrl(panUrl)) return
     const normalizedUrl = normalizePanUrl(panUrl)
     if (uniqueLinks.has(normalizedUrl)) return
     uniqueLinks.add(normalizedUrl)
-    
     let accessCode = globalAccessCode
     const index = text.indexOf(panUrl)
     if (index !== -1) {
       const contextText = text.substring(Math.max(0, index - 100), Math.min(text.length, index + panUrl.length + 100))
       const localCode = extractAccessCode(contextText)
       if (localCode) accessCode = localCode
-      
       const directMatch = contextText.match(new RegExp(`${escapeRegExp(panUrl)}[\\s\\S]{0,30}?(?:访问码|密码|访问密码|提取码|code)[:：]?\\s*([a-z0-9]{4,6})`, 'i'))
       if (directMatch && directMatch[1]) accessCode = directMatch[1]
     }
     tracks.push({ name: title, pan: panUrl, ext: { accessCode } })
   })
 }
-
-function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
+function escapeRegExp(string) { return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 function extractAccessCode(text) {
   if (!text) return ''
   let match = text.match(/[\[【]访问码[:：]\s*([a-z0-9]{4,6})[\]】]/i)
@@ -225,42 +212,34 @@ function extractAccessCode(text) {
   const standalone = text.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/i)
   if (standalone) {
     const code = standalone[1]
-    if (!/^\d+$/.test(code) && !/^[a-z]+$/i.test(code) && !/^\d{4}$/.test(code)) {
-      return code
-    }
+    if (!/^\d+$/.test(code) && !/^[a-z]+$/i.test(code) && !/^\d{4}$/.test(code)) { return code }
   }
   return ''
 }
-
-function isValidPanUrl(url) {
-  if (!url) return false
-  return /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(url)
-}
-
-function normalizePanUrl(url) {
-  return url.replace(/\?.*$/, '').toLowerCase()
-}
-
-async function getPlayinfo(ext) {
-  return jsonify({ 'urls': [] })
-}
+function isValidPanUrl(url) { return url ? /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(url) : false }
+function normalizePanUrl(url) { return url.replace(/\?.*$/, '').toLowerCase() }
+async function getPlayinfo(ext) { return jsonify({ 'urls': [] }) }
 
 async function search(ext) {
   ext = argsify(ext)
   let cards = []
   let text = encodeURIComponent(ext.text)
   let page = ext.page || 1
-  let url = `${appConfig.site}/search.html?keyword=${text}&page=${page}`
+  // --- 关键改动点 4：使用正确的URL格式 ---
+  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`
 
   const { data } = await $fetch.get(url, {
-    headers: { 'User-Agent': UA },
+    headers: {
+      'User-Agent': UA,
+      // --- 关键改动点 5：为搜索也加入Referer ---
+      'Referer': appConfig.site,
+    },
   })
 
   const $ = cheerio.load(data)
 
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return
-    
     const href = $(each).find('h2 a').attr('href')
     const title = $(each).find('h2 a').text()
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/
@@ -268,10 +247,8 @@ async function search(ext) {
     const dramaName = match ? match[1] : title
     const r = $(each).find('.summary').text()
     const tag = $(each).find('.tag').text()
-    
     if (/content/.test(r) && !/cloud/.test(r)) return
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return
-
     cards.push({
       vod_id: href,
       vod_name: dramaName,
