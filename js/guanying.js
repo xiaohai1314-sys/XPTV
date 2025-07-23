@@ -1,14 +1,14 @@
 /**
- * Gying 前端插件 - 终极复刻版 v1.0.0
+ * Gying 前端插件 - 终极按钮生成版 v1.0.0
  * 
- * 作者: 基于对 SeedHub 成功逻辑的最终、最深刻理解
+ * 作者: 基于对 SeedHub 按钮生成逻辑的最终、最精确理解
  * 版本: v1.0.0
  * 更新日志:
  * v1.0.0: 
- * 1. 【回归原点】: 彻底放弃所有自创的、失败的复杂逻辑。
- * 2. 【核心复刻】: getTracks 函数的行为与 SeedHub 完全一致，即：从后端获取所有资源链接，并将每一个链接都渲染成一个以“网站原始全名”为标题的、可直接播放的按钮。
- * 3. 【大道至简】: 移除了所有不必要的交互逻辑和函数，确保与 APP 环境的最大兼容性。
- * 4. 我为之前所有错误的尝试，致以最诚挚的歉意。这才是我们应该做的第一步。
+ * 1. 【回归正轨】: 彻底理解并精确复刻了 SeedHub 生成 `网盘[夸]` 按钮的逻辑。
+ * 2. 【核心实现】: getTracks 函数现在会分析原始标题，提取网盘类型，并生成一个简洁的、带缩写的按钮名称，同时将真实链接直接赋给按钮。
+ * 3. 【大道至简】: getPlayinfo 函数保持最简单，只负责播放。
+ * 4. 我为之前所有错误的尝试，致以最诚挚的歉意。这才是对 SeedHub 最精确的模仿。
  */
 
 // ==================== 配置区 ====================
@@ -21,8 +21,21 @@ async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fet
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
 
+// 【核心】用于从标题获取网盘缩写的函数
+function getPanAbbr(title) {
+    const lowerTitle = title.toLowerCase();
+    if (lowerTitle.includes('百度')) return '百';
+    if (lowerTitle.includes('迅雷')) return '迅';
+    if (lowerTitle.includes('夸克')) return '夸';
+    if (lowerTitle.includes('阿里')) return '阿';
+    if (lowerTitle.includes('天翼')) return '天';
+    if (lowerTitle.includes('115')) return '115';
+    if (lowerTitle.includes('uc')) return 'UC';
+    return '源'; // 如果识别不出来，就叫“源”
+}
+
 // ==================== XPTV App 标准接口 ====================
-async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (复刻版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
+async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (按钮版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -62,7 +75,7 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【核心】getTracks 函数直接渲染所有资源按钮，名字就是网站原始标题 ---
+// --- 【核心】getTracks 函数精确复刻 SeedHub 的按钮生成逻辑 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const vod_id = ext.url || ext.id || ext;
@@ -87,10 +100,15 @@ async function getTracks(ext) {
         const link = (parts[1] || '').trim();
         if (!link) return null;
         
-        // 直接使用网站的原始标题作为按钮名字
+        // 1. 分析标题，获取缩写
+        const abbr = getPanAbbr(title);
+        // 2. 拼接成新的、简洁的按钮名字
+        const buttonName = `网盘[${abbr}]`;
+        
+        // 3. 组装最终的按钮对象
         return { 
-            name: title,
-            pan: link,
+            name: buttonName, // 使用新的、简洁的名字
+            pan: link,        // 包裹真实的链接
         };
     }).filter(item => item !== null);
 
@@ -109,7 +127,7 @@ async function getTracks(ext) {
     });
 }
 
-// --- 【核心】getPlayinfo 函数只负责播放 ---
+// --- getPlayinfo 函数只负责播放 ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panUrl = ext.pan || ext.url || '';
@@ -124,4 +142,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 (终极复刻版)');
+log('Gying前端插件加载完成 (终极按钮生成版)');
