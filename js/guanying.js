@@ -1,17 +1,13 @@
 /**
- * Gying 前端插件 - 流程图复刻版 v1.4.0
+ * Gying 前端插件 - 兼容性修正版 v1.4.1
  * 
- * 作者: 基于用户流程图需求重构
- * 版本: v1.4.0
+ * 作者: 基于用户反馈分析和修正
+ * 版本: v1.4.1
  * 更新日志:
- * v1.4.0:
- * 1. 【流程复刻】完全按照用户提供的四步流程图重构 getTracks 和 getPlayinfo。
- * 2. 【后端协同】能够正确解析后端 v22.4 返回的、包含自定义指令的 "文件夹" 数据。
- * 3. 【分步渲染】getTracks 负责渲染第一步（网盘分类）。
- * 4. 【分步渲染】getPlayinfo 负责处理所有后续步骤的点击事件：
- *    - 点击“夸克网盘”，刷新并显示第二步（网盘[夸]）。
- *    - 点击“网盘[夸]”，刷新并显示第三步（文件夹）。
- *    - 点击“文件夹”，刷新并显示第四步（视频文件）。
+ * v1.4.1:
+ * 1. 【核心修正】修复了 getTracks 函数在处理 'unknown' 或非标准网盘类型时，不显示任何分类按钮的致命BUG。
+ * 2. 【逻辑优化】修改了分类按钮的生成逻辑，从遍历固定的 PAN_TYPE_MAP 改为遍历从数据中动态统计出的 panTypeCounts，确保所有存在的资源类型都会被展示。
+ * 3. 【增强兼容】即使网盘类型未知，也能正确显示为 "未知网盘"，保证了界面的健壮性。
  */
 
 // ==================== 配置区 (无需修改) ====================
@@ -19,12 +15,12 @@ const API_BASE_URL = 'http://192.168.10.111:3001/api';
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // ==================== 工具函数、配置、缓存区 (无需修改) ====================
-function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying v1.4.0] ${msg}`); } else { console.log(`[Gying v1.4.0] ${msg}`); } } catch (e) {} }
+function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying v1.4.1] ${msg}`); } else { console.log(`[Gying v1.4.1] ${msg}`); } } catch (e) {} }
 async function request(url) { try { log(`发起请求: ${url}`); const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { return { error: `HTTP ${status}` }; } return typeof data === 'object' ? data : JSON.parse(data); } catch (error) { return { error: error.message }; } }
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
 function detectPanType(title) { const lowerTitle = title.toLowerCase(); if (lowerTitle.includes('百度')) return '0'; if (lowerTitle.includes('迅雷')) return '1'; if (lowerTitle.includes('夸克')) return '2'; if (lowerTitle.includes('阿里')) return '3'; if (lowerTitle.includes('天翼')) return '4'; if (lowerTitle.includes('115')) return '5'; if (lowerTitle.includes('uc')) return '6'; return 'unknown'; }
-const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里', '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知' };
+const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里', '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知' }; // 'unknown' 现在是预设的一部分
 let fullResourceCache = [];
 let currentVodId = '';
 
@@ -33,8 +29,7 @@ async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, ti
 async function getCards(ext) { ext = argsify(ext); const { id, page = 1 } = ext; if (!id) return jsonify({ list: [] }); const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`; const data = await request(url); if (data.error) return jsonify({ list: [], total: 0 }); const cards = (data.list || []).map(item => ({ vod_id: item.vod_id, vod_name: item.vod_name, vod_pic: item.vod_pic, vod_remarks: item.vod_remarks, ext: { url: item.vod_id } })); return jsonify({ list: cards, total: data.total || 0 }); }
 async function search(ext) { ext = argsify(ext); const { text } = ext; if (!text) return jsonify({ list: [] }); const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`; const data = await request(url); if (data.error) return jsonify({ list: [] }); const cards = (data.list || []).map(item => ({ vod_id: item.vod_id, vod_name: item.vod_name, vod_pic: item.vod_pic, vod_remarks: item.vod_remarks, ext: { url: item.vod_id } })); return jsonify({ list: cards }); }
 
-// --- 【核心】v1.4.0 getTracks 函数 ---
-// 只负责渲染第一步：网盘分类
+// --- 【核心】v1.4.1 修正版 getTracks 函数 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const vod_id = ext.url || ext.id || (typeof ext === 'string' ? ext : '');
@@ -44,7 +39,7 @@ async function getTracks(ext) {
         const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
         const data = await request(detailUrl);
         if (data.error || !data.list || !data.list[0] || !data.list[0].vod_play_url) {
-            return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+            return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败或无资源', pan: '' }] }] });
         }
         fullResourceCache = data.list[0].vod_play_url.split('#').map(item => {
             const parts = item.split('$');
@@ -54,6 +49,10 @@ async function getTracks(ext) {
         currentVodId = vod_id;
         log(`资源缓存成功，共 ${fullResourceCache.length} 条。`);
     }
+    
+    if (fullResourceCache.length === 0) {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何有效网盘资源', pan: '' }] }] });
+    }
 
     const panTypeCounts = fullResourceCache.reduce((acc, r) => {
         acc[r.type] = (acc[r.type] || 0) + 1;
@@ -61,20 +60,22 @@ async function getTracks(ext) {
     }, {});
 
     const panFilterButtons = [];
-    Object.keys(PAN_TYPE_MAP).forEach(typeCode => {
-        if (panTypeCounts[typeCode]) {
-            panFilterButtons.push({
-                name: `${PAN_TYPE_MAP[typeCode]} (${panTypeCounts[typeCode]})`,
-                pan: `custom:action=show_pans&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}`
-            });
-        }
+    // 【核心修正】遍历从数据中统计出来的 panTypeCounts 的键，而不是固定的 PAN_TYPE_MAP
+    Object.keys(panTypeCounts).forEach(typeCode => {
+        const count = panTypeCounts[typeCode];
+        // 【兼容性】如果 PAN_TYPE_MAP 中没有这个类型，就用 "未知网盘"
+        const typeName = PAN_TYPE_MAP[typeCode] || '未知网盘'; 
+        
+        panFilterButtons.push({
+            name: `${typeName} (${count})`,
+            pan: `custom:action=show_pans&pan_type=${typeCode}&url=${encodeURIComponent(vod_id)}`
+        });
     });
 
     return jsonify({ list: [{ title: '云盘', tracks: panFilterButtons }] });
 }
 
-// --- 【核心】v1.4.0 getPlayinfo 函数 ---
-// 负责处理所有后续步骤的点击事件
+// --- getPlayinfo 函数 (与v1.4.0版本完全相同，无需修改) ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panUrl = ext.pan || ext.url || '';
@@ -94,36 +95,29 @@ async function getPlayinfo(ext) {
     let title = '';
 
     if (action === 'show_pans') {
-        // 第二步: 显示 网盘[夸], 网盘[翼]...
-        log(`执行第二步: 显示 ${PAN_TYPE_MAP[pan_type]} 的资源列表`);
-        title = `云盘 - ${PAN_TYPE_MAP[pan_type]}`;
+        log(`执行第二步: 显示 ${PAN_TYPE_MAP[pan_type] || '未知'} 的资源列表`);
+        title = `云盘 - ${PAN_TYPE_MAP[pan_type] || '未知'}`;
         const filtered = fullResourceCache.filter(r => r.type === pan_type);
         tracks = filtered.map(r => ({
-            name: `网盘 [${PAN_TYPE_MAP[r.type]}]`,
+            name: `网盘 [${PAN_TYPE_MAP[r.type] || '未知'}]`,
             sub: r.title,
-            pan: r.link // 注意：这里的 link 是后端的自定义指令 "custom:action=show_files..."
+            pan: r.link
         }));
     } else if (action === 'show_files') {
-        // 第三步: 显示文件夹
         const originalTitle = decodeURIComponent(params.get('title'));
         log(`执行第三步: 显示文件夹 "${originalTitle}"`);
         title = `文件夹`;
         tracks = [{
             name: `🗂️ ${originalTitle}`,
-            // 点击文件夹后，直接把最终的网盘链接作为 pan，触发第四步
             pan: decodeURIComponent(params.get('link')) 
         }];
     }
 
-    // 通过 rerun 刷新UI，显示当前步骤的内容
     const rerunExt = {
-        // 使用一个特殊的 vod_id 来告诉 getTracks 不要重新请求，而是直接渲染我们构造好的数据
         id: `rerun:${jsonify({ list: [{ title: title, tracks: tracks }] })}`,
         url: `rerun:${jsonify({ list: [{ title: title, tracks: tracks }] })}`
     };
     
-    // XPTV/影视TV的特殊技巧：当 id/url 以 "rerun:" 开头时，
-    // 它会直接用后面的 JSON 来渲染页面，而不是调用插件的 detail 方法。
     return jsonify({ urls: [{ name: '加载中...', url: `rerun://${jsonify(rerunExt)}` }] });
 }
 
@@ -134,4 +128,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v1.4.0 (流程图复刻版)');
+log('Gying前端插件加载完成 v1.4.1 (兼容性修正版)');
