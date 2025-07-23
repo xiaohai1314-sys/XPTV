@@ -1,14 +1,14 @@
 /**
- * Gying 前端插件 - 终极模仿版 v3.0.0
+ * Gying 前端插件 - 无状态全列表版 v4.0.0
  * 
- * 作者: 基于用户反馈和参考代码的最终尝试
- * 版本: v3.0.0 (终极模仿版)
+ * 作者: 基于用户反馈和所有失败尝试后的最终方案
+ * 版本: v4.0.0 (无状态全列表版)
  * 更新日志:
- * v3.0.0: 
- * 1. 【像素级模仿】getTracks 永远返回和 SeedHub 一样结构的JSON，pan属性永远是链接（或占位符链接）。
- * 2. 【改变通信方式】放弃在 pan 中传递指令，改为在 ext 对象中隐藏和传递分步信息 (step, pan_type, resource_index)。
- * 3. 【重构 play 函数】play 函数现在是分步逻辑的核心控制器，负责解析 ext 指令并重新调用 getTracks。
- * 4. 这是基于所有已知信息的最优解，旨在解决APP对返回JSON结构过于挑剔的问题。
+ * v4.0.0: 
+ * 1. 【彻底重构】放弃所有“有状态”、“分步刷新”的逻辑，因为APP环境可能不支持。
+ * 2. 【回归无状态】一次性获取所有数据，并为每种网盘类型都生成一个独立的分组。
+ * 3. 【UI模拟分步】将所有分组一次性返回给APP，寄希望于APP的UI能以某种方式（如锚点跳转、折叠面板）来模拟分步效果。
+ * 4. 这是解决“逻辑正确但无法显示”问题的最终尝试，将渲染的决定权完全交还给APP。
  */
 
 // ==================== 配置区 ====================
@@ -24,8 +24,7 @@ function detectPanType(title) { const lowerTitle = title.toLowerCase(); if (lowe
 const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里', '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知' };
 
 // ==================== XPTV App 标准接口 ====================
-async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, title: 'Gying观影 (四步版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
-
+async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, title: 'Gying观影 (全列表)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 async function getCards(ext) {
     ext = argsify(ext);
     const { id, page = 1 } = ext;
@@ -36,7 +35,6 @@ async function getCards(ext) {
     const cards = (data.list || []).map(item => ({ vod_id: item.vod_id, vod_name: item.vod_name, vod_pic: item.vod_pic, vod_remarks: item.vod_remarks, ext: { url: item.vod_id } }));
     return jsonify({ list: cards, total: data.total || 0 });
 }
-
 async function search(ext) {
     ext = argsify(ext);
     const { text } = ext;
@@ -48,14 +46,11 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【核心实现：v3.0 终极模仿版】 ---
+// --- 【核心实现：v4.0 无状态全列表版】 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let vod_id = ext.url || ext.id || ext;
     if (typeof ext === 'string') { vod_id = ext; }
-
-    const { step = 'step1', pan_type, resource_index } = ext;
-    log(`getTracks: step=${step}, pan_type=${pan_type}, resource_index=${resource_index}`);
 
     const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
     const data = await request(detailUrl);
@@ -66,82 +61,53 @@ async function getTracks(ext) {
     if (!playUrlString || playUrlString === '暂无任何网盘资源') {
         return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
     }
-    const fullResourceCache = playUrlString.split('#').map((item, index) => {
+    const fullResourceCache = playUrlString.split('#').map(item => {
         const parts = item.split('$');
         if (!parts[0] || !parts[1]) return null;
-        return { type: detectPanType(parts[0]), title: parts[0].trim(), link: parts[1].trim(), index: index };
+        return { type: detectPanType(parts[0]), title: parts[0].trim(), link: parts[1].trim() };
     }).filter(Boolean);
 
-    let tracks = [];
-    let title = 'Gying';
-    let next_ext = {}; // 这个对象将用来构建下一步的指令
+    const resultLists = [];
+    const resourcesByType = {};
 
-    // 步骤1: 显示网盘分类
-    if (step === 'step1') {
-        title = '第一步：请选择网盘';
-        const panTypeCounts = {};
-        fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
-        tracks = Object.keys(panTypeCounts).map(typeCode => {
-            next_ext = { url: vod_id, step: 'step2', pan_type: typeCode };
-            return {
-                name: `[分类] ${PAN_TYPE_MAP[typeCode] || '未知'} (${panTypeCounts[typeCode]})`,
-                // pan 是一个无意义的占位符，但 ext 包含了下一步的指令
-                pan: `http://gying.org/step/2`, 
-                ext: next_ext
-            };
-        } );
-    }
-
-    // 步骤2: 显示所选分类下的所有资源
-    else if (step === 'step2') {
-        title = `第二步：请选择资源 (${PAN_TYPE_MAP[pan_type]})`;
-        const resourcesOfSelectedType = fullResourceCache.filter(r => r.type === pan_type);
-        tracks = resourcesOfSelectedType.map(r => {
-            const cleanTitle = r.title.replace(/【.*?】|\[.*?\]/g, '').trim();
-            next_ext = { url: vod_id, step: 'step3', resource_index: r.index };
-            return {
-                name: `[资源] ${cleanTitle}`,
-                pan: `http://gying.org/step/3`,
-                ext: next_ext
-            };
-        } );
-    }
-
-    // 步骤3: 显示所选资源的文件夹
-    else if (step === 'step3') {
-        title = '第三步：请点击文件夹播放';
-        const selectedResource = fullResourceCache.find(r => r.index == resource_index);
-        if (selectedResource) {
-            tracks.push({
-                name: `[文件夹] ${selectedResource.title}`,
-                pan: selectedResource.link, // pan里是最终的真实链接
-                ext: { url: selectedResource.link } // ext 也带上，保持结构一致
-            });
+    // 1. 将所有资源按网盘类型分组
+    fullResourceCache.forEach(r => {
+        if (!resourcesByType[r.type]) {
+            resourcesByType[r.type] = [];
         }
-    }
-
-    // 统一返回APP能理解的简单结构
-    return jsonify({
-        list: [{
-            title: title,
-            tracks: tracks,
-        }],
+        resourcesByType[r.type].push(r);
     });
+
+    // 2. 创建第一步的“分类导航”分组
+    const navigationTracks = Object.keys(resourcesByType).map(typeCode => ({
+        name: `[跳转到] ${PAN_TYPE_MAP[typeCode] || '未知'} (${resourcesByType[typeCode].length})`,
+        // pan里放一个锚点链接，寄希望于APP能识别
+        pan: `#${PAN_TYPE_MAP[typeCode]}` 
+    }));
+    resultLists.push({ title: '第一步：选择网盘（跳转）', tracks: navigationTracks });
+
+    // 3. 为每一种网盘类型，都创建一个独立的分组
+    Object.keys(resourcesByType).forEach(typeCode => {
+        const resources = resourcesByType[typeCode];
+        const resourceTracks = resources.map(r => ({
+            name: r.title,
+            pan: r.link // pan里是最终的真实链接
+        }));
+        
+        resultLists.push({
+            // 分组标题带上特殊标记，寄希望于APP的锚点跳转能识别
+            title: `↓ ${PAN_TYPE_MAP[typeCode]} 资源列表 ↓`,
+            tracks: resourceTracks
+        });
+    });
+
+    // 4. 一次性返回所有分组
+    return jsonify({ list: resultLists });
 }
 
 async function getPlayinfo(ext) {
+    // 在这个无状态模式下，play函数只负责播放，不承担任何逻辑
     ext = argsify(ext);
-    log(`getPlayinfo called with ext: ${JSON.stringify(ext)}`);
-
-    // 检查 ext 中是否有我们藏好的 step 指令
-    if (ext.step) {
-        log(`getPlayinfo: 收到分步指令，重新调用getTracks`);
-        // 如果有，说明这是一个分步操作，需要重新调用 getTracks 来生成下一级界面
-        return await getTracks(ext);
-    }
-    
-    // 如果没有 step 指令，说明这是一个真实的播放请求
-    log(`getPlayinfo: 收到真实播放链接: ${ext.pan || ext.url}`);
     const playUrl = ext.pan || ext.url;
     return jsonify({ urls: [{ name: '点击播放', url: playUrl }] });
 }
@@ -150,13 +116,7 @@ async function getPlayinfo(ext) {
 async function init() { return await getConfig(); }
 async function home(ext) { return await getCards(ext); }
 async function category(ext) { return await getCards(ext); }
-async function detail(id) { 
-    // 初始调用时，ext里没有step，getTracks会默认执行step1
-    return await getTracks({ id: id }); 
-}
-async function play(ext) { 
-    // play函数现在是分步逻辑的核心控制器
-    return await getPlayinfo(ext); 
-}
+async function detail(id) { return await getTracks({ id: id }); }
+async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v3.0.0 (终极模仿版)');
+log('Gying前端插件加载完成 v4.0.0 (无状态全列表版)');
