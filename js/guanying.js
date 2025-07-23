@@ -1,14 +1,14 @@
 /**
- * Gying 前端插件 - 最终四步实现版 v2.0.0
+ * Gying 前端插件 - 终极模仿版 v3.0.0
  * 
- * 作者: 基于用户提供的脚本和参考代码整合优化
- * 版本: v2.0.0 (最终四步实现版)
+ * 作者: 基于用户反馈和参考代码的最终尝试
+ * 版本: v3.0.0 (终极模仿版)
  * 更新日志:
- * v2.0.0: 
- * 1. 【核心重构】学习 SeedHub 插件的成功经验，采用“伪装”模式，将分步逻辑隐藏在 pan 指令中，每次都返回APP能理解的简单列表结构。
- * 2. 【实现四步】通过在 pan 指令中编码 step 信息 (step1, step2, step3)，精确实现了用户描述的“选择分类 -> 选择资源 -> 显示文件夹 -> 播放”的四步流程。
- * 3. 【放弃刷新】不再依赖APP的UI刷新机制，每次点击都视为一次全新的 getTracks 调用，插件自身管理状态。
- * 4. 【高兼容性】移除了所有 Buffer 等潜在不兼容的API。
+ * v3.0.0: 
+ * 1. 【像素级模仿】getTracks 永远返回和 SeedHub 一样结构的JSON，pan属性永远是链接（或占位符链接）。
+ * 2. 【改变通信方式】放弃在 pan 中传递指令，改为在 ext 对象中隐藏和传递分步信息 (step, pan_type, resource_index)。
+ * 3. 【重构 play 函数】play 函数现在是分步逻辑的核心控制器，负责解析 ext 指令并重新调用 getTracks。
+ * 4. 这是基于所有已知信息的最优解，旨在解决APP对返回JSON结构过于挑剔的问题。
  */
 
 // ==================== 配置区 ====================
@@ -25,6 +25,7 @@ const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里
 
 // ==================== XPTV App 标准接口 ====================
 async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, title: 'Gying观影 (四步版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
+
 async function getCards(ext) {
     ext = argsify(ext);
     const { id, page = 1 } = ext;
@@ -35,6 +36,7 @@ async function getCards(ext) {
     const cards = (data.list || []).map(item => ({ vod_id: item.vod_id, vod_name: item.vod_name, vod_pic: item.vod_pic, vod_remarks: item.vod_remarks, ext: { url: item.vod_id } }));
     return jsonify({ list: cards, total: data.total || 0 });
 }
+
 async function search(ext) {
     ext = argsify(ext);
     const { text } = ext;
@@ -46,17 +48,15 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【核心实现：伪装成三步的四步流程】 ---
+// --- 【核心实现：v3.0 终极模仿版】 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let vod_id = ext.url || ext.id || ext;
     if (typeof ext === 'string') { vod_id = ext; }
 
-    // 从 ext 中解析出当前步骤和所需参数
     const { step = 'step1', pan_type, resource_index } = ext;
     log(`getTracks: step=${step}, pan_type=${pan_type}, resource_index=${resource_index}`);
 
-    // 任何步骤都需要先获取全量数据
     const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
     const data = await request(detailUrl);
     if (data.error || !data.list || data.list.length === 0) {
@@ -74,16 +74,22 @@ async function getTracks(ext) {
 
     let tracks = [];
     let title = 'Gying';
+    let next_ext = {}; // 这个对象将用来构建下一步的指令
 
     // 步骤1: 显示网盘分类
     if (step === 'step1') {
         title = '第一步：请选择网盘';
         const panTypeCounts = {};
         fullResourceCache.forEach(r => { panTypeCounts[r.type] = (panTypeCounts[r.type] || 0) + 1; });
-        tracks = Object.keys(panTypeCounts).map(typeCode => ({
-            name: `[分类] ${PAN_TYPE_MAP[typeCode] || '未知'} (${panTypeCounts[typeCode]})`,
-            pan: jsonify({ step: 'step2', pan_type: typeCode, url: vod_id }) // pan里藏着下一步的指令
-        }));
+        tracks = Object.keys(panTypeCounts).map(typeCode => {
+            next_ext = { url: vod_id, step: 'step2', pan_type: typeCode };
+            return {
+                name: `[分类] ${PAN_TYPE_MAP[typeCode] || '未知'} (${panTypeCounts[typeCode]})`,
+                // pan 是一个无意义的占位符，但 ext 包含了下一步的指令
+                pan: `http://gying.org/step/2`, 
+                ext: next_ext
+            };
+        } );
     }
 
     // 步骤2: 显示所选分类下的所有资源
@@ -92,11 +98,13 @@ async function getTracks(ext) {
         const resourcesOfSelectedType = fullResourceCache.filter(r => r.type === pan_type);
         tracks = resourcesOfSelectedType.map(r => {
             const cleanTitle = r.title.replace(/【.*?】|\[.*?\]/g, '').trim();
+            next_ext = { url: vod_id, step: 'step3', resource_index: r.index };
             return {
                 name: `[资源] ${cleanTitle}`,
-                pan: jsonify({ step: 'step3', resource_index: r.index, url: vod_id }) // pan里藏着下一步的指令
+                pan: `http://gying.org/step/3`,
+                ext: next_ext
             };
-        });
+        } );
     }
 
     // 步骤3: 显示所选资源的文件夹
@@ -106,7 +114,8 @@ async function getTracks(ext) {
         if (selectedResource) {
             tracks.push({
                 name: `[文件夹] ${selectedResource.title}`,
-                pan: selectedResource.link // pan里是最终的真实链接
+                pan: selectedResource.link, // pan里是最终的真实链接
+                ext: { url: selectedResource.link } // ext 也带上，保持结构一致
             });
         }
     }
@@ -122,25 +131,32 @@ async function getTracks(ext) {
 
 async function getPlayinfo(ext) {
     ext = argsify(ext);
-    // 尝试将 ext.pan (可能是一个JSON字符串) 解析成对象
-    let playInfo = argsify(ext.pan);
+    log(`getPlayinfo called with ext: ${JSON.stringify(ext)}`);
 
-    // 如果解析失败，或者解析后没有 step 属性，说明它是一个真实的播放链接
-    if (typeof playInfo !== 'object' || !playInfo.step) {
-        log(`getPlayinfo: 收到真实播放链接: ${ext.pan}`);
-        return jsonify({ urls: [{ name: '点击播放', url: ext.pan }] });
+    // 检查 ext 中是否有我们藏好的 step 指令
+    if (ext.step) {
+        log(`getPlayinfo: 收到分步指令，重新调用getTracks`);
+        // 如果有，说明这是一个分步操作，需要重新调用 getTracks 来生成下一级界面
+        return await getTracks(ext);
     }
     
-    // 如果解析成功，说明它是一个分步指令，需要再次调用 getTracks
-    log(`getPlayinfo: 收到分步指令，重新调用getTracks`);
-    return await getTracks(playInfo);
+    // 如果没有 step 指令，说明这是一个真实的播放请求
+    log(`getPlayinfo: 收到真实播放链接: ${ext.pan || ext.url}`);
+    const playUrl = ext.pan || ext.url;
+    return jsonify({ urls: [{ name: '点击播放', url: playUrl }] });
 }
 
 // ==================== 标准接口转发 ====================
 async function init() { return await getConfig(); }
 async function home(ext) { return await getCards(ext); }
 async function category(ext) { return await getCards(ext); }
-async function detail(id) { return await getTracks({ id: id }); } // 初始调用
-async function play(ext) { return await getPlayinfo(ext); }
+async function detail(id) { 
+    // 初始调用时，ext里没有step，getTracks会默认执行step1
+    return await getTracks({ id: id }); 
+}
+async function play(ext) { 
+    // play函数现在是分步逻辑的核心控制器
+    return await getPlayinfo(ext); 
+}
 
-log('Gying前端插件加载完成 v2.0.0 (最终四步实现版)');
+log('Gying前端插件加载完成 v3.0.0 (终极模仿版)');
