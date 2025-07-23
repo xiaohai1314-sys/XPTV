@@ -1,14 +1,14 @@
 /**
- * Gying 前端插件 - 无状态全列表版 v4.0.0
+ * Gying 前端插件 - 像素级模仿SeedHub版 v5.0.0
  * 
- * 作者: 基于用户反馈和所有失败尝试后的最终方案
- * 版本: v4.0.0 (无状态全列表版)
+ * 作者: 基于用户反馈和参考代码的最终实现
+ * 版本: v5.0.0 (像素级模仿SeedHub版)
  * 更新日志:
- * v4.0.0: 
- * 1. 【彻底重构】放弃所有“有状态”、“分步刷新”的逻辑，因为APP环境可能不支持。
- * 2. 【回归无状态】一次性获取所有数据，并为每种网盘类型都生成一个独立的分组。
- * 3. 【UI模拟分步】将所有分组一次性返回给APP，寄希望于APP的UI能以某种方式（如锚点跳转、折叠面板）来模拟分步效果。
- * 4. 这是解决“逻辑正确但无法显示”问题的最终尝试，将渲染的决定权完全交还给APP。
+ * v5.0.0: 
+ * 1. 【回归初心】放弃所有自定义的分步逻辑，完全模仿 SeedHub 插件的行为模式。
+ * 2. 【简化 getTracks】getTracks 函数现在只做一件事：获取所有资源链接，并以最简单的单分组列表形式返回。
+ * 3. 【简化 getPlayinfo】getPlayinfo 函数也回归到最简单的模式，只负责传递播放链接。
+ * 4. 【核心思想】插件只负责提供数据，将所有复杂的交互（如转存、解析文件夹）完全交由APP的核心功能处理。
  */
 
 // ==================== 配置区 ====================
@@ -24,7 +24,7 @@ function detectPanType(title) { const lowerTitle = title.toLowerCase(); if (lowe
 const PAN_TYPE_MAP = { '0': '百度', '1': '迅雷', '2': '夸克', '3': '阿里', '4': '天翼', '5': '115', '6': 'UC', 'unknown': '未知' };
 
 // ==================== XPTV App 标准接口 ====================
-async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, title: 'Gying观影 (全列表)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
+async function getConfig() { log(`插件初始化`); return jsonify({ ver: 1, title: 'Gying观影 (模仿版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 async function getCards(ext) {
     ext = argsify(ext);
     const { id, page = 1 } = ext;
@@ -46,7 +46,7 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- 【核心实现：v4.0 无状态全列表版】 ---
+// --- 【核心实现：v5.0 像素级模仿SeedHub版】 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let vod_id = ext.url || ext.id || ext;
@@ -61,52 +61,32 @@ async function getTracks(ext) {
     if (!playUrlString || playUrlString === '暂无任何网盘资源') {
         return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
     }
-    const fullResourceCache = playUrlString.split('#').map(item => {
+    
+    // 1. 将所有资源解析出来
+    const resourceList = playUrlString.split('#').map(item => {
         const parts = item.split('$');
         if (!parts[0] || !parts[1]) return null;
-        return { type: detectPanType(parts[0]), title: parts[0].trim(), link: parts[1].trim() };
+        const type = detectPanType(parts[0]);
+        const typeName = PAN_TYPE_MAP[type] ? `[${PAN_TYPE_MAP[type][0]}]` : '[未知]';
+        return {
+            // 2. 按钮名称直接就是资源标题
+            name: `网盘${typeName} ${parts[0].trim()}`,
+            // 3. pan属性就是真实的、可直接处理的链接
+            pan: parts[1].trim()
+        };
     }).filter(Boolean);
 
-    const resultLists = [];
-    const resourcesByType = {};
-
-    // 1. 将所有资源按网盘类型分组
-    fullResourceCache.forEach(r => {
-        if (!resourcesByType[r.type]) {
-            resourcesByType[r.type] = [];
-        }
-        resourcesByType[r.type].push(r);
+    // 4. 以最简单的、和SeedHub一样的单分组结构返回
+    return jsonify({
+        list: [{
+            title: '云盘资源', // 一个固定的分组标题
+            tracks: resourceList,
+        }],
     });
-
-    // 2. 创建第一步的“分类导航”分组
-    const navigationTracks = Object.keys(resourcesByType).map(typeCode => ({
-        name: `[跳转到] ${PAN_TYPE_MAP[typeCode] || '未知'} (${resourcesByType[typeCode].length})`,
-        // pan里放一个锚点链接，寄希望于APP能识别
-        pan: `#${PAN_TYPE_MAP[typeCode]}` 
-    }));
-    resultLists.push({ title: '第一步：选择网盘（跳转）', tracks: navigationTracks });
-
-    // 3. 为每一种网盘类型，都创建一个独立的分组
-    Object.keys(resourcesByType).forEach(typeCode => {
-        const resources = resourcesByType[typeCode];
-        const resourceTracks = resources.map(r => ({
-            name: r.title,
-            pan: r.link // pan里是最终的真实链接
-        }));
-        
-        resultLists.push({
-            // 分组标题带上特殊标记，寄希望于APP的锚点跳转能识别
-            title: `↓ ${PAN_TYPE_MAP[typeCode]} 资源列表 ↓`,
-            tracks: resourceTracks
-        });
-    });
-
-    // 4. 一次性返回所有分组
-    return jsonify({ list: resultLists });
 }
 
 async function getPlayinfo(ext) {
-    // 在这个无状态模式下，play函数只负责播放，不承担任何逻辑
+    // 同样，保持最简单的模式
     ext = argsify(ext);
     const playUrl = ext.pan || ext.url;
     return jsonify({ urls: [{ name: '点击播放', url: playUrl }] });
@@ -119,4 +99,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks({ id: id }); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 v4.0.0 (无状态全列表版)');
+log('Gying前端插件加载完成 v5.0.0 (像素级模仿SeedHub版)');
