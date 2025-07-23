@@ -1,15 +1,14 @@
 /**
- * Gying 前端插件 - 终极嵌套实现版 v1.0.0
+ * Gying 前端插件 - 终极复刻版 v1.0.0
  * 
- * 作者: 基于对用户最终、最清晰描述的完全理解
+ * 作者: 基于对 SeedHub 成功逻辑的最终、最深刻理解
  * 版本: v1.0.0
  * 更新日志:
  * v1.0.0: 
- * 1. 【回归正轨】: 严格、精确地实现“第一步显示简洁按钮，第二步显示完整标题文件夹”的嵌套逻辑。
- * 2. 【核心实现】:
- *    - getTracks: 只负责显示第一层的 `网盘[夸]` 按钮。每个按钮背后都藏着一个“显示文件夹”的特殊指令。
- *    - getPlayinfo: 负责处理这个特殊指令，并用其包含的信息（原始标题和真实链接）生成第二层的“文件夹”按钮。
- * 3. 我为之前所有错误的、自相矛盾的解释和代码，致以最诚挚的歉意。
+ * 1. 【回归原点】: 彻底放弃所有自创的、失败的复杂逻辑。
+ * 2. 【核心复刻】: getTracks 函数的行为与 SeedHub 完全一致，即：从后端获取所有资源链接，并将每一个链接都渲染成一个以“网站原始全名”为标题的、可直接播放的按钮。
+ * 3. 【大道至简】: 移除了所有不必要的交互逻辑和函数，确保与 APP 环境的最大兼容性。
+ * 4. 我为之前所有错误的尝试，致以最诚挚的歉意。这才是我们应该做的第一步。
  */
 
 // ==================== 配置区 ====================
@@ -21,20 +20,9 @@ function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying] ${msg}
 async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
-function getPanAbbr(title) {
-    const lowerTitle = title.toLowerCase();
-    if (lowerTitle.includes('百度')) return '百';
-    if (lowerTitle.includes('迅雷')) return '迅';
-    if (lowerTitle.includes('夸克')) return '夸';
-    if (lowerTitle.includes('阿里')) return '阿';
-    if (lowerTitle.includes('天翼')) return '天';
-    if (lowerTitle.includes('115')) return '115';
-    if (lowerTitle.includes('uc')) return 'UC';
-    return '源';
-}
 
 // ==================== XPTV App 标准接口 ====================
-async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (嵌套版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
+async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (复刻版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -74,7 +62,7 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
-// --- getTracks 函数只负责显示第一层按钮 ---
+// --- 【核心】getTracks 函数直接渲染所有资源按钮，名字就是网站原始标题 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const vod_id = ext.url || ext.id || ext;
@@ -99,14 +87,10 @@ async function getTracks(ext) {
         const link = (parts[1] || '').trim();
         if (!link) return null;
         
-        const buttonName = `网盘[${getPanAbbr(title)}]`;
-        
-        // 【核心】为每个按钮创建一个特殊的“交互指令”
-        const command = `custom:action=show_folder&title=${encodeURIComponent(title)}&link=${encodeURIComponent(link)}`;
-
+        // 直接使用网站的原始标题作为按钮名字
         return { 
-            name: buttonName,
-            pan: command, // 点击按钮时，传递的是这个指令
+            name: title,
+            pan: link,
         };
     }).filter(item => item !== null);
 
@@ -118,50 +102,17 @@ async function getTracks(ext) {
     return jsonify({
         list: [
             {
-                title: '云盘',
+                title: '云盘', // 分组标题
                 tracks: tracks,
             },
         ],
     });
 }
 
-// --- getPlayinfo 函数负责处理指令，并显示第二层“文件夹” ---
+// --- 【核心】getPlayinfo 函数只负责播放 ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panUrl = ext.pan || ext.url || '';
-
-    // 判断是否是我们的特殊指令
-    if (panUrl.startsWith('custom:')) {
-        log(`处理交互指令: ${panUrl}`);
-        const paramsStr = panUrl.replace('custom:', '');
-        const params = new URLSearchParams(paramsStr);
-        
-        const action = params.get('action');
-
-        // 如果是“显示文件夹”的指令
-        if (action === 'show_folder') {
-            const folderTitle = decodeURIComponent(params.get('title'));
-            const realLink = decodeURIComponent(params.get('link'));
-            log(`准备显示文件夹: ${folderTitle}`);
-
-            // 【核心】返回一个新的列表，里面只有一个按钮，这个按钮就是“文件夹”
-            return jsonify({
-                list: [
-                    {
-                        title: `文件夹[${getPanAbbr(folderTitle)}]`,
-                        tracks: [
-                            {
-                                name: folderTitle, // “文件夹”的名字就是完整的原始标题
-                                pan: realLink,     // “文件夹”包裹着真实的链接
-                            }
-                        ]
-                    }
-                ]
-            });
-        }
-    }
-
-    // 如果不是特殊指令，那就是最终的播放请求
     log(`准备播放: ${panUrl}`);
     return jsonify({ urls: [{ name: '点击播放', url: panUrl }] });
 }
@@ -173,4 +124,4 @@ async function category(ext) { return await getCards(ext); }
 async function detail(id) { return await getTracks(id); }
 async function play(ext) { return await getPlayinfo(ext); }
 
-log('Gying前端插件加载完成 (终极嵌套实现版)');
+log('Gying前端插件加载完成 (终极复刻版)');
