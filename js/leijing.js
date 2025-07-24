@@ -1,17 +1,16 @@
 /**
  * =================================================================
- * 脚本最终修复版 - 正确链接提取策略
- * 版本: 20
+ * 脚本最终完美版 - 终极版
+ * 版本: 22
  *
- * 核心洞察:
- * - 链接本身已包含访问码，点击即可进入，无需手动输入。
- * - 之前脚本的问题在于正则表达式过早地被空格或括号截断，未能提取完整链接字符串。
+ * 最终洞察:
+ * - 链接和访问码被作为一个整体，经过URL编码后，存储在<a>标签的href属性中。
  *
- * 新策略:
- * 1. 查找所有天翼云盘链接的<a>标签。
- * 2. 获取其父元素的完整文本内容。
- * 3. 使用新的正则表达式，完整匹配出 "链接 (访问码:xxxx)" 这样的完整字符串。
- * 4. 将这个完整字符串作为最终的网盘地址（pan）。
+ * 最终策略:
+ * 1. 找到所有<a>标签。
+ * 2. 获取其href属性值。
+ * 3. 对href值进行URL解码(decodeURIComponent)。
+ * 4. 对解码后的干净文本使用正则表达式提取出链接和访问码。
  * =================================================================
  */
 
@@ -19,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 20,
+  ver: 22,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -41,7 +40,7 @@ async function search(ext) { ext = argsify(ext); let cards = []; let text = enco
 
 
 /**
- * 【详情页解析 - 最终正确策略版】
+ * 【详情页解析 - 终极正确版】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -53,27 +52,63 @@ async function getTracks(ext) {
     const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || "网盘资源";
-    
-    // 获取页面所有文本内容，用于正则匹配
-    const bodyText = $('body').text();
 
-    // 【核心修复】这个正则表达式现在会匹配完整的 "链接 (访问码:xxxx)" 字符串
-    // 它会匹配 "http(s )://.../..." 后面可选地跟着一个带括号的访问码部分
-    const panRegex = /(https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[a-zA-Z0-9]+(?:\s*[\(（]\s*访问码\s*[:：]\s*[a-zA-Z0-9]{4,6}\s*[\)）])?)/gi;
-    
-    let match;
-    while ((match = panRegex.exec(bodyText)) !== null) {
-      const fullLink = match[0].trim(); // 获取匹配到的完整字符串
+    // 1. 核心策略：查找所有链接，解码href，然后提取
+    $('a').each((i, el) => {
+      const href = $(el).attr('href');
+      if (!href || !href.includes('cloud.189.cn')) return;
 
-      // 使用Set防止重复添加
-      if (uniqueLinks.has(fullLink)) continue;
-      uniqueLinks.add(fullLink);
+      // 【核心修复】对href属性进行URL解码
+      let decodedHref = '';
+      try {
+        decodedHref = decodeURIComponent(href);
+      } catch (e) {
+        decodedHref = href; // 如果解码失败，使用原始href
+      }
+      
+      // 正则表达式，用于从解码后的文本中提取链接和访问码
+      const panRegex = /(https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+ )[\s\S]*?(?:访问码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/;
+      const match = decodedHref.match(panRegex);
 
-      tracks.push({
-        name: title, // 资源名统一使用页面标题
-        pan: fullLink, // 将捕获到的完整链接+访问码字符串作为pan地址
-        ext: { accessCode: "" } // 访问码字段留空，因为信息已在pan字段中
-      });
+      if (match) {
+        const panUrl = match[1]; // 链接部分
+        const accessCode = match[2]; // 访问码部分
+
+        if (uniqueLinks.has(panUrl)) return;
+        uniqueLinks.add(panUrl);
+
+        tracks.push({
+          name: $(el).text().trim() || title,
+          pan: panUrl,
+          ext: { accessCode: accessCode || "" }
+        });
+      } else if (isValidPanUrl(decodedHref)) {
+        // 如果没有匹配到访问码，但解码后的链接是合法的，也添加进去
+        const panUrl = decodedHref.split(' ')[0]; // 取空格前部分作为纯链接
+        if (uniqueLinks.has(panUrl)) return;
+        uniqueLinks.add(panUrl);
+        
+        tracks.push({
+          name: $(el).text().trim() || title,
+          pan: panUrl,
+          ext: { accessCode: "" }
+        });
+      }
+    });
+
+    // 2. 备用策略：如果上述方法失败，扫描整个页面纯文本
+    if (tracks.length === 0) {
+        console.log("在<a>标签中未找到链接，对全文进行扫描...");
+        const bodyText = $('body').text();
+        const panRegex = /(https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+ )[\s\S]*?(?:访问码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/;
+        let match;
+        while ((match = panRegex.exec(bodyText)) !== null) {
+            const panUrl = match[1];
+            const accessCode = match[2];
+            if (uniqueLinks.has(panUrl)) continue;
+            uniqueLinks.add(panUrl);
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || "" } });
+        }
     }
 
     return jsonify({ list: [{ title: "资源列表", tracks }] });
@@ -82,4 +117,9 @@ async function getTracks(ext) {
     console.error("资源加载错误:", e);
     return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] });
   }
+}
+
+function isValidPanUrl(url) {
+  if (!url) return false;
+  return /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(url);
 }
