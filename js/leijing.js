@@ -1,16 +1,16 @@
 /**
  * =================================================================
- * 脚本最终完美版 - 终极版
- * 版本: 22
+ * 脚本最终修复版 - 返璞归真
+ * 版本: 23
  *
  * 最终洞察:
- * - 链接和访问码被作为一个整体，经过URL编码后，存储在<a>标签的href属性中。
+ * - 经过多次失败，证明解析href属性的思路是错误的。
+ * - 回归最简单的事实：<a>标签的显示文本本身就是我们需要的完整链接。
  *
  * 最终策略:
- * 1. 找到所有<a>标签。
- * 2. 获取其href属性值。
- * 3. 对href值进行URL解码(decodeURIComponent)。
- * 4. 对解码后的干净文本使用正则表达式提取出链接和访问码。
+ * 1. 找到所有包含 "cloud.189.cn" 文本的 <a> 标签。
+ * 2. 直接获取这个标签的显示文本 (text())。
+ * 3. 将这个完整的文本作为网盘地址（pan），不再进行任何分割或解码。
  * =================================================================
  */
 
@@ -18,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 22,
+  ver: 23,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -40,7 +40,7 @@ async function search(ext) { ext = argsify(ext); let cards = []; let text = enco
 
 
 /**
- * 【详情页解析 - 终极正确版】
+ * 【详情页解析 - 返璞归真版】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -53,63 +53,27 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || "网盘资源";
 
-    // 1. 核心策略：查找所有链接，解码href，然后提取
-    $('a').each((i, el) => {
-      const href = $(el).attr('href');
-      if (!href || !href.includes('cloud.189.cn')) return;
+    // 【核心修复】直接查找所有文本内容包含 "cloud.189.cn" 的 <a> 标签
+    $('a:contains("cloud.189.cn")').each((i, el) => {
+      // 直接获取这个标签的完整显示文本
+      const fullLinkText = $(el).text().trim();
 
-      // 【核心修复】对href属性进行URL解码
-      let decodedHref = '';
-      try {
-        decodedHref = decodeURIComponent(href);
-      } catch (e) {
-        decodedHref = href; // 如果解码失败，使用原始href
-      }
-      
-      // 正则表达式，用于从解码后的文本中提取链接和访问码
-      const panRegex = /(https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+ )[\s\S]*?(?:访问码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/;
-      const match = decodedHref.match(panRegex);
+      if (fullLinkText) {
+        // 使用一个简单的正则来验证一下格式
+        if (/cloud\.189\.cn\/t\//.test(fullLinkText)) {
+          if (uniqueLinks.has(fullLinkText)) return;
+          uniqueLinks.add(fullLinkText);
 
-      if (match) {
-        const panUrl = match[1]; // 链接部分
-        const accessCode = match[2]; // 访问码部分
-
-        if (uniqueLinks.has(panUrl)) return;
-        uniqueLinks.add(panUrl);
-
-        tracks.push({
-          name: $(el).text().trim() || title,
-          pan: panUrl,
-          ext: { accessCode: accessCode || "" }
-        });
-      } else if (isValidPanUrl(decodedHref)) {
-        // 如果没有匹配到访问码，但解码后的链接是合法的，也添加进去
-        const panUrl = decodedHref.split(' ')[0]; // 取空格前部分作为纯链接
-        if (uniqueLinks.has(panUrl)) return;
-        uniqueLinks.add(panUrl);
-        
-        tracks.push({
-          name: $(el).text().trim() || title,
-          pan: panUrl,
-          ext: { accessCode: "" }
-        });
+          tracks.push({
+            name: title,
+            // 【最关键的改动】直接将完整的显示文本作为pan地址
+            pan: fullLinkText,
+            // 访问码字段留空，因为所有信息都在pan里了
+            ext: { accessCode: "" }
+          });
+        }
       }
     });
-
-    // 2. 备用策略：如果上述方法失败，扫描整个页面纯文本
-    if (tracks.length === 0) {
-        console.log("在<a>标签中未找到链接，对全文进行扫描...");
-        const bodyText = $('body').text();
-        const panRegex = /(https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+ )[\s\S]*?(?:访问码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/;
-        let match;
-        while ((match = panRegex.exec(bodyText)) !== null) {
-            const panUrl = match[1];
-            const accessCode = match[2];
-            if (uniqueLinks.has(panUrl)) continue;
-            uniqueLinks.add(panUrl);
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || "" } });
-        }
-    }
 
     return jsonify({ list: [{ title: "资源列表", tracks }] });
 
@@ -117,9 +81,4 @@ async function getTracks(ext) {
     console.error("资源加载错误:", e);
     return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] });
   }
-}
-
-function isValidPanUrl(url) {
-  if (!url) return false;
-  return /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(url);
 }
