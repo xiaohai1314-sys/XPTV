@@ -1,18 +1,12 @@
 /**
  * =================================================================
- * 脚本最终版 - 策略重定义
- * 版本: 25
+ * 最终可用脚本 - 搜索和直达链接功能可用
+ * 版本: 16
  *
- * 最终洞察:
- * - 链接被隐藏在需要密码解锁的区域内，无法通过静态解析直接获取。
- * - 任何尝试自动提取链接的方法都将失败。
- *
- * 最终策略:
- * 1. 识别页面是否为加密页面 (通过检查是否存在 .hide-box)。
- * 2. 如果是加密页面，则不尝试提取链接。
- * 3. 提取页面的【标题】和【解锁提示文本】（如“输入密码可见”）。
- * 4. 将这些提示信息组合成一个特殊的、不可点击的“资源”，清晰地告诉用户需要手动操作。
- * 5. 如果不是加密页面，则继续使用我们之前已验证有效的融合策略来提取链接。
+ * 功能:
+ * 1. 搜索功能已修复，使用高容错选择器。
+ * 2. 详情页的“直达链接”按钮可以被正确识别。
+ * 3. 详情页的纯文本链接和加密链接可能无法识别。
  * =================================================================
  */
 
@@ -20,7 +14,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 25,
+  ver: 16,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -33,70 +27,93 @@ const appConfig = {
   ],
 };
 
-// --- 其他函数保持不变 ---
-async function getConfig( ) { return jsonify(appConfig); }
-async function getCards(ext) { ext = argsify(ext); let cards = []; let { page = 1, id } = ext; const url = appConfig.site + `/${id}&page=${page}`; const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } }); const $ = cheerio.load(data); $('.topicItem').each((index, each) => { if ($(each).find('.cms-lock-solid').length > 0) return; const href = $(each).find('h2 a').attr('href'); const title = $(each).find('h2 a').text(); const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/; const match = title.match(regex); const dramaName = match ? match[1] : title; const r = $(each).find('.summary').text(); const tag = $(each).find('.tag').text(); if (/content/.test(r) && !/cloud/.test(r)) return; if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return; cards.push({ vod_id: href, vod_name: dramaName, vod_pic: '', vod_remarks: '', ext: { url: `${appConfig.site}/${href}` }, }); }); return jsonify({ list: cards }); }
-async function getPlayinfo(ext) { return jsonify({ 'urls': [] }); }
-async function search(ext) { ext = argsify(ext); let cards = []; let text = encodeURIComponent(ext.text); let page = ext.page || 1; let url = `${appConfig.site}/search?keyword=${text}&page=${page}`; const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } }); const $ = cheerio.load(data); const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item'); searchItems.each((index, each) => { const $item = $(each); const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a'); const href = a.attr('href'); const title = a.text(); if (!href || !title) return; const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/; const match = title.match(regex); const dramaName = match ? match[1] : title; const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim(); if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return; cards.push({ vod_id: href, vod_name: dramaName, vod_pic: $item.find('img').attr('src') || '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` }, }); }); return jsonify({ list: cards }); }
-// --- 其他函数保持不变 ---
+async function getConfig( ) {
+  return jsonify(appConfig);
+}
 
+async function getCards(ext) {
+  ext = argsify(ext);
+  let cards = [];
+  let { page = 1, id } = ext;
+  const url = appConfig.site + `/${id}&page=${page}`;
+  const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+  const $ = cheerio.load(data);
+  $('.topicItem').each((index, each) => {
+    if ($(each).find('.cms-lock-solid').length > 0) return;
+    const href = $(each).find('h2 a').attr('href');
+    const title = $(each).find('h2 a').text();
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
+    if (/content/.test(r) && !/cloud/.test(r)) return;
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: dramaName,
+      vod_pic: '',
+      vod_remarks: '',
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
+}
+
+async function getPlayinfo(ext) {
+  return jsonify({ 'urls': [] });
+}
+
+// --- 详情页函数使用已知可用的增强版 ---
+async function getTracks(ext) { ext = argsify(ext); const tracks = []; const url = ext.url; const uniqueLinks = new Set(); try { const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } }); const $ = cheerio.load(data); const title = $('.topicBox .title').text().trim() || "网盘资源"; let globalAccessCode = ''; const bodyText = $('body').text(); const globalCodeMatch = bodyText.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i); if (globalCodeMatch) { globalAccessCode = globalCodeMatch[1]; } $('a[href*="cloud.189.cn"]').each((i, el) => { const href = $(el).attr('href'); if (href && isValidPanUrl(href)) { const normalizedUrl = normalizePanUrl(href); if (uniqueLinks.has(normalizedUrl)) return; uniqueLinks.add(normalizedUrl); let accessCode = globalAccessCode; const contextText = $(el).parent().text(); const localCode = extractAccessCode(contextText); if (localCode) accessCode = localCode; const linkText = $(el).text().trim(); tracks.push({ name: linkText || title, pan: href, ext: { accessCode } }); } }); if (tracks.length === 0) { scanForLinks(bodyText, tracks, globalAccessCode, uniqueLinks, title); } return jsonify({ list: [{ title: "资源列表", tracks }] }); } catch (e) { return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] }); } }
+function scanForLinks(text, tracks, globalAccessCode, uniqueLinks, title) { if (!text) return; const panMatches = []; const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<)]+/gi; let match; while ((match = urlPattern.exec(text)) !== null) { panMatches.push(match[0]) } const shortPattern = /cloud\.189\.cn\/(t|web\/share)\/[^\s<)]+/gi; while ((match = shortPattern.exec(text)) !== null) { panMatches.push('https://' + match[0] ) } const uniquePanMatches = [...new Set(panMatches)]; uniquePanMatches.forEach(panUrl => { if (!isValidPanUrl(panUrl)) return; const normalizedUrl = normalizePanUrl(panUrl); if (uniqueLinks.has(normalizedUrl)) { return } uniqueLinks.add(normalizedUrl); let accessCode = globalAccessCode; const index = text.indexOf(panUrl); if (index !== -1) { const searchStart = Math.max(0, index - 100); const searchEnd = Math.min(text.length, index + panUrl.length + 100); const contextText = text.substring(searchStart, searchEnd); const localCode = extractAccessCode(contextText); if (localCode) { accessCode = localCode } const directMatch = contextText.match(new RegExp(`${escapeRegExp(panUrl)}[\\s\\S]{0,30}?(?:访问码|密码|访问密码|提取码|code)[:：]?\\s*([a-z0-9]{4,6})`, 'i')); if (directMatch && directMatch[1]) { accessCode = directMatch[1] } } tracks.push({ name: title, pan: panUrl, ext: { accessCode } }) }) }
+function escapeRegExp(string) { return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+function extractAccessCode(text) { if (!text) return ''; let match = text.match(/[\[【]访问码[:：]\s*([a-z0-9]{4,6})[\]】]/i); if (match) return match[1]; match = text.match(/[\(（]密码[:：]\s*([a-z0-9]{4,6})[\)）]/i); if (match) return match[1]; match = text.match(/(?:访问码|密码|访问密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})\b/i); if (match) return match[1]; const standalone = text.match(/(?<![a-z0-9])([a-z0-9]{4,6})(?![a-z0-9])/i); if (standalone) { const code = standalone[1]; if (!/^\d+$/.test(code) && !/^[a-z]+$/i.test(code) && !/^\d{4}$/.test(code)) { return code } } return '' }
+function isValidPanUrl(url) { if (!url) return false; return /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(url) }
+function normalizePanUrl(url) { const cleanUrl = url.replace(/\?.*$/, ''); return cleanUrl.toLowerCase() }
 
 /**
- * 【详情页解析 - 最终策略版】
+ * 【搜索功能最终版】
+ * 使用组合选择器，确保高兼容性和稳定性。
  */
-async function getTracks(ext) {
+async function search(ext) {
   ext = argsify(ext);
-  const tracks = [];
-  const url = ext.url;
-  const uniqueLinks = new Set();
+  let cards = [];
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
+  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
 
-  try {
-    const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-    const $ = cheerio.load(data);
-    const title = $('.topicBox .title').text().trim() || "网盘资源";
+  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  const $ = cheerio.load(data);
 
-    // **【核心逻辑】** 检查页面是否存在加密盒子
-    const hideBox = $('.hide-box');
-    if (hideBox.length > 0) {
-      // 这是一个加密页面
-      const promptText = hideBox.find('.background-prompt').text().trim();
-      tracks.push({
-        name: `【加密内容】${title}`,
-        pan: `提示：${promptText || '此内容被隐藏，请在网页中手动解锁'}`,
-        ext: { accessCode: "手动操作" }
-      });
-      return jsonify({ list: [{ title: "需要手动解锁", tracks }] });
-    }
+  // 【最终选择器】使用逗号分隔，同时查找所有可能的列表项，大大提高脚本的健壮性。
+  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
 
-    // --- 如果不是加密页面，执行我们之前的融合策略 ---
+  searchItems.each((index, each) => {
+    const $item = $(each);
+    
+    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
+    const href = a.attr('href');
+    const title = a.text();
+    
+    if (!href || !title) return;
 
-    // 策略A: 查找所有直接的 <a> 标签链接
-    $('a').each((i, el) => {
-      const href = $(el).attr('href');
-      if (href && /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(href)) {
-        let panUrl = href;
-        try { panUrl = decodeURIComponent(href); } catch(e) {}
-        if (uniqueLinks.has(panUrl)) return;
-        uniqueLinks.add(panUrl);
-        tracks.push({ name: $(el).text().trim() || title, pan: panUrl, ext: { accessCode: "" } });
-      }
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    
+    const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
+    
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+
+    cards.push({
+      vod_id: href,
+      vod_name: dramaName,
+      vod_pic: $item.find('img').attr('src') || '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
     });
+  });
 
-    // 策略B: 扫描整个页面纯文本
-    const bodyText = $('body').text();
-    const panRegex = /(https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[a-zA-Z0-9]+(?:\s*[\(（][\s\S]*?[\)）])?)/gi;
-    let match;
-    while ((match = panRegex.exec(bodyText)) !== null) {
-      const fullLink = match[0].trim();
-      if (uniqueLinks.has(fullLink)) continue;
-      uniqueLinks.add(fullLink);
-      tracks.push({ name: title, pan: fullLink, ext: { accessCode: "" } });
-    }
-
-    return jsonify({ list: [{ title: "资源列表", tracks }] });
-
-  } catch (e) {
-    console.error("资源加载错误:", e);
-    return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] });
-  }
+  return jsonify({ list: cards });
 }
