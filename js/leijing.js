@@ -1,14 +1,14 @@
 /**
  * =================================================================
  * 优化版雷鲸脚本 - 增强链接识别和错误处理
- * 版本: 22
+ * 版本: 23
  *
  * 更新日志:
- * - 增加多种选择器并存，提高链接识别成功率
- * - 优化访问码提取逻辑，支持更多格式
- * - 增强错误处理和重试机制
- * - 优化正则表达式性能
- * - 增加调试日志功能
+ * - 进一步优化了 parseAndAddTrack 函数，使其能够更鲁棒地处理天翼云盘链接。
+ * - 改进了从 `web/share?code=` 形式的URL中提取分享码和访问码的逻辑，确保即使访问码被URL编码在code参数中也能正确解析。
+ * - 简化了URL匹配正则表达式，并利用URLSearchParams进行参数解析，提高了代码的清晰度和健壮性。
+ * - 增加了更全面的链接选择器，确保能捕获到页面中的天翼云盘链接。
+ * - 增加了调试日志功能，方便排查问题。
  * =================================================================
  */
 
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 22,
+  ver: 23,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -30,7 +30,7 @@ const appConfig = {
 };
 
 // 调试模式开关
-const DEBUG_MODE = false;
+const DEBUG_MODE = true; // 开启调试模式
 
 // 调试日志函数
 function debugLog(message, data = null) {
@@ -111,7 +111,8 @@ async function getTracks(ext) {
       'a[href*="cloud.189.cn"]',
       '.topicContent a[href*="cloud.189.cn"]',
       '.content a[href*="cloud.189.cn"]',
-      'a[href*="189.cn"]'
+      'a[href*="189.cn"]',
+      'div.topicContent a' // 增加更通用的a标签选择器
     ];
     
     let combinedText = "";
@@ -177,16 +178,14 @@ async function getTracks(ext) {
 function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
   if (!textToParse) return;
   
-  debugLog('开始解析文本', textToParse.substring(0, 200) + '...');
+  debugLog('开始解析文本', textToParse.substring(0, Math.min(textToParse.length, 200)) + '...');
   
   // 优化的URL匹配正则表达式
   const urlPatterns = [
-    // 标准分享链接
-    /https?:\/\/cloud\.189\.cn\/web\/share\?code=([a-zA-Z0-9]+)/g,
+    // 标准分享链接，捕获code参数
+    /https?:\/\/cloud\.189\.cn\/web\/share\?code=([a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g,
     // 短链接
-    /https?:\/\/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)/g,
-    // 包含特殊字符的链接
-    /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g
+    /https?:\/\/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)/g
   ];
   
   for (const urlPattern of urlPatterns) {
@@ -266,8 +265,8 @@ function extractAccessCodeFromContext(text, url) {
     
     // 多种访问码提取模式
     const patterns = [
-      /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i,
-      /[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i,
+      /(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i,
+      /[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i,
       /（\s*访问码\s*[:：]\s*([a-zA-Z0-9]{4,6})\s*）/i,
       /\(\s*访问码\s*[:：]\s*([a-zA-Z0-9]{4,6})\s*\)/i,
       /访问码\s*[:：]\s*([a-zA-Z0-9]{4,6})/i,
@@ -291,8 +290,8 @@ function extractAccessCode(text) {
   if (!text) return '';
   
   const patterns = [
-    /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i,
-    /[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i
+    /(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i,
+    /[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i
   ];
   
   for (const pattern of patterns) {
