@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 优化版雷鲸脚本 - 增强链接识别和错误处理
- * 版本: 23
+ * 版本: 24
  *
  * 更新日志:
  * - 进一步优化了 parseAndAddTrack 函数，使其能够更鲁棒地处理天翼云盘链接。
@@ -9,6 +9,7 @@
  * - 简化了URL匹配正则表达式，并利用URLSearchParams进行参数解析，提高了代码的清晰度和健壮性。
  * - 增加了更全面的链接选择器，确保能捕获到页面中的天翼云盘链接。
  * - 增加了调试日志功能，方便排查问题。
+ * - 修复了URL解析时，`rawUrl` 包含括号导致 `URL` 对象创建失败的问题。
  * =================================================================
  */
 
@@ -16,7 +17,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 23,
+  ver: 24,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -182,8 +183,8 @@ function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
   
   // 优化的URL匹配正则表达式
   const urlPatterns = [
-    // 标准分享链接，捕获code参数
-    /https?:\/\/cloud\.189\.cn\/web\/share\?code=([a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g,
+    // 标准分享链接，捕获code参数，不包含括号
+    /https?:\/\/cloud\.189\.cn\/web\/share\?code=([a-zA-Z0-9%]+)/g,
     // 短链接
     /https?:\/\/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)/g
   ];
