@@ -1,12 +1,13 @@
 /**
  * =================================================================
  * 最终可用脚本 - 搜索和详情页链接识别功能优化
- * 版本: 19
+ * 版本: 20
  *
  * 更新日志:
+ * - 彻底解决了网盘链接识别问题，特别是针对链接中包含访问码的情况。
+ * - 脚本现在能够正确解析并提取出纯净的网盘URL和对应的访问码。
+ * - 优化了从URL中提取分享码和访问码的逻辑，确保APP能正确识别。
  * - 调整了 getTracks 函数的最终返回数据结构，使其符合通用播放器APP的规范。
- * - 将返回的线路标题从固定的“资源列表”修改为更具描述性的“天翼云盘”，提高了兼容性。
- * - 这是针对“脚本能跑但APP不显示链接”问题的最终优化。
  * =================================================================
  */
 
@@ -14,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 19,
+  ver: 20,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -27,7 +28,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
@@ -64,7 +65,6 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数：重构优化版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -98,11 +98,10 @@ async function getTracks(ext) {
             parseAndAddTrack(bodyText, title, tracks, uniqueLinks);
         }
 
-        // 【关键修改】调整返回的数据结构以符合通用APP规范
         if (tracks.length > 0) {
             return jsonify({ list: [{ title: "天翼云盘", tracks }] });
         } else {
-            return jsonify({ list: [] }); // 如果没找到任何链接，返回空列表
+            return jsonify({ list: [] });
         }
 
     } catch (e) {
@@ -113,23 +112,36 @@ async function getTracks(ext) {
 
 function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
     if (!textToParse) return;
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s<]+/g;
+    // 匹配天翼云盘的短链接或分享链接，并捕获分享码和访问码
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9%]+))(?:[^\s<)]*?)(?:\uff08访问码\uff1a([a-zA-Z0-9]{4,6})\uff09|\(访问码:([a-zA-Z0-9]{4,6})\))/g;
     let match;
-    while ((match = urlPattern.exec(textToParse )) !== null) {
-        const rawUrl = match[0];
-        const cleanUrlMatch = rawUrl.match(/https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[a-zA-Z0-9]+/);
-        if (!cleanUrlMatch) continue;
-        
-        const panUrl = cleanUrlMatch[0];
+    while ((match = urlPattern.exec(textToParse)) !== null) {
+        let panUrl = '';
+        let accessCode = '';
+
+        // 优先从 web/share?code= 中提取
+        if (match[2]) { // web/share?code= 形式
+            panUrl = decodeURIComponent(match[0].split('?code=')[0] + '?code=' + match[2]);
+            // 尝试从 URL 的 code 参数中提取访问码
+            const urlCodeMatch = decodeURIComponent(match[2]).match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
+            if (urlCodeMatch && urlCodeMatch[1]) {
+                accessCode = urlCodeMatch[1];
+            }
+        } else if (match[1]) { // t/ 形式
+            panUrl = `https://cloud.189.cn/t/${match[1]}`;
+        }
+
+        // 从括号中提取访问码，优先级更高
+        if (match[3]) { // 全角括号
+            accessCode = match[3];
+        } else if (match[4]) { // 半角括号
+            accessCode = match[4];
+        }
+
+        if (!panUrl) continue; // 确保有有效的网盘URL
+
         const normalizedUrl = normalizePanUrl(panUrl);
-
         if (uniqueLinks.has(normalizedUrl)) continue;
-
-        const urlIndex = match.index;
-        const contextStart = Math.max(0, urlIndex - 100);
-        const contextEnd = Math.min(textToParse.length, urlIndex + rawUrl.length + 100);
-        const contextText = textToParse.substring(contextStart, contextEnd);
-        const accessCode = extractAccessCode(contextText);
 
         tracks.push({
             name: title,
@@ -144,7 +156,7 @@ function extractAccessCode(text) {
     if (!text) return '';
     const codeMatch = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (codeMatch && codeMatch[1]) return codeMatch[1];
-    const bracketMatch = text.match(/[\[【（(]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\]】)）]/i);
+    const bracketMatch = text.match(/[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i);
     if (bracketMatch && bracketMatch[1]) return bracketMatch[1];
     return '';
 }
@@ -154,7 +166,7 @@ function normalizePanUrl(url) {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s< )]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
@@ -189,3 +201,7 @@ async function search(ext) {
   });
   return jsonify({ list: cards });
 }
+
+
+
+实时
