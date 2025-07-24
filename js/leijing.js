@@ -1,16 +1,18 @@
 /**
  * =================================================================
- * 脚本最终修复版 - 返璞归真
- * 版本: 23
+ * 脚本最终版 - 策略重定义
+ * 版本: 25
  *
  * 最终洞察:
- * - 经过多次失败，证明解析href属性的思路是错误的。
- * - 回归最简单的事实：<a>标签的显示文本本身就是我们需要的完整链接。
+ * - 链接被隐藏在需要密码解锁的区域内，无法通过静态解析直接获取。
+ * - 任何尝试自动提取链接的方法都将失败。
  *
  * 最终策略:
- * 1. 找到所有包含 "cloud.189.cn" 文本的 <a> 标签。
- * 2. 直接获取这个标签的显示文本 (text())。
- * 3. 将这个完整的文本作为网盘地址（pan），不再进行任何分割或解码。
+ * 1. 识别页面是否为加密页面 (通过检查是否存在 .hide-box)。
+ * 2. 如果是加密页面，则不尝试提取链接。
+ * 3. 提取页面的【标题】和【解锁提示文本】（如“输入密码可见”）。
+ * 4. 将这些提示信息组合成一个特殊的、不可点击的“资源”，清晰地告诉用户需要手动操作。
+ * 5. 如果不是加密页面，则继续使用我们之前已验证有效的融合策略来提取链接。
  * =================================================================
  */
 
@@ -18,7 +20,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 23,
+  ver: 25,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -40,7 +42,7 @@ async function search(ext) { ext = argsify(ext); let cards = []; let text = enco
 
 
 /**
- * 【详情页解析 - 返璞归真版】
+ * 【详情页解析 - 最终策略版】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -53,27 +55,43 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || "网盘资源";
 
-    // 【核心修复】直接查找所有文本内容包含 "cloud.189.cn" 的 <a> 标签
-    $('a:contains("cloud.189.cn")').each((i, el) => {
-      // 直接获取这个标签的完整显示文本
-      const fullLinkText = $(el).text().trim();
+    // **【核心逻辑】** 检查页面是否存在加密盒子
+    const hideBox = $('.hide-box');
+    if (hideBox.length > 0) {
+      // 这是一个加密页面
+      const promptText = hideBox.find('.background-prompt').text().trim();
+      tracks.push({
+        name: `【加密内容】${title}`,
+        pan: `提示：${promptText || '此内容被隐藏，请在网页中手动解锁'}`,
+        ext: { accessCode: "手动操作" }
+      });
+      return jsonify({ list: [{ title: "需要手动解锁", tracks }] });
+    }
 
-      if (fullLinkText) {
-        // 使用一个简单的正则来验证一下格式
-        if (/cloud\.189\.cn\/t\//.test(fullLinkText)) {
-          if (uniqueLinks.has(fullLinkText)) return;
-          uniqueLinks.add(fullLinkText);
+    // --- 如果不是加密页面，执行我们之前的融合策略 ---
 
-          tracks.push({
-            name: title,
-            // 【最关键的改动】直接将完整的显示文本作为pan地址
-            pan: fullLinkText,
-            // 访问码字段留空，因为所有信息都在pan里了
-            ext: { accessCode: "" }
-          });
-        }
+    // 策略A: 查找所有直接的 <a> 标签链接
+    $('a').each((i, el) => {
+      const href = $(el).attr('href');
+      if (href && /https?:\/\/cloud\.189\.cn\/(t|web\/share )\//i.test(href)) {
+        let panUrl = href;
+        try { panUrl = decodeURIComponent(href); } catch(e) {}
+        if (uniqueLinks.has(panUrl)) return;
+        uniqueLinks.add(panUrl);
+        tracks.push({ name: $(el).text().trim() || title, pan: panUrl, ext: { accessCode: "" } });
       }
     });
+
+    // 策略B: 扫描整个页面纯文本
+    const bodyText = $('body').text();
+    const panRegex = /(https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[a-zA-Z0-9]+(?:\s*[\(（][\s\S]*?[\)）])?)/gi;
+    let match;
+    while ((match = panRegex.exec(bodyText)) !== null) {
+      const fullLink = match[0].trim();
+      if (uniqueLinks.has(fullLink)) continue;
+      uniqueLinks.add(fullLink);
+      tracks.push({ name: title, pan: fullLink, ext: { accessCode: "" } });
+    }
 
     return jsonify({ list: [{ title: "资源列表", tracks }] });
 
