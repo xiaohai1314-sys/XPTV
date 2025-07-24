@@ -1,12 +1,13 @@
 /**
  * =================================================================
  * 最终可用脚本 - 搜索和详情页链接识别功能优化
- * 版本: 21
+ * 版本: 20
  *
  * 更新日志:
- * - 进一步优化了 parseAndAddTrack 函数，使其能够更鲁棒地处理天翼云盘链接。
- * - 改进了从 `web/share?code=` 形式的URL中提取分享码和访问码的逻辑，确保即使访问码被URL编码在code参数中也能正确解析。
- * - 简化了URL匹配正则表达式，并利用URLSearchParams进行参数解析，提高了代码的清晰度和健壮性。
+ * - 彻底解决了网盘链接识别问题，特别是针对链接中包含访问码的情况。
+ * - 脚本现在能够正确解析并提取出纯净的网盘URL和对应的访问码。
+ * - 优化了从URL中提取分享码和访问码的逻辑，确保APP能正确识别。
+ * - 调整了 getTracks 函数的最终返回数据结构，使其符合通用播放器APP的规范。
  * =================================================================
  */
 
@@ -14,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21,
+  ver: 20,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -111,44 +112,30 @@ async function getTracks(ext) {
 
 function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
     if (!textToParse) return;
-    // 匹配天翼云盘的短链接或分享链接，并捕获完整的URL
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g;
+    // 匹配天翼云盘的短链接或分享链接，并捕获分享码和访问码
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9%]+))(?:[^\s<)]*?)(?:\uff08访问码\uff1a([a-zA-Z0-9]{4,6})\uff09|\(访问码:([a-zA-Z0-9]{4,6})\))/g;
     let match;
     while ((match = urlPattern.exec(textToParse)) !== null) {
-        const rawUrl = match[0];
-        let panUrl = rawUrl;
+        let panUrl = '';
         let accessCode = '';
 
-        try {
-            const urlObj = new URL(rawUrl);
-            if (urlObj.pathname.startsWith('/web/share')) {
-                const codeParam = urlObj.searchParams.get('code');
-                if (codeParam) {
-                    const decodedCodeParam = decodeURIComponent(codeParam);
-                    // 尝试从解码后的code参数中提取访问码
-                    const codeMatch = decodedCodeParam.match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
-                    if (codeMatch && codeMatch[1]) {
-                        accessCode = codeMatch[1];
-                        // 确保panUrl是纯净的分享链接，不包含访问码
-                        panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.replace(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i, '').trim());
-                        // 如果替换后code参数为空，则使用原始的分享码部分
-                        if (panUrl.endsWith('?code=')) {
-                            panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.split('（')[0].split('(')[0].trim());
-                        }
-                    } else {
-                        // 如果code参数中没有访问码，则直接使用原始的code参数作为分享码
-                        panUrl = rawUrl;
-                    }
-                }
+        // 优先从 web/share?code= 中提取
+        if (match[2]) { // web/share?code= 形式
+            panUrl = decodeURIComponent(match[0].split('?code=')[0] + '?code=' + match[2]);
+            // 尝试从 URL 的 code 参数中提取访问码
+            const urlCodeMatch = decodeURIComponent(match[2]).match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
+            if (urlCodeMatch && urlCodeMatch[1]) {
+                accessCode = urlCodeMatch[1];
             }
-        } catch (e) {
-            // URL解析失败，可能是因为URL本身就包含了访问码，直接从原始匹配中提取
-            // 此时panUrl保持为rawUrl
+        } else if (match[1]) { // t/ 形式
+            panUrl = `https://cloud.189.cn/t/${match[1]}`;
         }
 
-        // 再次尝试从整个rawUrl字符串中提取访问码，作为最终兜底
-        if (!accessCode) {
-            accessCode = extractAccessCode(rawUrl);
+        // 从括号中提取访问码，优先级更高
+        if (match[3]) { // 全角括号
+            accessCode = match[3];
+        } else if (match[4]) { // 半角括号
+            accessCode = match[4];
         }
 
         if (!panUrl) continue; // 确保有有效的网盘URL
@@ -215,6 +202,3 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-
-
-实时
