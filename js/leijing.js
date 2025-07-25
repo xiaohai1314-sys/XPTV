@@ -87,7 +87,7 @@ async function getTracks(ext) {
         }
 
         // --- 策略一：v20 的精准匹配 (优先) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)\s*?[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
@@ -103,7 +103,8 @@ async function getTracks(ext) {
         // 仅当精准模式未找到任何链接时，或为了补充纯链接而执行
         
         // 1. 从 <a> 标签中寻找
-        $('a[href*="cloud.189.cn"]').each((i, el) => {
+        $('a[href*="cloud.189.cn"]
+').each((i, el) => {
             const href = $(el).attr('href');
             if (!href) return;
 
@@ -120,7 +121,7 @@ async function getTracks(ext) {
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<>()]+/gi;
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/t\/[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
@@ -198,3 +199,4 @@ async function search(ext) {
   });
   return jsonify({ list: cards });
 }
+
