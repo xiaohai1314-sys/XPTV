@@ -1,18 +1,16 @@
 /**
  * =================================================================
- * 最终可用脚本 - 结构分析修复版
- * 版本: 22 (结构感知版)
+ * 最终可用脚本 - 融合增强版
+ * 版本: 24 (融合版)
  *
  * 更新日志:
- * - 根据实际网站HTML结构重构了 getTracks 函数。
- * - 放弃了单一的正则匹配策略，改为采用更可靠的DOM遍历和上下文搜索方法。
- * - [getTracks] 策略调整:
- *   1. **遍历链接**: 首先通过 `$('a[href*="cloud.189.cn"]')` 精准找到所有天翼云盘的链接元素。
- *   2. **上下文搜索**: 对每个链接，获取其最近的块级父元素(如 <p> 或 <div>)的全部文本内容。
- *   3. **智能提取**: 在这个上下文中，使用增强版的 `extractAccessCode` 函数来查找对应的访问码。
- * - [extractAccessCode] 函数增强: 正则表达式现在可以匹配带括号、中括号和各种空格的访问码格式。
- * - 解决了因链接与访问码在不同HTML标签内而导致识别失败的根本问题。
- * - 这是目前针对该网站结构最稳定、最准确的版本。
+ * - 采纳用户建议，在 v21 的基础上增加新逻辑，而非完全替换。
+ * - [getTracks] 函数采用三层策略:
+ *   1. **v21精准优先**: 首先尝试用 v21 的精确正则匹配 "链接+访问码" 的组合。
+ *   2. **v21兼容回退**: 如果精准匹配找不到，则启动 v21 的广泛链接扫描模式。
+ *   3. **终极补充方案**: 如果以上两种策略都失败 (未找到任何资源)，则启动 v23 的终极方案，
+ *      直接在原始HTML上进行正则匹配，以解决因JS动态内容或特殊标签导致的解析失败问题。
+ * - 此版本融合了所有方案的优点，最大限度地提高了识别成功率和兼容性。
  * =================================================================
  */
 
@@ -20,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 22,
+  ver: 24,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -70,7 +68,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v22 结构感知修复版 ---
+// --- 详情页函数: v24 融合增强版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -78,52 +76,75 @@ async function getTracks(ext) {
     const uniqueLinks = new Set();
 
     try {
-        const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data);
+        const { data: html } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+        const $ = cheerio.load(html);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
-
-        // 优先寻找一个全局/通用的访问码，作为备用
+        
         let globalAccessCode = '';
-        const globalCodeMatch = bodyText.match(/(?:通用|全局|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
+        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // 核心策略：遍历所有天翼云盘链接，然后在它们的上下文中寻找访问码
-        $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const panUrl = $(el).attr('href');
-            if (!panUrl) return;
-
+        // --- 策略一：v21 的精准匹配 (优先) ---
+        const precisePatternV21 = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=  )[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
+        let match;
+        while ((match = precisePatternV21.exec(bodyText)) !== null) {
+            const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
+            const accessCode = match[1];
             const normalizedUrl = normalizePanUrl(panUrl);
-            if (uniqueLinks.has(normalizedUrl)) return; // 防止重复添加
+            if (uniqueLinks.has(normalizedUrl)) continue;
+            
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
+        }
+
+        // --- 策略二：v21 的广泛兼容模式 (回退) ---
+        $('a[href*="cloud.189.cn"]').each((i, el) => {
+            const href = $(el).attr('href');
+            if (!href) return;
+
+            const normalizedUrl = normalizePanUrl(href);
+            if (uniqueLinks.has(normalizedUrl)) return;
 
             let accessCode = '';
-            // 查找链接最近的块级父元素(p, div)，获取其全部文本内容作为搜索范围
-            // 这是解决链接和访问码在不同标签内的关键
-            const contextElement = $(el).closest('p, div');
-            const contextText = contextElement.length ? contextElement.text() : $(el).parent().text();
+            const contextText = $(el).parent().text();
+            const localCode = extractAccessCode(contextText);
+            accessCode = localCode || globalAccessCode;
 
-            // 在上下文中提取访问码
-            accessCode = extractAccessCode(contextText);
-
-            // 如果在局部上下文中找不到，则尝试使用全局备用码
-            if (!accessCode) {
-                accessCode = globalAccessCode;
-            }
-            
-            // 如果还是找不到，最后在链接本身的文本里找一次 (例如: 链接文本就是 "下载 (访问码:xxxx)")
-            if (!accessCode) {
-                accessCode = extractAccessCode($(el).text());
-            }
-
-            tracks.push({
-                name: $(el).text().trim().substring(0, 50) || title, // 截取部分链接文本作为名字
-                pan: panUrl,
-                ext: { accessCode: accessCode || '' } // 确保有个空字符串
-            });
+            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
+
+        const urlPatternV21 = /https?:\/\/cloud\.189\.cn\/(t|web\/share  )\/[^\s<>()]+/gi;
+        while ((match = urlPatternV21.exec(bodyText)) !== null) {
+            const panUrl = match[0];
+            const normalizedUrl = normalizePanUrl(panUrl);
+            if (uniqueLinks.has(normalizedUrl)) continue;
+
+            let accessCode = '';
+            const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
+            const localCode = extractAccessCode(searchArea);
+            accessCode = localCode || globalAccessCode;
+
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
+        }
+        
+        // --- 策略三：终极补充方案 (仅在上述策略全部失效时启用) ---
+        if (tracks.length === 0) {
+            const ultimatePattern = /<a[^>]+href="([^"]*cloud\.189\.cn[^"]*)"[^>]*>[\s\S]*?(?:访问码|密码|提取码)[\s:：]*([a-zA-Z0-9]{4,6})/gi;
+            while ((match = ultimatePattern.exec(html)) !== null) {
+                const panUrl = match[1];
+                const accessCode = match[2];
+                const normalizedUrl = normalizePanUrl(panUrl);
+                if (uniqueLinks.has(normalizedUrl)) continue;
+
+                tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+                uniqueLinks.add(normalizedUrl);
+            }
+        }
 
         if (tracks.length > 0) {
             return jsonify({ list: [{ title: "天翼云盘", tracks }] });
@@ -137,21 +158,14 @@ async function getTracks(ext) {
     }
 }
 
-/**
- * 增强版的访问码提取函数
- * @param {string} text 包含访问码的文本
- * @returns {string} 提取到的访问码或空字符串
- */
 function extractAccessCode(text) {
     if (!text) return '';
-    // 强大的正则表达式，能匹配 "访问码:xxxx", "(访问码:xxxx)", "【提取码 xxxx】" 等多种格式
-    const match = text.match(/(?:访问码|密码|提取码|code)[\s:：]*([a-zA-Z0-9]{4,6})/i);
-    if (match && match[1]) {
-        return match[1];
-    }
+    let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
+    if (match && match[1]) return match[1];
+    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
+    if (match && match[1]) return match[1];
     return '';
 }
-
 
 function normalizePanUrl(url) {
     try {
