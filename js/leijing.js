@@ -1,16 +1,13 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 21 (融合版)
+ * 版本: 21.1 (修复版)
  *
  * 更新日志:
- * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
- * - [getTracks] 函数采用双重策略：
- *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
- *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
- * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
- * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
- * - 这是目前最稳定、兼容性最强的版本。
+ * - 修复了 v21 版本中 precisePattern 正则表达式因换行符或HTML标签导致匹配失败的问题。
+ * - [getTracks] 函数中的精准匹配策略 (precisePattern) 现已优化，可以正确识别链接和访问码不直接相邻的情况。
+ * - 增强了对“密码”、“提取码”等不同关键词的识别能力。
+ * - 提升了脚本在处理复杂页面布局时的稳定性和资源识别准确率。
  * =================================================================
  */
 
@@ -18,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21,
+  ver: 21.1,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,7 +28,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
@@ -68,7 +65,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21 融合版 ---
+// --- 详情页函数: v21.1 修复版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -80,19 +77,29 @@ async function getTracks(ext) {
         const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text(); // 获取整个页面文本，备用
+        const bodyHtml = $('body').html(); // 获取HTML用于更灵活的匹配
+        
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // --- 策略一：v20 的精准匹配 (优先) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
+        // --- 策略一：v20 的精准匹配 (优先) - 已修复 ---
+        // 优化后的正则，可以匹配链接和访问码之间有换行或HTML标签的情况
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[^\s<>()]*[\s\S]*?(?:访问码|密码|提取码)\s*[:：\s]*?([a-zA-Z0-9]{4,6})/gi;
         let match;
-        while ((match = precisePattern.exec(bodyText)) !== null) {
-            const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
+        
+        // 使用HTML进行匹配，保留换行等信息
+        while ((match = precisePattern.exec(bodyHtml.replace(/<br\s*\/?>/gi, '\n'))) !== null) {
+            // 从完整匹配中提取纯URL
+            const panUrlMatch = match[0].match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]*/);
+            if (!panUrlMatch) continue;
+            
+            const panUrl = panUrlMatch[0];
             const accessCode = match[1];
             const normalizedUrl = normalizePanUrl(panUrl);
+            
             if (uniqueLinks.has(normalizedUrl)) continue;
             
             tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
@@ -111,7 +118,11 @@ async function getTracks(ext) {
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
 
             let accessCode = '';
-            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
+            // 扩大搜索范围，检查链接自身文本、父元素文本
+            const linkText = $(el).text();
+            const parentText = $(el).parent().text();
+            const contextText = linkText + ' ' + parentText;
+            
             const localCode = extractAccessCode(contextText);
             accessCode = localCode || globalAccessCode; // 优先局部，再用全局
 
@@ -120,7 +131,7 @@ async function getTracks(ext) {
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<>()]+/gi;
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share\?code= )[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
@@ -163,7 +174,7 @@ function normalizePanUrl(url) {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
