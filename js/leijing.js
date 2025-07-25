@@ -1,14 +1,14 @@
 /**
  * =================================================================
- * 最终可用脚本 - 融合 v16 和 v20 优点，并适配通用 App 规范
- * 版本: 22 (兼容版)
+ * 最终可用脚本 - 适配特定App的播放列表格式
+ * 版本: 23 (播放列表优化版)
  *
  * 更新日志:
- * - 参照可识别脚本的规范，重命名核心函数 (home, category, detail, search)。
- * - 调整了 home, category, detail, search 函数的输入参数和输出格式，以符合通用 App 标准。
- * - 移除了全局 appConfig，将配置信息整合到相应函数中，提高模块化。
- * - 继承了 v21 版本的双重策略（精准优先+兼容回退）来提取网盘链接和访问码。
- * - 这是为 XPTV 等通用 App 优化的、稳定且兼容性强的版本。
+ * - 核心修改：重构 detail 函数的返回值，以适应需要结构化播放列表的App。
+ * - 不再将所有链接拼接成一个长字符串，而是返回一个包含多个播放项的 list 数组。
+ * - 每个播放项都是一个对象，包含 'name' (资源名) 和 'url' (链接#访问码)。
+ * - 这种格式提高了与特定App的兼容性。
+ * - 其他函数 (home, category, search) 保持 v22 的兼容性结构。
  * =================================================================
  */
 
@@ -28,7 +28,7 @@ async function home() {
     ];
     return jsonify({
         class: categories,
-        filters: {} // 很多App需要这个字段，即使为空
+        filters: {}
     });
 }
 
@@ -54,20 +54,20 @@ async function category(tid, pg, filter, extend) {
         cards.push({
             vod_id: href,
             vod_name: dramaName,
-            vod_pic: '', // 雷鲸列表页没有图片
+            vod_pic: '',
             vod_remarks: '',
         });
     });
     return jsonify({
         list: cards,
         page: page,
-        pagecount: page + (cards.length < 20 ? 0 : 1), // 简单判断是否有下一页
+        pagecount: page + (cards.length < 20 ? 0 : 1),
         limit: cards.length,
-        total: 0 // 网站未提供总数
+        total: 0
     });
 }
 
-// 详情页: 获取播放列表（网盘链接）
+// 详情页: 获取播放列表（网盘链接）- 【核心修改处】
 async function detail(ids) {
     const url = `${site}/${ids}`;
     const tracks = [];
@@ -84,7 +84,7 @@ async function detail(ids) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // 策略一：精准匹配
+        // 提取链接和访问码的逻辑保持不变
         const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
@@ -92,11 +92,10 @@ async function detail(ids) {
             const accessCode = match[1];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
-            tracks.push(`${title}$${panUrl}#${accessCode}`);
+            tracks.push({ name: title, url: `${panUrl}#${accessCode}` });
             uniqueLinks.add(normalizedUrl);
         }
 
-        // 策略二：广泛兼容模式
         $('a[href*="cloud.189.cn"]').each((i, el) => {
             const href = $(el).attr('href');
             if (!href) return;
@@ -105,7 +104,7 @@ async function detail(ids) {
             const contextText = $(el).parent().text();
             const localCode = extractAccessCode(contextText);
             const accessCode = localCode || globalAccessCode;
-            tracks.push(`${$(el).text().trim() || title}$${href}#${accessCode}`);
+            tracks.push({ name: $(el).text().trim() || title, url: `${href}#${accessCode}` });
             uniqueLinks.add(normalizedUrl);
         });
 
@@ -117,21 +116,19 @@ async function detail(ids) {
             const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
             const localCode = extractAccessCode(searchArea);
             const accessCode = localCode || globalAccessCode;
-            tracks.push(`${title}$${panUrl}#${accessCode}`);
+            tracks.push({ name: title, url: `${panUrl}#${accessCode}` });
             uniqueLinks.add(normalizedUrl);
         }
 
-        const play_from = "天翼云盘";
-        const play_url = tracks.join('$$$');
-
-        return jsonify({
-            list: [{
-                vod_id: ids,
-                vod_name: title,
-                vod_play_from: play_from,
-                vod_play_url: play_url,
-            }]
-        });
+        // 【新的返回格式】
+        if (tracks.length > 0) {
+            return jsonify({
+                title: "天翼云盘", // 线路名称
+                list: tracks       // 直接返回包含 {name, url} 对象的数组
+            });
+        } else {
+            return jsonify({ list: [] });
+        }
 
     } catch (e) {
         console.error('获取详情页失败:', e);
@@ -170,7 +167,6 @@ async function search(wd, quick, pg) {
 }
 
 // --- 辅助函数 ---
-
 function extractAccessCode(text) {
     if (!text) return '';
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
@@ -190,7 +186,6 @@ function normalizePanUrl(url) {
     }
 }
 
-// 很多App不直接支持 getPlayinfo, 此处保留为空以防万一
 async function play(flag, id, flags) {
     return jsonify({
         parse: 0,
