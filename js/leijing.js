@@ -1,16 +1,16 @@
 /**
  * =================================================================
- * 最终可用脚本 - 回归初心修正版
- * 版本: 29 (终极版)
+ * 最终可用脚本 - 融合 v16 和 v20 优点
+ * 版本: 21 (融合版)
  *
  * 更新日志:
- * - 为之前所有错误的修改和理论（特别是URL重定向）致以最诚挚的歉意。
- * - 脚本主体完全恢复至用户最初提供的、能够稳定工作的 v21 版本。
- * - [getTracks] 函数中只增加了一个核心修正：
- *   1. 在初始化 Cheerio 之前，对原始 HTML 进行“实体解码”。
- *   2. 后续所有 v21 的原生逻辑都在解码后的、干净的 DOM 上执行。
- * - 此方法是真正的“最小化改动”，只为解决“HTML实体编码”这唯一的、真正的根源问题。
- * - 这是对用户承诺的、能正常工作且修复了特殊链接识别问题的最终版本。
+ * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
+ * - [getTracks] 函数采用双重策略：
+ *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
+ *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
+ * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
+ * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
 
@@ -18,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 29,
+  ver: 21,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,24 +31,15 @@ const appConfig = {
   ],
 };
 
-// --- HTML实体解码函数 ---
-function decodeHtmlEntities(text ) {
-    if (!text) return '';
-    return text.replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
-        return String.fromCharCode(parseInt(hex, 16));
-    });
-}
-
 async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
-// --- 完全恢复至用户原始版本 ---
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-  const url = appConfig.site + `${id}&page=${page}`;
+  const url = appConfig.site + `/${id}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
@@ -77,7 +68,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: 在v21基础上只增加解码补丁 ---
+// --- 详情页函数: v21 融合版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -85,25 +76,18 @@ async function getTracks(ext) {
     const uniqueLinks = new Set();
 
     try {
-        const { data: html } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        
-        // *** 核心修正：在所有操作前，先解码HTML ***
-        const decodedHtml = decodeHtmlEntities(html);
-        
-        // 使用解码后的HTML初始化Cheerio
-        const $ = cheerio.load(decodedHtml);
-        
+        const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+        const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text(); // 这个bodyText现在是解码后的干净文本
-        
+        const bodyText = $('body').text(); // 获取整个页面文本，备用
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // --- 策略一：v21 的精准匹配 (现在工作在解码后的文本上) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=  )[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
+        // --- 策略一：v20 的精准匹配 (优先) ---
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
@@ -115,7 +99,7 @@ async function getTracks(ext) {
             uniqueLinks.add(normalizedUrl);
         }
 
-        // --- 策略二：v21 的广泛兼容模式 (现在工作在解码后的DOM上) ---
+        // --- 策略二：v16 的广泛兼容模式 (回退) ---
         // 仅当精准模式未找到任何链接时，或为了补充纯链接而执行
         
         // 1. 从 <a> 标签中寻找
@@ -127,7 +111,7 @@ async function getTracks(ext) {
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
 
             let accessCode = '';
-            const contextText = $(el).parent().text(); // contextText现在也是解码后的
+            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
             const localCode = extractAccessCode(contextText);
             accessCode = localCode || globalAccessCode; // 优先局部，再用全局
 
@@ -136,7 +120,7 @@ async function getTracks(ext) {
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share  )\/[^\s<>()]+/gi;
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
@@ -179,12 +163,11 @@ function normalizePanUrl(url) {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
 
-// --- 完全恢复至用户原始版本 ---
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
