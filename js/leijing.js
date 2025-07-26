@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点 & 增强链接识别
- * 版本: 25 (融合版 - 增强链接识别)
+ * 版本: 38 (融合版 - 增强链接识别)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
@@ -14,7 +14,20 @@
  * - 优化了 `extractAccessCode` 函数，使其能更灵活地从文本中提取访问码。
  * - 结合了用户提供的可识别 `topicId=41829` 的脚本逻辑，进一步增强了 `getTracks` 函数的鲁棒性。
  * - 修复了 `extractAccessCode` 无法正确提取访问码的问题。
- * - 这是目前最稳定、兼容性最强的版本。
+ * - 优化了 `parseAndAddTrack` 函数，使其能够更鲁棒地处理天翼云盘链接。
+ * - 改进了从 `web/share?code=` 形式的URL中提取分享码和访问码的逻辑，确保即使访问码被URL编码在code参数中也能正确解析。
+ * - 简化了URL匹配正则表达式，并利用URLSearchParams进行参数解析，提高了代码的清晰度和健壮性。
+ * - 进一步优化了 `extractAccessCode` 函数，使其能够处理更多访问码的格式，包括直接跟在链接后面的括号内的访问码。
+ * - 修复了 `parseAndAddTrack` 函数中，当 `code` 参数包含访问码时，`panUrl` 被截断的问题，并确保正确提取访问码。
+ * - 进一步优化 `parseAndAddTrack` 函数，确保 `panUrl` 和 `accessCode` 的正确提取，特别是针对 `code` 参数中包含访问码的情况。
+ * - 修复了 `urlPattern` 正则表达式中的 `Range out of order in character class` 错误。
+ * - 再次优化 `parseAndAddTrack` 函数中 `code` 参数的解析逻辑，确保正确分离分享码和访问码。
+ * - 修复了 `panUrl` 在 `code` 参数中包含括号时未正确清理的问题。
+ * - 优化了 `parseAndAddTrack` 函数，使其能够从链接的文本内容中提取访问码。
+ * - 修复了 `extractAccessCode` 函数，使其能够正确提取 `topicId=41829` 链接中的访问码。
+ * - 修复了 `parseAndAddTrack` 函数，确保 `panUrl` 不包含多余的括号。
+ * - 进一步优化 `extractAccessCode` 函数，增加对 `（访问码：xxxx）` 这种中文括号的识别。
+ * - 修复了正则表达式中的 `Range out of order in character class` 错误，简化了 `panUrl` 清理的正则表达式。
  * =================================================================
  */
 
@@ -22,7 +35,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 25,
+  ver: 38,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -120,7 +133,7 @@ async function getTracks(ext) {
 function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
     if (!textToParse) return;
     // 匹配天翼云盘的短链接或分享链接，并捕获完整的URL
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g;
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%\(\)\u4e00-\u9fa5\u3000-\u303F\uFF00-\uFFEF]+)/g;
     let match;
     while ((match = urlPattern.exec(textToParse)) !== null) {
         const rawUrl = match[0];
@@ -134,14 +147,22 @@ function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
                 if (codeParam) {
                     const decodedCodeParam = decodeURIComponent(codeParam);
                     // 尝试从解码后的code参数中提取访问码
-                    const codeMatch = decodedCodeParam.match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
-                    if (codeMatch && codeMatch[1]) {
-                        accessCode = codeMatch[1];
-                        // 确保panUrl是纯净的分享链接，不包含访问码
-                        panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.replace(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i, '').trim());
-                        // 如果替换后code参数为空，则使用原始的分享码部分
-                        if (panUrl.endsWith('?code=')) {
-                            panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.split('（')[0].split('(')[0].trim());
+                    let tempAccessCode = extractAccessCode(decodedCodeParam);
+                    if (tempAccessCode) {
+                        accessCode = tempAccessCode;
+                        // 移除code参数中的访问码部分，保留纯分享码
+                        const cleanCodeParam = decodedCodeParam.replace(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i, '').replace(/[\(（].*[\)）]/, '').trim();
+                        // 如果清理后code参数为空，则使用原始的分享码部分
+                        if (cleanCodeParam === '') {
+                            // 尝试从原始的decodedCodeParam中提取分享码部分，即括号前的部分
+                            const shareCodeMatch = decodedCodeParam.match(/^([a-zA-Z0-9]+)(?:[\(（].*)?$/);
+                            if (shareCodeMatch && shareCodeMatch[1]) {
+                                panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(shareCodeMatch[1]);
+                            } else {
+                                panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam);
+                            }
+                        } else {
+                            panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(cleanCodeParam);
                         }
                     } else {
                         // 如果code参数中没有访问码，则直接使用原始的code参数作为分享码
@@ -157,6 +178,20 @@ function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
         // 再次尝试从整个rawUrl字符串中提取访问码，作为最终兜底
         if (!accessCode) {
             accessCode = extractAccessCode(rawUrl);
+        }
+
+        // 从链接的文本内容中提取访问码
+        if (!accessCode) {
+            const linkTextAfterUrl = textToParse.substring(match.index + rawUrl.length);
+            const linkTextMatch = linkTextAfterUrl.match(/^[\s\S]{0,50}?(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
+            if (linkTextMatch && linkTextMatch[1]) {
+                accessCode = linkTextMatch[1];
+            } else {
+                const bracketCodeMatch = linkTextAfterUrl.match(/^[\s\S]{0,50}?[\(（]([a-zA-Z0-9]{4,6})[\)）]/);
+                if (bracketCodeMatch && bracketCodeMatch[1]) {
+                    accessCode = bracketCodeMatch[1];
+                }
+            }
         }
 
         if (!panUrl) continue; // 确保有有效的网盘URL
@@ -176,12 +211,15 @@ function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
 function extractAccessCode(text) {
     if (!text) return '';
     // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
-    let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
+    let match = text.match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
-    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
+    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
-    // 尝试匹配直接跟在链接后面的访问码，例如 `https://cloud.189.cn/t/xxxx（t189）` 这种格式
+    // 尝试匹配直接跟在链接后面的括号内的访问码，例如 `https://cloud.189.cn/t/xxxx（t189）` 这种格式
     match = text.match(/\(([a-zA-Z0-9]{4,6})\)$/);
+    if (match && match[1]) return match[1];
+    // 尝试匹配直接跟在链接后面的访问码，没有括号或前缀，例如 `https://cloud.189.cn/web/share?code=XXXX xxxx` 这种格式
+    match = text.match(/\s([a-zA-Z0-9]{4,6})$/);
     if (match && match[1]) return match[1];
     return '';
 }
@@ -226,8 +264,6 @@ async function search(ext) {
   });
   return jsonify({ list: cards });
 }
-
-
 
 
 
