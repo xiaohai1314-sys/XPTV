@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 21 (融合版)
+ * 版本: 22 (融合版 - 增强链接识别)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
@@ -10,6 +10,7 @@
  *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
  * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
  * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ * - 增强了对 `https://cloud.189.cn/web/share?code=XXXX` 格式链接的识别，即使没有明确的访问码提示。
  * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
@@ -18,7 +19,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21,
+  ver: 22,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -68,7 +69,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21 融合版 ---
+// --- 详情页函数: v22 融合版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -119,17 +120,24 @@ async function getTracks(ext) {
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<>()]+/gi;
+        // 增强对 `https://cloud.189.cn/web/share?code=XXXX` 格式链接的识别
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share\?code=)[a-zA-Z0-9]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
 
             let accessCode = '';
-            // 在链接前后 50 个字符范围内寻找密码
-            const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
-            const localCode = extractAccessCode(searchArea);
-            accessCode = localCode || globalAccessCode;
+            // 尝试从URL中直接提取code作为访问码
+            const urlCodeMatch = panUrl.match(/code=([a-zA-Z0-9]{4,6})/);
+            if (urlCodeMatch && urlCodeMatch[1]) {
+                accessCode = urlCodeMatch[1];
+            } else {
+                // 在链接前后 50 个字符范围内寻找密码
+                const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
+                const localCode = extractAccessCode(searchArea);
+                accessCode = localCode || globalAccessCode;
+            }
 
             tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
@@ -202,4 +210,3 @@ async function search(ext) {
 
 
 
-实时
