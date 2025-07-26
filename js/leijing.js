@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 22 (融合版 - 增强链接识别)
+ * 版本: 23 (融合版 - 增强链接识别)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
@@ -11,6 +11,7 @@
  * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
  * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
  * - 增强了对 `https://cloud.189.cn/web/share?code=XXXX` 格式链接的识别，即使没有明确的访问码提示。
+ * - 优化了 `extractAccessCode` 函数，使其能更灵活地从文本中提取访问码。
  * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
@@ -19,7 +20,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 22,
+  ver: 23,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -69,7 +70,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v22 融合版 ---
+// --- 详情页函数: v23 融合版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -88,14 +89,15 @@ async function getTracks(ext) {
         }
 
         // --- 策略一：v20 的精准匹配 (优先) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // 优化：放宽对访问码前缀的匹配，并处理直接在URL后的访问码
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]|(?:访问码|密码|提取码|code)?[:：\s]*([a-zA-Z0-9]{4,6}))?/gi;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
-            const accessCode = match[3];
+            const accessCode = match[3] || match[4]; // 尝试从两个捕获组中获取访问码
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
             
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
             uniqueLinks.add(normalizedUrl);
         }
 
@@ -162,7 +164,12 @@ function extractAccessCode(text) {
     if (match && match[1]) return match[1];
     match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
-    return '';
+    // 尝试匹配直接跟在链接后面的访问码，例如 
+
+
+    match = text.match(/([a-zA-Z0-9]{4,6})\s*$/);
+    if (match && match[1]) return match[1];
+    return 
 }
 
 function normalizePanUrl(url) {
@@ -183,22 +190,22 @@ async function search(ext) {
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
-  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
+  const searchItems = $(".search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item");
   searchItems.each((index, each) => {
     const $item = $(each);
-    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
-    const href = a.attr('href');
+    const a = $item.find("a.title, h2 a, h3 a, .item-title a, .title > span a");
+    const href = a.attr("href");
     const title = a.text();
     if (!href || !title) return;
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
+    const tag = $item.find(".tag, .category, .item-tag, .detailInfo .module").text().trim();
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: '',
+      vod_pic: "",
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
