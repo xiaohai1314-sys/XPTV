@@ -87,11 +87,10 @@ async function getTracks(ext) {
         }
 
         // --- 策略一：v20 的精准匹配 (优先) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[^\s<)]*?(?:[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09])/g;
-        let match;
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
-            const accessCode = match[1];
+            const accessCode = match[3];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
             
@@ -120,7 +119,7 @@ async function getTracks(ext) {
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share)\/[^\s<>()]+/gi;
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
@@ -191,10 +190,16 @@ async function search(ext) {
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: $item.find('img').attr('src') || '',
+      vod_pic: '',
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
   return jsonify({ list: cards });
 }
+
+
+
+
+
+实时
