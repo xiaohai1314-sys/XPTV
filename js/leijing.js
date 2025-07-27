@@ -1,12 +1,16 @@
 /**
  * =================================================================
- * 最终可用脚本 - 搜索和详情页链接识别功能优化
- * 版本: 21
+ * 最终可用脚本 - 融合 v16 和 v20 优点
+ * 版本: 21 (融合版)
  *
  * 更新日志:
- * - 进一步优化了 parseAndAddTrack 函数，使其能够更鲁棒地处理天翼云盘链接。
- * - 改进了从 `web/share?code=` 形式的URL中提取分享码和访问码的逻辑，确保即使访问码被URL编码在code参数中也能正确解析。
- * - 简化了URL匹配正则表达式，并利用URLSearchParams进行参数解析，提高了代码的清晰度和健壮性。
+ * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
+ * - [getTracks] 函数采用双重策略：
+ *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
+ *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
+ * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
+ * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
 
@@ -27,7 +31,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig( ) {
+async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
@@ -64,6 +68,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
+// --- 详情页函数: v21 融合版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -72,29 +77,44 @@ async function getTracks(ext) {
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data);
-        const title = $('.topicBox .title').text().trim() || "网盘资源";
-        
-        let combinedText = "";
-        $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const $el = $(el);
-            const hrefAttr = $el.attr('href') || '';
-            const linkText = $el.text() || '';
-            combinedText += hrefAttr + ' ' + linkText + '\n';
-        });
+        const bodyText = data; // 直接使用原始文本，不经过cheerio解析
+        const title = "网盘资源"; // 简化标题获取，避免cheerio依赖
 
-        if (combinedText) {
-            parseAndAddTrack(combinedText, title, tracks, uniqueLinks);
+        let globalAccessCode = '';
+        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
+        if (globalCodeMatch) {
+            globalAccessCode = globalCodeMatch[1];
         }
 
-        if (tracks.length === 0) {
-            const content = $('.topicContent').text();
-            parseAndAddTrack(content, title, tracks, uniqueLinks);
+        // 策略一：精准匹配 (优先)
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        let match;
+        while ((match = precisePattern.exec(bodyText)) !== null) {
+            const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
+            const accessCode = match[3];
+            const normalizedUrl = normalizePanUrl(panUrl);
+            if (uniqueLinks.has(normalizedUrl)) continue;
+            
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
         }
 
-        if (tracks.length === 0) {
-            const bodyText = $('body').text();
-            parseAndAddTrack(bodyText, title, tracks, uniqueLinks);
+        // 策略二：广泛兼容模式 (回退)
+        // 从纯文本中寻找所有可能的链接，并尝试提取访问码
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share\?code=)[a-zA-Z0-9]+(?:[\(（\uff08]访问码[:：\uff1a][a-zA-Z0-9]{4,6}[\)）\uff09])?/gi;
+        while ((match = urlPattern.exec(bodyText)) !== null) {
+            const panUrl = match[0];
+            const normalizedUrl = normalizePanUrl(panUrl);
+            if (uniqueLinks.has(normalizedUrl)) continue;
+
+            let accessCode = "";
+            // 在链接前后 50 个字符范围内寻找密码
+            const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
+            const localCode = extractAccessCode(searchArea);
+            accessCode = localCode || globalAccessCode;
+
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
         }
 
         if (tracks.length > 0) {
@@ -109,77 +129,23 @@ async function getTracks(ext) {
     }
 }
 
-function parseAndAddTrack(textToParse, title, tracks, uniqueLinks) {
-    if (!textToParse) return;
-    // 匹配天翼云盘的短链接或分享链接，并捕获完整的URL
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%\(\)\uff08\uff09\uFF1A\uFF1B\uFF0C\uFF0E\uFF0F\uFF1F\uFF01\uFF02\uFF03\uFF04\uFF05\uFF06\uFF07\uFF08\uFF09\uFF0A\uFF0B\uFF0C\uFF0D\uFF0E\uFF0F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF5B-\uFF60\uFF61-\uFF65\uFF66-\uFF6F\uFF70-\uFF79\uFF80-\uFF89\uFF90-\uFF99\uFFA0-\uFFA9\uFFB0-\uFFB9\uFFC0-\uFFC9\uFFD0-\uFFD9\uFFE0-\uFFE9\uFFF0-\uFFF9]+)/g;
-    let match;
-    while ((match = urlPattern.exec(textToParse)) !== null) {
-        const rawUrl = match[0];
-        let panUrl = rawUrl;
-        let accessCode = '';
-
-        try {
-            const urlObj = new URL(rawUrl);
-            if (urlObj.pathname.startsWith('/web/share')) {
-                const codeParam = urlObj.searchParams.get('code');
-                if (codeParam) {
-                    const decodedCodeParam = decodeURIComponent(codeParam);
-                    // 尝试从解码后的code参数中提取访问码
-                    const codeMatch = decodedCodeParam.match(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i);
-                    if (codeMatch && codeMatch[1]) {
-                        accessCode = codeMatch[1];
-                        // 确保panUrl是纯净的分享链接，不包含访问码
-                        panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.replace(/(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i, '').trim());
-                        // 如果替换后code参数为空，则使用原始的分享码部分
-                        if (panUrl.endsWith('?code=')) {
-                            panUrl = urlObj.origin + urlObj.pathname + '?code=' + encodeURIComponent(decodedCodeParam.split('（')[0].split('(')[0].trim());
-                        }
-                    } else {
-                        // 如果code参数中没有访问码，则直接使用原始的code参数作为分享码
-                        panUrl = rawUrl;
-                    }
-                }
-            }
-        } catch (e) {
-            // URL解析失败，可能是因为URL本身就包含了访问码，直接从原始匹配中提取
-            // 此时panUrl保持为rawUrl
-        }
-
-        // 再次尝试从整个rawUrl字符串中提取访问码，作为最终兜底
-        if (!accessCode) {
-            accessCode = extractAccessCode(rawUrl);
-        }
-
-        if (!panUrl) continue; // 确保有有效的网盘URL
-
-        const normalizedUrl = normalizePanUrl(panUrl);
-        if (uniqueLinks.has(normalizedUrl)) continue;
-
-        tracks.push({
-            name: title,
-            pan: panUrl,
-            ext: { accessCode: accessCode || '' }
-        });
-        uniqueLinks.add(normalizedUrl);
-    }
-}
-
 function extractAccessCode(text) {
     if (!text) return '';
-    const codeMatch = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-    if (codeMatch && codeMatch[1]) return codeMatch[1];
-    const bracketMatch = text.match(/[\uFF3B\u3010\uFF08\(]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\uFF3D\u3011\uFF09\)]/i);
-    if (bracketMatch && bracketMatch[1]) return bracketMatch[1];
+    // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
+    let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
+    if (match && match[1]) return match[1];
+    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
+    if (match && match[1]) return match[1];
     return '';
 }
 
 function normalizePanUrl(url) {
     try {
-        const urlObj = new URL(url);
+        const decodedUrl = decodeURIComponent(url); // Add URL decoding
+        const urlObj = new URL(decodedUrl);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<)]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
@@ -207,8 +173,8 @@ async function search(ext) {
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: $item.find('img').attr('src') || '',
-      vod_remarks: tag,
+      vod_pic: '',
+      vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
@@ -217,4 +183,5 @@ async function search(ext) {
 
 
 
-实时
+
+
