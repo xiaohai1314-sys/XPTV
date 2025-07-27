@@ -1,16 +1,14 @@
 /**
  * =================================================================
- * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 21 (融合版)
+ * 最终可用脚本 - 解决复杂链接格式问题
+ * 版本: 22 (增强兼容版)
  *
  * 更新日志:
- * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
- * - [getTracks] 函数采用双重策略：
- *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
- *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
- * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
- * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
- * - 这是目前最稳定、兼容性最强的版本。
+ * - [核心修复] 解决了对 a 标签 href 属性中直接包含访问码文本的链接无法识别的问题。
+ * - [正则增强] 升级正则表达式，以兼容全角/半角括号和冒号，以及它们之间的各种空格。
+ * - [逻辑优化] 调整匹配逻辑，直接在核心内容区域的完整 HTML 中进行搜索，极大提高了识别率。
+ * - [数据清洗] 增加了更强的链接清理逻辑，确保从“污染”源中提取出纯净的 URL。
+ * - [保持稳定] 继承了 v21 的双重策略（精准优先+广泛回退），并对两种策略都进行了强化，兼顾了准确性和覆盖面。
  * =================================================================
  */
 
@@ -18,7 +16,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21,
+  ver: 22,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,7 +29,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
@@ -68,7 +66,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21 融合版 ---
+// --- 详情页函数: v22 增强兼容版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -77,21 +75,23 @@ async function getTracks(ext) {
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const bodyText = data; // 直接使用原始文本，不经过cheerio解析
-        const title = "网盘资源"; // 简化标题获取，避免cheerio依赖
+        const $ = cheerio.load(data);
+        const title = $('.topicBox .title').text().trim() || "网盘资源";
+        
+        // 关键改动：直接获取核心内容区的 HTML，以便同时搜索 href 和文本
+        const contentHtml = $('.topicContent').html() || $('body').html();
+        const bodyText = $('body').text(); // 纯文本备用，用于上下文搜索
 
-        let globalAccessCode = '';
-        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
-        if (globalCodeMatch) {
-            globalAccessCode = globalCodeMatch[1];
-        }
-
-        // 策略一：精准匹配 (优先)
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // --- 策略一：增强的精准匹配 (优先) ---
+        // 这个正则表达式现在可以处理 URL 在 href 或文本中，并兼容多种括号和冒号
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))[^\s<]*?\s*[\(（\uff08\s]*?(?:访问码|密码|提取码|code)\s*[:：\uff1a\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09]/gi;
+        
         let match;
-        while ((match = precisePattern.exec(bodyText)) !== null) {
-            const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
-            const accessCode = match[3];
+        while ((match = precisePattern.exec(contentHtml)) !== null) {
+            // 清理和规范化 URL，从URL中剔除可能混入的文本
+            let panUrl = match[1].replace(/（访问码：.*/, '').trim(); 
+            const accessCode = match[2];
+            
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
             
@@ -99,21 +99,23 @@ async function getTracks(ext) {
             uniqueLinks.add(normalizedUrl);
         }
 
-        // 策略二：广泛兼容模式 (回退)
-        // 从纯文本中寻找所有可能的链接，并尝试提取访问码
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share\?code=)[a-zA-Z0-9]+(?:[\(（\uff08]访问码[:：\uff1a][a-zA-Z0-9]{4,6}[\)）\uff09])?/gi;
-        while ((match = urlPattern.exec(bodyText)) !== null) {
-            const panUrl = match[0];
+        // --- 策略二：广泛兼容模式 (回退和补充) ---
+        // 寻找页面上所有可能的链接，然后在其附近寻找访问码
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share )\/[^\s<>()"'`]+/gi;
+        
+        while ((match = urlPattern.exec(contentHtml)) !== null) {
+            let panUrl = match[0];
+            // 再次清理，防止链接尾部包含HTML标签等杂质
+            panUrl = panUrl.replace(/["'<].*/, '');
+
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
 
-            let accessCode = "";
-            // 在链接前后 50 个字符范围内寻找密码
+            // 在链接附近（前后50个字符）的纯文本中寻找访问码
             const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
-            const localCode = extractAccessCode(searchArea);
-            accessCode = localCode || globalAccessCode;
+            const accessCode = extractAccessCode(searchArea);
 
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
             uniqueLinks.add(normalizedUrl);
         }
 
@@ -129,23 +131,34 @@ async function getTracks(ext) {
     }
 }
 
+/**
+ * 辅助函数：从一段文本中提取访问码
+ * @param {string} text 待搜索的文本
+ * @returns {string} 找到的访问码或空字符串
+ */
 function extractAccessCode(text) {
     if (!text) return '';
     // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
+    // 再次尝试匹配被括号包围的格式
     match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
     return '';
 }
 
+/**
+ * 辅助函数：规范化URL，用于去重
+ * @param {string} url 原始URL
+ * @returns {string} 规范化后的URL
+ */
 function normalizePanUrl(url) {
     try {
-        const decodedUrl = decodeURIComponent(url); // Add URL decoding
-        const urlObj = new URL(decodedUrl);
+        const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
+        // 如果URL构造失败（比如被污染了），则用正则尽力提取核心部分
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
@@ -174,14 +187,9 @@ async function search(ext) {
       vod_id: href,
       vod_name: dramaName,
       vod_pic: '',
-      vod_remarks: '',
+      vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
   return jsonify({ list: cards });
 }
-
-
-
-
-
