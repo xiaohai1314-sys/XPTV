@@ -1,14 +1,17 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 21.2 (最终修正版)
+ * 版本: 21.3 (根源修正版)
  *
  * 更新日志:
- * - 深入调试，定位到 getCards 函数中存在过滤逻辑缺陷，该缺陷导致特定帖子被提前跳过，无法进入详情页解析。
- * - [getCards] 修正了错误的过滤条件，确保所有有效帖子都能被正确加载。
- * - [getTracks] 对 precisePattern 正则表达式进行最终优化，确保其能处理全角括号及各种文本格式。
- * - [normalizePanUrl] 增加了 decodeURIComponent 步骤，以正确处理 href 属性中被编码的 URL。
- * - 此版本通过端到端调试，确保从列表页到详情页的整个流程通畅，彻底解决目标链接的提取问题。
+ * - 彻底反思并重写核心提取逻辑，定位到问题的根源在于对<a>标签的错误处理方式。
+ * - [getTracks] 放弃在整个页面文本中进行复杂正则匹配的旧思路。
+ * - 采用全新的、更可靠的策略：
+ *   1. **直接遍历<a>标签**: 脚本现在直接查找所有包含 "cloud.189.cn" 的<a>标签。
+ *   2. **分离处理**: 对每个<a>标签，分别处理其 `href` 属性（获取纯链接）和可见文本（提取访问码）。
+ *   3. **简化正则**: 使用一个非常简单和明确的正则表达式，只用于从<a>标签的文本中提取访问码。
+ * - [getCards] 保留了对过滤条件的修正，确保帖子不会在列表页被错误过滤。
+ * - 此版本逻辑清晰，直击要害，是解决该问题的最终、最可靠的方案。
  * =================================================================
  */
 
@@ -16,7 +19,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: "21.2",
+  ver: "21.3",
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -49,7 +52,7 @@ async function getCards(ext) {
     const dramaName = match ? match[1] : title;
     const r = $(each).find('.summary').text();
     const tag = $(each).find('.tag').text();
-    // **修正点 1: 优化过滤逻辑，防止误杀**
+    // 修正过滤逻辑，防止误杀
     if (r.includes('content') && !r.includes('cloud.189.cn')) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
@@ -67,7 +70,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21.2 最终修正版 ---
+// --- 详情页函数: v21.3 根源修正版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -77,59 +80,38 @@ async function getTracks(ext) {
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
         const $ = cheerio.load(data);
-        const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text(); 
-        let globalAccessCode = '';
-        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
-        if (globalCodeMatch) {
-            globalAccessCode = globalCodeMatch[1];
-        }
+        const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
 
-        // --- 策略一：精准匹配 (最终优化正则) ---
-        // **修正点 2: 优化正则表达式，确保覆盖所有情况**
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))\s*[（(][^）)]*?(?:访问码|密码|提取码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})[^）)]*?[）)]/g;
-        let match;
-        while ((match = precisePattern.exec(bodyText)) !== null) {
-            const panUrl = match[1].trim();
-            const accessCode = match[2].trim();
-            const normalizedUrl = normalizePanUrl(panUrl);
-            if (uniqueLinks.has(normalizedUrl)) continue;
-            
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-            uniqueLinks.add(normalizedUrl);
-        }
-
-        // --- 策略二：广泛兼容模式 (回退) ---
+        // 全新的、更可靠的提取策略
         $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const href = $(el).attr('href');
+            const $el = $(el);
+            const href = $el.attr('href');
+            const linkText = $el.text(); // 获取<a>标签的可见文本，例如 "http...（访问码：t189 ）"
+
             if (!href) return;
 
-            const normalizedUrl = normalizePanUrl(href);
-            if (uniqueLinks.has(normalizedUrl)) return;
+            // 1. 从 href 中提取纯净的 URL
+            const urlMatch = href.match(/https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ )/);
+            if (!urlMatch) return;
+            const panUrl = urlMatch[0];
 
+            // 使用纯净 URL 进行去重
+            if (uniqueLinks.has(panUrl)) return;
+
+            // 2. 从链接的可见文本中提取访问码
             let accessCode = '';
-            const contextText = $(el).parent().text();
-            const localCode = extractAccessCode(contextText);
-            accessCode = localCode || globalAccessCode;
+            const codeMatch = linkText.match(/(?:访问码|密码|提取码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/i);
+            if (codeMatch && codeMatch[1]) {
+                accessCode = codeMatch[1];
+            }
 
-            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
-            uniqueLinks.add(normalizedUrl);
+            tracks.push({
+                name: pageTitle,
+                pan: panUrl,
+                ext: { accessCode }
+            });
+            uniqueLinks.add(panUrl);
         });
-
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t\/|web\/share\?code= )[^\s<>()（）]+/gi;
-        while ((match = urlPattern.exec(bodyText)) !== null) {
-            const panUrl = match[0];
-            const normalizedUrl = normalizePanUrl(panUrl);
-            if (uniqueLinks.has(normalizedUrl)) continue;
-
-            let accessCode = '';
-            const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
-            const localCode = extractAccessCode(searchArea);
-            accessCode = localCode || globalAccessCode;
-
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-            uniqueLinks.add(normalizedUrl);
-        }
 
         if (tracks.length > 0) {
             return jsonify({ list: [{ title: "天翼云盘", tracks }] });
@@ -140,28 +122,6 @@ async function getTracks(ext) {
     } catch (e) {
         console.error('获取详情页失败:', e);
         return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] });
-    }
-}
-
-function extractAccessCode(text) {
-    if (!text) return '';
-    let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-    if (match && match[1]) return match[1];
-    match = text.match(/[（(][^）)]*?(?:访问码|密码|提取码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})[^）)]*?[）)]/i);
-    if (match && match[1]) return match[1];
-    return '';
-}
-
-function normalizePanUrl(url) {
-    try {
-        // **修正点 3: 增加解码步骤，处理编码过的href**
-        const decodedUrl = decodeURIComponent(url);
-        const urlObj = new URL(decodedUrl);
-        // 只取域名和路径，去掉查询参数和哈希，以获得更纯净的标识
-        return (urlObj.origin + urlObj.pathname).toLowerCase();
-    } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )（）]+/);
-        return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
 
