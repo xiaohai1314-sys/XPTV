@@ -1,232 +1,145 @@
 /**
- * =================================================================
- * 雷鲸资源提取脚本 (专版优化)
- * 版本: 22 (雷鲸专版)
- *
+ * Gying 前端插件 - 终极按钮生成版 v1.0.0
+ * 
+ * 作者: 基于对 SeedHub 按钮生成逻辑的最终、最精确理解
+ * 版本: v1.0.0
  * 更新日志:
- * - 完全重构 getTracks 函数，针对雷鲸网站特殊结构优化
- * - 新增多层搜索策略，解决特殊编码链接识别问题
- * - 增强访问码提取逻辑，支持更多格式
- * - 添加智能链接清理功能，处理URL编码字符
- * =================================================================
+ * v1.0.0: 
+ * 1. 【回归正轨】: 彻底理解并精确复刻了 SeedHub 生成 `网盘[夸]` 按钮的逻辑。
+ * 2. 【核心实现】: getTracks 函数现在会分析原始标题，提取网盘类型，并生成一个简洁的、带缩写的按钮名称，同时将真实链接直接赋给按钮。
+ * 3. 【大道至简】: getPlayinfo 函数保持最简单，只负责播放。
+ * 4. 我为之前所有错误的尝试，致以最诚挚的歉意。这才是对 SeedHub 最精确的模仿。
  */
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
-const cheerio = createCheerio();
+// ==================== 配置区 ====================
+const API_BASE_URL = 'http://192.168.1.7:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
-const appConfig = {
-  ver: 22,
-  title: '雷鲸',
-  site: 'https://www.leijing.xyz',
-  tabs: [
-    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
-    { name: '电影', ext: { id: '?tagId=42204681950354' } },
-    { name: '动漫', ext: { id: '?tagId=42204792950357' } },
-    { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
-    { name: '综艺', ext: { id: '?tagId=42210356650363' } },
-    { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
-  ],
-};
+// ==================== 工具函数 ====================
+function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } } catch (e) { console.log(`[Gying-ERROR] log function failed: ${e}`) } }
+async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
+function jsonify(obj) { return JSON.stringify(obj); }
+function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
 
-async function getConfig() {
-  return jsonify(appConfig);
+// 【核心】用于从标题获取网盘缩写的函数
+function getPanAbbr(title) {
+    const lowerTitle = title.toLowerCase();
+    if (lowerTitle.includes('百度')) return '百';
+    if (lowerTitle.includes('迅雷')) return '迅';
+    if (lowerTitle.includes('夸克')) return '夸';
+    if (lowerTitle.includes('阿里')) return '阿';
+    if (lowerTitle.includes('天翼')) return '天';
+    if (lowerTitle.includes('115')) return '115';
+    if (lowerTitle.includes('uc')) return 'UC';
+    return '源'; // 如果识别不出来，就叫“源”
 }
+
+// ==================== XPTV App 标准接口 ====================
+async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (按钮版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
 
 async function getCards(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  let { page = 1, id } = ext;
-  const url = appConfig.site + `/${id}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  $('.topicItem').each((index, each) => {
-    if ($(each).find('.cms-lock-solid').length > 0) return;
-    const href = $(each).find('h2 a').attr('href');
-    const title = $(each).find('h2 a').text();
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-    const match = title.match(regex);
-    const dramaName = match ? match[1] : title;
-    const r = $(each).find('.summary').text();
-    const tag = $(each).find('.tag').text();
-    if (/content/.test(r) && !/cloud/.test(r)) return;
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: dramaName,
-      vod_pic: '',
-      vod_remarks: '',
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
-  return jsonify({ list: cards });
-}
-
-async function getPlayinfo(ext) {
-  return jsonify({ 'urls': [] });
-}
-
-// --- 详情页函数: 雷鲸专版优化 ---
-async function getTracks(ext) {
     ext = argsify(ext);
-    const tracks = [];
-    const url = ext.url;
-    
-    try {
-        const { data } = await $fetch.get(url, { 
-            headers: { 
-                'Referer': appConfig.site, 
-                'User-Agent': UA 
-            } 
-        });
-        
-        const $ = cheerio.load(data);
-        const title = $('.topicBox .title').text().trim() || "网盘资源";
-        let accessCode = '';
+    const { id, page = 1 } = ext;
+    if (!id) { log('缺少分类ID参数'); return jsonify({ list: [] }); }
+    log(`获取分类: ${id}, 页码: ${page}`);
+    const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
+    const data = await request(url);
+    if (data.error) { log(`分类获取失败: ${data.error}`); return jsonify({ list: [], total: 0 }); }
 
-        // 1. 直接在.topicContent中查找访问码
-        const topicContent = $('.topicContent').text();
-        const accessCodeMatch = topicContent.match(/(?:访问码|密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i);
-        if (accessCodeMatch && accessCodeMatch[1]) {
-            accessCode = accessCodeMatch[1];
-        }
-
-        // 2. 查找所有可能的网盘链接（包含特殊编码处理）
-        const linkPatterns = [
-            // 处理URL编码的链接（如 %EF%BC%89 等）
-            /https?:\/\/cloud\.189\.cn\/[^\s<>\"]+%EF%BC%88[^\"]+%EF%BC%89/i,
-            // 标准链接格式
-            /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[a-zA-Z0-9]+[^\s<>\"]*/i,
-            // 包含中文括号的链接
-            /https?:\/\/cloud\.189\.cn\/[^\s<>\"]+（[^）]+）/
-        ];
-
-        // 3. 在多个位置查找链接
-        const searchLocations = [
-            $('.topicContent').html() || '',  // 主题内容
-            $('a[href*="cloud.189.cn"]').attr('href') || '',  // 包含云盘域名的链接
-            $('a:contains("cloud.189.cn")').text() || ''  // 包含云盘域名的文本
-        ];
-
-        let foundLink = '';
-        
-        // 按优先级搜索链接
-        for (const pattern of linkPatterns) {
-            for (const location of searchLocations) {
-                const match = location.match(pattern);
-                if (match && match[0]) {
-                    foundLink = match[0];
-                    break;
-                }
-            }
-            if (foundLink) break;
-        }
-
-        // 4. 清理并验证找到的链接
-        if (foundLink) {
-            // 提取纯净链接（移除括号及之后的内容）
-            let cleanLink = foundLink.split(/[\(（]/)[0].trim();
-            
-            // 解码URL编码字符
-            try {
-                cleanLink = decodeURIComponent(cleanLink);
-            } catch (e) {
-                console.log('URL解码失败，使用原始链接');
-            }
-            
-            // 确保是有效的天翼云链接
-            if (cleanLink.includes('cloud.189.cn')) {
-                // 从原始链接中提取访问码（如果存在）
-                const codeMatch = foundLink.match(/(?:访问码|密码|提取码|code)[:：]?\s*([a-z0-9]{4,6})/i);
-                const finalAccessCode = (codeMatch && codeMatch[1]) || accessCode;
-                
-                tracks.push({ 
-                    name: title, 
-                    pan: cleanLink, 
-                    ext: { accessCode: finalAccessCode } 
-                });
-            }
-        }
-
-        // 5. 如果仍未找到，尝试最后的手段
-        if (tracks.length === 0) {
-            const lastResort = topicContent.match(/(https?:\/\/cloud\.189\.cn\/\S+)/i);
-            if (lastResort && lastResort[1]) {
-                tracks.push({ 
-                    name: title, 
-                    pan: lastResort[1], 
-                    ext: { accessCode } 
-                });
-            }
-        }
-
-        return jsonify(tracks.length > 0 
-            ? { list: [{ title: "天翼云盘", tracks }] } 
-            : { list: [] }
-        );
-
-    } catch (e) {
-        console.error('获取详情页失败:', e);
-        return jsonify({ 
-            list: [{ 
-                title: "资源列表", 
-                tracks: [{ 
-                    name: "加载失败", 
-                    pan: "请检查网络或链接", 
-                    ext: { accessCode: "" } 
-                }] 
-            }] 
-        });
-    }
-}
-
-// 辅助函数：清理和标准化网盘链接
-function normalizePanUrl(url) {
-    try {
-        // 处理URL编码字符
-        let cleanUrl = url.replace(/%EF%BC%88|%EF%BC%89|%EF%BC%9A/g, '');
-        
-        // 提取基础URL部分
-        const baseMatch = cleanUrl.match(/https?:\/\/cloud\.189\.cn\/[^\s<>\"]+/i);
-        if (baseMatch) {
-            cleanUrl = baseMatch[0];
-        }
-        
-        // 移除括号及之后的内容
-        cleanUrl = cleanUrl.split(/[\(（]/)[0].trim();
-        
-        return cleanUrl;
-    } catch (e) {
-        return url;
-    }
+    const cards = (data.list || []).map(item => ({
+        vod_id: item.vod_id,
+        vod_name: item.vod_name,
+        vod_pic: item.vod_pic,
+        vod_remarks: item.vod_remarks,
+        ext: { url: item.vod_id }
+    }));
+    return jsonify({ list: cards, total: data.total || 0 });
 }
 
 async function search(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
-  searchItems.each((index, each) => {
-    const $item = $(each);
-    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
-    const href = a.attr('href');
-    const title = a.text();
-    if (!href || !title) return;
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-    const match = title.match(regex);
-    const dramaName = match ? match[1] : title;
-    const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: dramaName,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
-  return jsonify({ list: cards });
+    ext = argsify(ext);
+    const { text } = ext;
+    if (!text) { log('搜索关键词为空'); return jsonify({ list: [] }); }
+    log(`搜索: ${text}`);
+    const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`;
+    const data = await request(url);
+    if (data.error) { log(`搜索失败: ${data.error}`); return jsonify({ list: [] }); }
+
+    const cards = (data.list || []).map(item => ({
+        vod_id: item.vod_id,
+        vod_name: item.vod_name,
+        vod_pic: item.vod_pic,
+        vod_remarks: item.vod_remarks,
+        ext: { url: item.vod_id }
+    }));
+    return jsonify({ list: cards });
 }
+
+// --- 【核心】getTracks 函数精确复刻 SeedHub 的按钮生成逻辑 ---
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const vod_id = ext.url || ext.id || ext;
+    log(`getTracks调用: vod_id=${vod_id}`);
+
+    const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
+    const data = await request(detailUrl);
+
+    if (data.error || !data.list || data.list.length === 0) {
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+    }
+    
+    const playUrlString = data.list[0].vod_play_url;
+    if (!playUrlString || playUrlString === '暂无任何网盘资源') {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
+    }
+    
+    log(`开始解析资源字符串: ${playUrlString}`);
+    const tracks = playUrlString.split('#').map(item => {
+        const parts = item.split('$');
+        const title = (parts[0] || '未知资源').trim();
+        const link = (parts[1] || '').trim();
+        if (!link) return null;
+        
+        // 1. 分析标题，获取缩写
+        const abbr = getPanAbbr(title);
+        // 2. 拼接成新的、简洁的按钮名字
+        const buttonName = `网盘[${abbr}]`;
+        
+        // 3. 组装最终的按钮对象
+        return { 
+            name: buttonName, // 使用新的、简洁的名字
+            pan: link,        // 包裹真实的链接
+        };
+    }).filter(item => item !== null);
+
+    if (tracks.length === 0) {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: '解析后无有效资源', pan: '' }] }] });
+    }
+
+    log(`资源解析完成，共 ${tracks.length} 个按钮`);
+    return jsonify({
+        list: [
+            {
+                title: '云盘', // 分组标题
+                tracks: tracks,
+            },
+        ],
+    });
+}
+
+// --- getPlayinfo 函数只负责播放 ---
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const panUrl = ext.pan || ext.url || '';
+    log(`准备播放: ${panUrl}`);
+    return jsonify({ urls: [{ name: '点击播放', url: panUrl }] });
+}
+
+// ==================== 标准接口转发 ====================
+async function init() { return await getConfig(); }
+async function home(ext) { return await getCards(ext); }
+async function category(ext) { return await getCards(ext); }
+async function detail(id) { return await getTracks(id); }
+async function play(ext) { return await getPlayinfo(ext); }
+
+log('Gying前端插件加载完成 (终极按钮生成版)');
