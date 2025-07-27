@@ -1,9 +1,3 @@
-/**
- * =================================================================
- * 最终可用脚本 - v21 融合增强版（保留旧策略 + 富文本兼容）
- * 兼容原分类结构，支持复杂嵌套提取
- * =================================================================
- */
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
@@ -65,83 +59,56 @@ async function getTracks(ext) {
   const uniqueLinks = new Set();
 
   try {
-    const { data } = await $fetch.get(url, {
+    const { data: html } = await $fetch.get(url, {
       headers: {
         'Referer': appConfig.site,
         'User-Agent': UA
       }
     });
 
-    const decodedHtml = data.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
-    const $ = cheerio.load(decodedHtml);
+    // 加载 cheerio 页面文本（用于全局提取码）
+    const $ = cheerio.load(html.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' '));
     const title = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
+    const globalMatch = bodyText.match(/(?:提取码|访问码|密码)[：:\s]?([a-z0-9]{4,6})/i);
+    const globalAccessCode = globalMatch ? globalMatch[1] : '';
 
-    let globalAccessCode = '';
-    const globalMatch = bodyText.match(/(?:提取|访问|解压|查看)[码碼][:：\s]?([a-z0-9]{4,6})/i);
-    if (globalMatch) globalAccessCode = globalMatch[1];
-
-    // 精准匹配（链接 + 访问码）
-    const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
-    let match;
-    while ((match = precisePattern.exec(bodyText)) !== null) {
-      const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
-      const accessCode = match[3];
-      const normalizedUrl = normalizePanUrl(panUrl);
-      if (uniqueLinks.has(normalizedUrl)) continue;
-      tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-      uniqueLinks.add(normalizedUrl);
-    }
-
-    // a 标签提取
+    // 策略一：正常 a 标签识别
     $('a[href*="cloud.189.cn"]').each((i, el) => {
       const href = $(el).attr('href');
       if (!href) return;
-      const normalizedUrl = normalizePanUrl(href);
-      if (uniqueLinks.has(normalizedUrl)) return;
-      const contextText = $(el).parent().text();
-      const accessCode = extractAccessCode(contextText) || globalAccessCode;
+      const normalized = normalizePanUrl(href);
+      if (uniqueLinks.has(normalized)) return;
+      const ctx = $(el).parent().text();
+      const accessCode = extractAccessCode(ctx) || globalAccessCode;
       tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
-      uniqueLinks.add(normalizedUrl);
+      uniqueLinks.add(normalized);
     });
 
-    // 全文链接提取
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s<>()"'\u3000]{4,}/gi;
-    while ((match = urlPattern.exec(bodyText)) !== null) {
-      const panUrl = match[0];
-      const normalizedUrl = normalizePanUrl(panUrl);
-      if (uniqueLinks.has(normalizedUrl)) continue;
-      const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
-      const accessCode = extractAccessCode(searchArea) || globalAccessCode;
+    // 策略二：原始 HTML 注释中提取（重点支持你给的页面）
+    const rawText = html;
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s"'<>]{4,}/gi;
+    let match;
+    while ((match = urlPattern.exec(rawText)) !== null) {
+      const panUrl = match[0].trim().replace(/[“”"'\s]+$/, '');
+      const normalized = normalizePanUrl(panUrl);
+      if (uniqueLinks.has(normalized)) continue;
+      const context = rawText.substring(Math.max(0, match.index - 100), match.index + 100);
+      const accessCode = extractAccessCode(context) || globalAccessCode;
       tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-      uniqueLinks.add(normalizedUrl);
+      uniqueLinks.add(normalized);
     }
-
-    // 新增：从 code / pre / div 中提取链接
-    $('code, pre, div, p, li').each((i, el) => {
-      const text = $(el).text().trim();
-      if (text.length < 20) return;
-      const matches = [...text.matchAll(/https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s"'“”<>\[\]()]{4,}/gi)];
-      matches.forEach(m => {
-        const panUrl = m[0].replace(/[“”"'\s]+$/, '');
-        const normalizedUrl = normalizePanUrl(panUrl);
-        if (uniqueLinks.has(normalizedUrl)) return;
-        const accessCode = extractAccessCode(text) || globalAccessCode;
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-        uniqueLinks.add(normalizedUrl);
-      });
-    });
 
     return tracks.length > 0
       ? jsonify({ list: [{ title: "天翼云盘", tracks }] })
       : jsonify({ list: [] });
 
   } catch (e) {
-    console.error('获取详情页失败:', e);
+    console.error('getTracks 错误:', e);
     return jsonify({
       list: [{
-        title: "资源列表",
-        tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }]
+        title: "加载失败",
+        tracks: [{ name: "加载出错", pan: "请检查网络或资源", ext: { accessCode: "" } }]
       }]
     });
   }
@@ -149,9 +116,7 @@ async function getTracks(ext) {
 
 function extractAccessCode(text) {
   if (!text) return '';
-  let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-  if (match && match[1]) return match[1];
-  match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
+  const match = text.match(/(?:访问码|提取码|密码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
   return match ? match[1] : '';
 }
 
@@ -160,7 +125,7 @@ function normalizePanUrl(url) {
     const urlObj = new URL(url);
     return (urlObj.origin + urlObj.pathname).toLowerCase();
   } catch (e) {
-    const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
+    const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>]+/);
     return match ? match[0].toLowerCase() : url.toLowerCase();
   }
 }
@@ -173,17 +138,17 @@ async function search(ext) {
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
-  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
+  const searchItems = $('.search-result ul > li, .topicItem, .searchModule .item');
   searchItems.each((index, each) => {
     const $item = $(each);
-    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
+    const a = $item.find('a.title, h2 a, h3 a');
     const href = a.attr('href');
     const title = a.text();
     if (!href || !title) return;
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
+    const tag = $item.find('.tag, .category, .item-tag').text().trim();
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
