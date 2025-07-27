@@ -1,13 +1,12 @@
 /**
  * =================================================================
- * 最终可用脚本 - 深入分析后的终极修正版
- * 版本: 24 (原始数据匹配版)
+ * 最终可用脚本 - 融合 v16 和 v20 优点
+ * 版本: 22 (增强版)
  *
  * 更新日志:
- * - [根本性修正] 定位到最终问题：Cheerio在解析HTML时会对href属性进行处理，导致.html()方法返回的内容与原始数据不一致，从而使正则匹配失败。
- * - [全新策略] 放弃使用 .html() 或 .text() 获取搜索内容。改为直接在 $fetch 返回的最原始、未经任何处理的HTML字符串(data)上进行正则表达式匹配。
- * - [解码流程优化] 调整解码时机。不再对整个HTML解码，而是在正则表达式捕获到包含URL编码的“原始文本块”之后，再对这个文本块进行decodeURIComponent，确保解码操作的精确性。
- * - [高可靠性] 此方法绕开了所有HTML解析库的中间干扰，直接操作源数据，是目前最可靠的解决方案，能100%应对您提供的两个疑难链接。
+ * - 修复了无法识别中文括号和 web/share 路径的问题。
+ * - 增强精准匹配正则，覆盖更多云盘格式。
+ * - 优化回退模式的上下文提取逻辑。
  * =================================================================
  */
 
@@ -15,7 +14,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 24,
+  ver: 22,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -28,7 +27,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(   ) {
+async function getConfig() {
   return jsonify(appConfig);
 }
 
@@ -65,7 +64,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v24 原始数据匹配版 ---
+// --- 详情页函数: v22 增强版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -74,60 +73,53 @@ async function getTracks(ext) {
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data); // Cheerio仍然用于解析标题等常规内容
+        const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        
-        // 关键修正：直接在最原始的HTML字符串 `data` 上进行匹配
-        const rawHtml = data;
+        const bodyText = $('body').text();
 
-        // 策略一：在原始HTML中寻找所有可能的链接块（包括URL编码的）
-        const blockPattern = /https?:\/\/cloud\.189\.cn\/[^\s<>"']+/g;
-        const potentialBlocks = rawHtml.match(blockPattern ) || [];
-
-        for (const rawBlock of potentialBlocks) {
-            // 关键修正：对捕获到的原始文本块进行解码
-            let decodedBlock;
-            try {
-                decodedBlock = decodeURIComponent(rawBlock);
-            } catch (e) {
-                decodedBlock = rawBlock; // 解码失败则使用原始块
-            }
-
-            // 在解码后的文本块中，精确提取URL和访问码
-            const linkMatch = decodedBlock.match(/^(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))/);
-            if (!linkMatch) continue;
-
-            const panUrl = linkMatch[1];
+        // 增强的精准匹配：支持中文括号、多种URL格式
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^）)]*[\(（]?访问码[:：\s]?([a-zA-Z0-9]{4,6})[\)）]?/g;
+        let match;
+        while ((match = precisePattern.exec(bodyText)) !== null) {
+            const panUrl = match[0].split(/[\(（]/)[0].trim();
+            const accessCode = match[3];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
-
-            const accessCode = extractAccessCode(decodedBlock);
-
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
+            
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         }
 
-        // 策略二：广泛扫描纯文本内容作为补充（处理链接和密码分离的情况）
-        const bodyText = $('body').text();
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share )\/[^\s<>()"'`]+/gi;
-        let match;
+        // 回退模式1：从 <a> 标签提取
+        $('a[href*="cloud.189.cn"]').each((i, el) => {
+            const href = $(el).attr('href');
+            if (!href || uniqueLinks.has(normalizePanUrl(href))) return;
+
+            const contextText = $(el).parent().text();
+            const localCode = extractAccessCode(contextText);
+            tracks.push({ 
+                name: $(el).text().trim() || title, 
+                pan: href, 
+                ext: { accessCode: localCode || '' } 
+            });
+            uniqueLinks.add(normalizePanUrl(href));
+        });
+
+        // 回退模式2：从纯文本提取
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share)\/[^\s<>]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
-            const normalizedUrl = normalizePanUrl(panUrl);
-            if (uniqueLinks.has(normalizedUrl)) continue;
+            if (uniqueLinks.has(normalizePanUrl(panUrl))) continue;
 
-            const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
-            const accessCode = extractAccessCode(searchArea);
-
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
-            uniqueLinks.add(normalizedUrl);
+            const searchArea = bodyText.substring(Math.max(0, match.index - 100), match.index + panUrl.length + 100);
+            const localCode = extractAccessCode(searchArea);
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode: localCode || '' } });
+            uniqueLinks.add(normalizePanUrl(panUrl));
         }
 
-        if (tracks.length > 0) {
-            return jsonify({ list: [{ title: "天翼云盘", tracks }] });
-        } else {
-            return jsonify({ list: [] });
-        }
+        return tracks.length > 0 
+            ? jsonify({ list: [{ title: "天翼云盘", tracks }] })
+            : jsonify({ list: [] });
 
     } catch (e) {
         console.error('获取详情页失败:', e);
@@ -135,12 +127,17 @@ async function getTracks(ext) {
     }
 }
 
+// 增强的访问码提取
 function extractAccessCode(text) {
     if (!text) return '';
-    let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-    if (match && match[1]) return match[1];
-    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)?\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
-    if (match && match[1]) return match[1];
+    const patterns = [
+        /(?:访问码|密码|提取码|code|提取密码)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i,
+        /[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i
+    ];
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) return match[1];
+    }
     return '';
 }
 
@@ -149,38 +146,39 @@ function normalizePanUrl(url) {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
 
+// 搜索功能（保持不变）
 async function search(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
-  searchItems.each((index, each) => {
-    const $item = $(each);
-    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
-    const href = a.attr('href');
-    const title = a.text();
-    if (!href || !title) return;
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-    const match = title.match(regex);
-    const dramaName = match ? match[1] : title;
-    const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: dramaName,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
+    ext = argsify(ext);
+    let cards = [];
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+    const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
+    searchItems.each((index, each) => {
+        const $item = $(each);
+        const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
+        const href = a.attr('href');
+        const title = a.text();
+        if (!href || !title) return;
+        const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+        const match = title.match(regex);
+        const dramaName = match ? match[1] : title;
+        const tag = $item.find('.tag, .category, .item-tag, .detailInfo .module').text().trim();
+        if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+        cards.push({
+            vod_id: href,
+            vod_name: dramaName,
+            vod_pic: '',
+            vod_remarks: tag,
+            ext: { url: `${appConfig.site}/${href}` },
+        });
     });
-  });
-  return jsonify({ list: cards });
+    return jsonify({ list: cards });
 }
