@@ -1,7 +1,7 @@
 /**
  * =================================================================
- * 最终可用脚本 - 融合 v16 和 v20 优点 + 增强段落分析能力
- * 版本: 21 (融合增强版)
+ * 最终可用脚本 - v21 融合增强版（保留旧策略 + 富文本兼容）
+ * 兼容原分类结构，支持复杂嵌套提取
  * =================================================================
  */
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -58,7 +58,6 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// ✅ 增强版 getTracks 函数
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -73,38 +72,65 @@ async function getTracks(ext) {
       }
     });
 
-    // 1. 解码 HTML 转义符
     const decodedHtml = data.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
     const $ = cheerio.load(decodedHtml);
     const title = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    // 2. 提取通用访问码
     let globalAccessCode = '';
     const globalMatch = bodyText.match(/(?:提取|访问|解压|查看)[码碼][:：\s]?([a-z0-9]{4,6})/i);
     if (globalMatch) globalAccessCode = globalMatch[1];
 
-    // 3. 搜索所有包含链接的段落
-    const allTextBlocks = [];
-    $('p, li, code, pre, div').each((_, el) => {
-      const text = $(el).text().trim();
-      if (text.length > 20) allTextBlocks.push(text);
+    // 精准匹配（链接 + 访问码）
+    const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    let match;
+    while ((match = precisePattern.exec(bodyText)) !== null) {
+      const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
+      const accessCode = match[3];
+      const normalizedUrl = normalizePanUrl(panUrl);
+      if (uniqueLinks.has(normalizedUrl)) continue;
+      tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+      uniqueLinks.add(normalizedUrl);
+    }
+
+    // a 标签提取
+    $('a[href*="cloud.189.cn"]').each((i, el) => {
+      const href = $(el).attr('href');
+      if (!href) return;
+      const normalizedUrl = normalizePanUrl(href);
+      if (uniqueLinks.has(normalizedUrl)) return;
+      const contextText = $(el).parent().text();
+      const accessCode = extractAccessCode(contextText) || globalAccessCode;
+      tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
+      uniqueLinks.add(normalizedUrl);
     });
 
-    for (const text of allTextBlocks) {
-      const linkMatches = [...text.matchAll(/https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s()“”"'\[\]<>]{4,}/gi)];
-      for (const match of linkMatches) {
-        const panUrl = match[0].replace(/[\s"'“”]+$/, ''); // 去除末尾符号
+    // 全文链接提取
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s<>()"'\u3000]{4,}/gi;
+    while ((match = urlPattern.exec(bodyText)) !== null) {
+      const panUrl = match[0];
+      const normalizedUrl = normalizePanUrl(panUrl);
+      if (uniqueLinks.has(normalizedUrl)) continue;
+      const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
+      const accessCode = extractAccessCode(searchArea) || globalAccessCode;
+      tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+      uniqueLinks.add(normalizedUrl);
+    }
+
+    // 新增：从 code / pre / div 中提取链接
+    $('code, pre, div, p, li').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text.length < 20) return;
+      const matches = [...text.matchAll(/https?:\/\/cloud\.189\.cn\/(?:t|web\/share)[^\s"'“”<>\[\]()]{4,}/gi)];
+      matches.forEach(m => {
+        const panUrl = m[0].replace(/[“”"'\s]+$/, '');
         const normalizedUrl = normalizePanUrl(panUrl);
-        if (uniqueLinks.has(normalizedUrl)) continue;
-
-        const localCode = extractAccessCode(text);
-        const accessCode = localCode || globalAccessCode;
-
+        if (uniqueLinks.has(normalizedUrl)) return;
+        const accessCode = extractAccessCode(text) || globalAccessCode;
         tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
         uniqueLinks.add(normalizedUrl);
-      }
-    }
+      });
+    });
 
     return tracks.length > 0
       ? jsonify({ list: [{ title: "天翼云盘", tracks }] })
@@ -126,8 +152,7 @@ function extractAccessCode(text) {
   let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
   if (match && match[1]) return match[1];
   match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
-  if (match && match[1]) return match[1];
-  return '';
+  return match ? match[1] : '';
 }
 
 function normalizePanUrl(url) {
