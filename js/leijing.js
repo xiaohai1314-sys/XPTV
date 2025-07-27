@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 22 (融合版)
+ * 版本: 23 (融合版)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
@@ -102,19 +102,29 @@ async function getTracks(ext) {
         // 仅当精准模式未找到任何链接时，或为了补充纯链接而执行
         
         // 1. 从 <a> 标签中寻找
-        $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const href = $(el).attr('href');
+        $("a[href*=\"cloud.189.cn\"]").each((i, el) => {
+            const href = $(el).attr("href");
             if (!href) return;
 
-            const normalizedUrl = normalizePanUrl(href);
+            const decodedHref = decodeURIComponent(href); // Decode the href
+            const normalizedUrl = normalizePanUrl(decodedHref);
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
 
             let accessCode = '';
-            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
-            const localCode = extractAccessCode(contextText);
+            // Try to extract access code from the decoded href first
+            let localCode = extractAccessCode(decodedHref);
+            if (!localCode) {
+                // If not found in href, try to extract from the link text or parent text
+                const linkText = $(el).text();
+                localCode = extractAccessCode(linkText);
+                if (!localCode) {
+                    const contextText = $(el).parent().text(); // Get text from parent element
+                    localCode = extractAccessCode(contextText);
+                }
+            }
             accessCode = localCode || globalAccessCode; // 优先局部，再用全局
 
-            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
+            tracks.push({ name: $(el).text().trim() || title, pan: decodedHref, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
 
@@ -159,7 +169,8 @@ function extractAccessCode(text) {
 
 function normalizePanUrl(url) {
     try {
-        const urlObj = new URL(url);
+        const decodedUrl = decodeURIComponent(url); // Add URL decoding
+        const urlObj = new URL(decodedUrl);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
         const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
