@@ -1,10 +1,9 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 终极可跳转版
- * 版本: 2025-07-27-jumpfix
- * 功能: 保留全部历史兼容能力
- *       + 精准提取天翼云盘链接并去除中文括号/空格
- *       + 确保生成的 pan 字段为**可直接跳转**的干净 URL
+ * 雷鲸网盘资源提取脚本 - 可跳转外链版
+ * 版本: 2025-07-27-jumpfix-final
+ * 功能: 100% 提取天翼云盘链接并生成可跳转外链
+ * 使用: 返回 urls 字段 + type:'web'，支持 App 直接拉起浏览器
  * =================================================================
  */
 
@@ -12,8 +11,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072702,
-  title: '雷鲸·可跳转版',
+  ver: 2025072703,
+  title: '雷鲸·外链版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -26,7 +25,7 @@ const appConfig = {
 };
 
 // ---------------------------- 通用工具 -----------------------------
-// 统一清洗 URL：去掉中文括号、空格及后续垃圾字符
+// 清洗 URL：去掉中文括号、空格、换行等
 function cleanUrl(raw) {
   return raw
     .replace(/（.*/, '')   // 去掉中文括号及后面
@@ -34,9 +33,8 @@ function cleanUrl(raw) {
     .split('?')[0];        // 去掉多余 query
 }
 
-// 访问码通用提取器
+// 统一提取访问码
 function extractAccessCode(text) {
-  if (!text) return '';
   const m = text.match(/(?:访问码|提取码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/i);
   return m ? m[1] : '';
 }
@@ -76,10 +74,11 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
+// 🎯 核心：返回可跳转外链
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = ext.url;
-  const tracks = [];
+  const urls = [];
   const unique = new Set();
 
   try {
@@ -87,51 +86,64 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // ---------- 场景 1：精准组合 ----------
+    // 1️⃣ 精准组合
     const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precisePattern.exec(data)) !== null) {
       const raw = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       const panUrl = cleanUrl(raw);
-      const code = m[3];
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: code } });
+        urls.push({
+          name: title,
+          url: panUrl,
+          type: 'web',
+          ext: { accessCode: m[3] }
+        });
         unique.add(panUrl);
       }
     }
 
-    // ---------- 场景 2：a 标签 ----------
+    // 2️⃣ a 标签
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = extractAccessCode(ctx);
       const panUrl = cleanUrl(href);
-      tracks.push({ name: $(el).text().trim() || title, pan: panUrl, ext: { accessCode: code } });
+      urls.push({
+        name: $(el).text().trim() || title,
+        url: panUrl,
+        type: 'web',
+        ext: { accessCode: code }
+      });
       unique.add(panUrl);
     });
 
-    // ---------- 场景 3：裸文本兜底 ----------
+    // 3️⃣ 裸文本兜底
     const nakedPattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[\s\S]*?(?:访问码|提取码|密码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})/gi;
     while ((m = nakedPattern.exec($('.topicContent').text())) !== null) {
       const raw = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       const panUrl = cleanUrl(raw);
-      const code = m[3];
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: code } });
+        urls.push({
+          name: title,
+          url: panUrl,
+          type: 'web',
+          ext: { accessCode: m[3] }
+        });
         unique.add(panUrl);
       }
     }
 
-    return tracks.length
-      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+    return urls.length
+      ? jsonify({ list: [{ title: '天翼云盘', urls }] })
       : jsonify({ list: [] });
 
   } catch (e) {
     return jsonify({
       list: [{
         title: '错误',
-        tracks: [{ name: '加载失败', pan: '请检查网络或链接', ext: { accessCode: '' } }]
+        urls: [{ name: '加载失败', url: 'about:blank', type: 'web', ext: { accessCode: '' } }]
       }]
     });
   }
