@@ -1,14 +1,16 @@
 /**
  * =================================================================
- * 最终可用脚本 - 核心问题修正版
- * 版本: 27 (DOM遍历策略版)
+ * 最终可用脚本 - 融合 v16 和 v20 优点
+ * 版本: 21 (融合版)
  *
  * 更新日志:
- * - [重大突破] 定位并解决了所有先前版本失败的核心原因：a 标签内的文本被分割为多个独立的文本节点。
- * - 彻底重构 getTracks 函数，放弃了所有基于 .text() 或 .html() 的扁平化处理方式。
- * - 采用全新的 DOM 遍历策略：通过 Cheerio 的 .next() 方法获取 a 标签紧邻的兄弟文本节点。
- * - 将 a 标签文本和其兄弟文本节点内容拼接，还原出完整的“链接+密码”字符串，从而实现精准提取。
- * - 此版本直击问题根源，逻辑正确，是解决此顽固问题的最终确定性方案。
+ * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
+ * - [getTracks] 函数采用双重策略：
+ *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
+ *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
+ * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
+ * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
 
@@ -16,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 27, // 版本号更新
+  ver: 21,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -29,7 +31,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(   ) {
+async function getConfig() {
   return jsonify(appConfig);
 }
 
@@ -66,7 +68,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v27 DOM遍历策略版 ---
+// --- 详情页函数: v21 融合版 (增强版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -77,51 +79,78 @@ async function getTracks(ext) {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const $content = $('.topicContent');
+        const bodyText = $('body').text(); // 获取整个页面文本，备用
+        let globalAccessCode = '';
+        
+        // 增强全局访问码提取（支持更多格式）
+        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压|密码)[码]?[：:]?\s*([a-z0-9]{4,6})\b/i);
+        if (globalCodeMatch) {
+            globalAccessCode = globalCodeMatch[1];
+        }
 
-        const addTrack = (panUrl, accessCode) => {
+        // --- 策略一：增强精准匹配 (优先) ---
+        // 新增对URL编码字符的支持（%EF%BC%89等）
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)([a-zA-Z0-9]+)[^\s]*(?:[\(\（]?(?:访问码|密码|提取码|code)[:：]?\s*([a-zA-Z0-9]{4,6})[\)\）]?)?/gi;
+        let match;
+        while ((match = precisePattern.exec(bodyText)) !== null) {
+            // 处理URL编码的括号（%EF%BC%89等）
+            let panUrl = match[0].replace(/%EF%BC%8C|%EF%BC%9A|%EF%BC%89|%EF%BC%88/g, '');
+            const accessCode = match[2] || globalAccessCode;
+            
+            // 清理链接中的多余字符
+            panUrl = panUrl.split(/[\(\（\s]/)[0].trim();
             const normalizedUrl = normalizePanUrl(panUrl);
-            if (normalizedUrl && !uniqueLinks.has(normalizedUrl)) {
-                tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            if (uniqueLinks.has(normalizedUrl)) continue;
+            
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
+        }
+
+        // --- 策略二：优化回退模式 (兼容性处理) ---
+        // 1. 从 <a> 标签中寻找（增强对编码字符的处理）
+        $('a').each((i, el) => {
+            const href = $(el).attr('href') || '';
+            const text = $(el).text().trim();
+            
+            // 检测是否包含云盘域名
+            if (href.includes('cloud.189.cn') || text.includes('cloud.189.cn')) {
+                let panUrl = href.includes('cloud.189.cn') ? href : text;
+                
+                // 清理编码字符和多余部分
+                panUrl = panUrl.replace(/%EF%BC%8C|%EF%BC%9A|%EF%BC%89|%EF%BC%88/g, '')
+                               .split(/[\(\（\s]/)[0]
+                               .trim();
+                
+                const normalizedUrl = normalizePanUrl(panUrl);
+                if (uniqueLinks.has(normalizedUrl)) return;
+
+                // 提取访问码（优先从文本内容）
+                const contextText = $(el).parent().text();
+                const localCode = extractAccessCode(contextText) || extractAccessCode(text);
+                const accessCode = localCode || globalAccessCode;
+
+                tracks.push({ name: text || title, pan: panUrl, ext: { accessCode } });
                 uniqueLinks.add(normalizedUrl);
             }
-        };
-
-        // [核心修正] 遍历所有 a 标签，并检查其后的兄弟节点
-        $content.find('a[href*="cloud.189.cn"]').each((i, el) => {
-            const $el = $(el);
-            let panUrl = $el.text().trim();
-            let accessCode = '';
-
-            // 检查 a 标签的下一个兄弟节点是否是文本节点（即访问码部分）
-            const nextNode = el.next;
-            if (nextNode && nextNode.type === 'text' && nextNode.data) {
-                const nextText = nextNode.data.trim();
-                const codeMatch = nextText.match(/(?:访问码|密码|提取码|code)[\s:：]*?([a-zA-Z0-9]{4,6})/);
-                if (codeMatch) {
-                    accessCode = codeMatch[1];
-                }
-            }
-            
-            // 如果从兄弟节点没找到，再从 a 标签的 href 属性中解码寻找
-            if (!accessCode) {
-                let href = $el.attr('href') || '';
-                try { href = decodeURIComponent(href); } catch (e) {}
-                const codeMatch = href.match(/(?:访问码|密码|提取码|code)[\s:：]*?([a-zA-Z0-9]{4,6})/);
-                if (codeMatch) {
-                    accessCode = codeMatch[1];
-                }
-            }
-
-            addTrack(panUrl, accessCode);
         });
 
-        // 作为补充，扫描纯文本内容
-        const contentText = $content.text();
-        const textPattern = /(https?:\/\/cloud\.189\.cn\/[^\s<>( )（）]+)[\s\S]{0,50}(?:访问码|密码|提取码|code)[\s:：]*?([a-zA-Z0-9]{4,6})/g;
-        let match;
-        while ((match = textPattern.exec(contentText)) !== null) {
-            addTrack(match[1], match[2]);
+        // 2. 补充纯文本扫描（增强对编码字符的处理）
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t\/|web\/share\?code=)[^\s<>{}\[\]\"\']+/gi;
+        while ((match = urlPattern.exec(bodyText)) !== null) {
+            let panUrl = match[0].replace(/%EF%BC%8C|%EF%BC%9A|%EF%BC%89|%EF%BC%88/g, '')
+                                 .split(/[\(\（\s]/)[0]
+                                 .trim();
+            const normalizedUrl = normalizePanUrl(panUrl);
+            if (uniqueLinks.has(normalizedUrl)) continue;
+
+            // 在链接前后50字符内搜索访问码
+            const searchArea = bodyText.substring(
+                Math.max(0, match.index - 50),
+                match.index + panUrl.length + 50
+            );
+            const accessCode = extractAccessCode(searchArea) || globalAccessCode;
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+            uniqueLinks.add(normalizedUrl);
         }
 
         if (tracks.length > 0) {
@@ -136,13 +165,34 @@ async function getTracks(ext) {
     }
 }
 
+// 增强访问码提取函数
+function extractAccessCode(text) {
+    if (!text) return '';
+    // 扩展匹配模式（支持无括号情况）
+    const patterns = [
+        /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-z0-9]{4,6})/i,
+        /[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-z0-9]{4,6})\s*[\)）\uff09\]】]/i,
+        /[:：]\s*([a-z0-9]{4,6})\b/i  // 直接匹配冒号后的4-6位字符
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) return match[1];
+    }
+    
+    // 尝试匹配纯数字/字母组合（在密码常见位置）
+    const fallbackMatch = text.match(/(?:访问|提取|解压|密码)[码]?[:：]?\s*(\w{4,6})/i);
+    if (fallbackMatch && fallbackMatch[1]) return fallbackMatch[1];
+    
+    return '';
+}
+
 function normalizePanUrl(url) {
     try {
-        const cleanedUrl = url.replace(/[.,;!?)）】]+$/, '');
-        const urlObj = new URL(cleanedUrl);
+        const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )（）]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
