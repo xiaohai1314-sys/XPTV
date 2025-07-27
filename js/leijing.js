@@ -11,7 +11,6 @@
  * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
  * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
  * - 这是目前最稳定、兼容性最强的版本。
- * - 增加了对 leijing.xyz 网站特定链接格式的识别和提取。
  * =================================================================
  */
 
@@ -88,9 +87,7 @@ async function getTracks(ext) {
         }
 
         // --- 策略一：v20 的精准匹配 (优先) ---
-        // 匹配 https://cloud.189.cn/t/xxxxxx（访问码：xxxx） 或 https://cloud.189.cn/web/share?code=xxxxxx（访问码：xxxx）
         const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
-        let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
             const accessCode = match[3];
@@ -106,23 +103,23 @@ async function getTracks(ext) {
         
         // 1. 从 <a> 标签中寻找
         $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const href = $(el).attr("href");
+            const href = $(el).attr('href');
             if (!href) return;
 
             const normalizedUrl = normalizePanUrl(href);
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
 
-            let accessCode = "";
-            const linkText = $(el).text(); // 获取链接文本
-            const localCode = extractAccessCode(linkText);
+            let accessCode = '';
+            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
+            const localCode = extractAccessCode(contextText);
             accessCode = localCode || globalAccessCode; // 优先局部，再用全局
 
-            tracks.push({ name: title, pan: href, ext: { accessCode } });
+            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
 
         // 2. 从纯文本中寻找 (作为最后的补充)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t\/|web\/share\?code=)[a-zA-Z0-9]+/gi;
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share )\/[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
@@ -162,19 +159,9 @@ function extractAccessCode(text) {
 
 function normalizePanUrl(url) {
     try {
-        const urlObj = new URL(decodeURIComponent(url));
-        // Remove query parameters and hash for normalization, as they might not be part of the unique resource identifier
-        urlObj.search = "";
-        urlObj.hash = "";
-        // Specifically handle the leijing.xyz format where access code is part of the path
-        let pathname = urlObj.pathname;
-        const leijingMatch = pathname.match(/\/(t\/[a-zA-Z0-9]+)(?:%EF%BC%88%E8%AE%BF%E9%97%AE%E7%A0%81%EF%BC%9A[a-zA-Z0-9]{4,6}%EF%BC%89)?/);
-        if (leijingMatch) {
-            pathname = leijingMatch[1];
-        }
-        return (urlObj.origin + pathname).toLowerCase();
+        const urlObj = new URL(url);
+        return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        // Fallback for invalid URLs, try to extract a basic cloud.189.cn pattern
         const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
@@ -204,12 +191,14 @@ async function search(ext) {
       vod_id: href,
       vod_name: dramaName,
       vod_pic: '',
-      vod_remarks: tag,
+      vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
   return jsonify({ list: cards });
 }
+
+
 
 
 
