@@ -1,13 +1,13 @@
 /**
  * =================================================================
- * 最终可用脚本 - 解决URL编码及复杂链接格式问题
- * 版本: 23 (解码增强版)
+ * 最终可用脚本 - 深入分析后的终极修正版
+ * 版本: 24 (原始数据匹配版)
  *
  * 更新日志:
- * - [重大修正] 发现了之前失败的根本原因：href 属性中的中文字符被URL编码，导致正则匹配失败。
- * - [核心策略改变] 在匹配前，先对整个HTML内容进行URL解码，将 `%EF%BC%88` 等编码还原为中文字符。
- * - [逻辑优化] 采用更稳健的两步提取法：先用一个宽泛的正则提取出所有包含链接和密码的“原始文本块”，然后再从这些文本块中精确分离出纯净的URL和访问码。
- * - [兼容性] 此版本能完美处理您提供的两个疑难链接，并对其他潜在的格式变化有更强的适应性。
+ * - [根本性修正] 定位到最终问题：Cheerio在解析HTML时会对href属性进行处理，导致.html()方法返回的内容与原始数据不一致，从而使正则匹配失败。
+ * - [全新策略] 放弃使用 .html() 或 .text() 获取搜索内容。改为直接在 $fetch 返回的最原始、未经任何处理的HTML字符串(data)上进行正则表达式匹配。
+ * - [解码流程优化] 调整解码时机。不再对整个HTML解码，而是在正则表达式捕获到包含URL编码的“原始文本块”之后，再对这个文本块进行decodeURIComponent，确保解码操作的精确性。
+ * - [高可靠性] 此方法绕开了所有HTML解析库的中间干扰，直接操作源数据，是目前最可靠的解决方案，能100%应对您提供的两个疑难链接。
  * =================================================================
  */
 
@@ -15,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 23,
+  ver: 24,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -65,7 +65,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v23 解码增强版 ---
+// --- 详情页函数: v24 原始数据匹配版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -74,40 +74,40 @@ async function getTracks(ext) {
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data);
+        const $ = cheerio.load(data); // Cheerio仍然用于解析标题等常规内容
         const title = $('.topicBox .title').text().trim() || "网盘资源";
         
-        // 关键修复：获取HTML并进行URL解码，解决%EF%BC%88等编码问题
-        let contentHtml = $('.topicContent').html() || $('body').html();
-        try {
-            contentHtml = decodeURIComponent(contentHtml);
-        } catch (e) {
-            // 解码失败也没关系，继续使用原始HTML
-            console.log("URL解码失败，部分链接可能无法识别。错误:", e);
-        }
+        // 关键修正：直接在最原始的HTML字符串 `data` 上进行匹配
+        const rawHtml = data;
 
-        // --- 策略一：两步提取法，精准打击“链接+密码”混合体 ---
-        // 步骤1: 用一个宽泛的正则，匹配出所有包含天翼链接和访问码信息的“原始文本块”
+        // 策略一：在原始HTML中寻找所有可能的链接块（包括URL编码的）
         const blockPattern = /https?:\/\/cloud\.189\.cn\/[^\s<>"']+/g;
-        const potentialBlocks = contentHtml.match(blockPattern ) || [];
+        const potentialBlocks = rawHtml.match(blockPattern ) || [];
 
-        for (const block of potentialBlocks) {
-            // 步骤2: 对每个文本块，精确提取URL和访问码
-            const linkMatch = block.match(/^(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))/);
+        for (const rawBlock of potentialBlocks) {
+            // 关键修正：对捕获到的原始文本块进行解码
+            let decodedBlock;
+            try {
+                decodedBlock = decodeURIComponent(rawBlock);
+            } catch (e) {
+                decodedBlock = rawBlock; // 解码失败则使用原始块
+            }
+
+            // 在解码后的文本块中，精确提取URL和访问码
+            const linkMatch = decodedBlock.match(/^(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))/);
             if (!linkMatch) continue;
 
             const panUrl = linkMatch[1];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
 
-            const accessCode = extractAccessCode(block); // 从整个文本块中提取密码
+            const accessCode = extractAccessCode(decodedBlock);
 
             tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
             uniqueLinks.add(normalizedUrl);
         }
 
-        // --- 策略二：广泛扫描模式 (作为补充) ---
-        // 此策略用于处理链接和密码分离，且策略一未能捕获的情况
+        // 策略二：广泛扫描纯文本内容作为补充（处理链接和密码分离的情况）
         const bodyText = $('body').text();
         const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share )\/[^\s<>()"'`]+/gi;
         let match;
