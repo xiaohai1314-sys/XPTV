@@ -1,15 +1,17 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 21.5 (最终完整修正版)
+ * 版本: 21 (融合版)
  *
  * 更新日志:
- * - 基于用户可正常工作的 v21 原始版本进行最终修正，确保分类列表等所有功能正常。
- * - 进行唯一且必要的修改：
- *   1. **[getTracks]** 对 `precisePattern` 正则表达式进行了最终修正，使其：
- *      a. 能够兼容全角括号 `（）` 和半角括号 `()`。
- *      b. 修正了错误的捕获组，确保能正确提取所有格式链接的访问码。
- * - 这是解决问题的最终、完整、稳定的版本。
+ * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
+ * - [getTracks] 函数采用双重策略：
+ *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
+ *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
+ * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
+ * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ * - 这是目前最稳定、兼容性最强的版本。
+ * - 增加了对 leijing.xyz 网站特定链接格式的识别和提取。
  * =================================================================
  */
 
@@ -17,7 +19,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: "21.5",
+  ver: 21,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -30,7 +32,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(   ) {
+async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
@@ -67,7 +69,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21.5 最终完整修正版 ---
+// --- 详情页函数: v21 融合版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -85,14 +87,13 @@ async function getTracks(ext) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // --- 策略一：v20 的精准匹配 (最终修正正则) ---
-        // 修正了捕获组的问题，并增强了对括号内文本和全角括号的匹配
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ )\s*[（(][^）)]*?(?:访问码|密码|提取码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})[^）)]*?[）)]/g;
+        // --- 策略一：v20 的精准匹配 (优先) ---
+        // 匹配 https://cloud.189.cn/t/xxxxxx（访问码：xxxx） 或 https://cloud.189.cn/web/share?code=xxxxxx（访问码：xxxx）
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            const panUrl = match[0].split(/[（(]/)[0].trim();
-            // 修正了访问码的捕获组索引，现在是第1个捕获组
-            const accessCode = match[1];
+            const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
+            const accessCode = match[3];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
             
@@ -101,29 +102,34 @@ async function getTracks(ext) {
         }
 
         // --- 策略二：v16 的广泛兼容模式 (回退) ---
+        // 仅当精准模式未找到任何链接时，或为了补充纯链接而执行
+        
+        // 1. 从 <a> 标签中寻找
         $('a[href*="cloud.189.cn"]').each((i, el) => {
-            const href = $(el).attr('href');
+            const href = $(el).attr("href");
             if (!href) return;
 
             const normalizedUrl = normalizePanUrl(href);
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
 
-            let accessCode = '';
-            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
-            const localCode = extractAccessCode(contextText);
+            let accessCode = "";
+            const linkText = $(el).text(); // 获取链接文本
+            const localCode = extractAccessCode(linkText);
             accessCode = localCode || globalAccessCode; // 优先局部，再用全局
 
-            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
+            tracks.push({ name: title, pan: href, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
 
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share  )\/[^\s<>()]+/gi;
+        // 2. 从纯文本中寻找 (作为最后的补充)
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/(t\/|web\/share\?code=)[a-zA-Z0-9]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
 
             let accessCode = '';
+            // 在链接前后 50 个字符范围内寻找密码
             const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
             const localCode = extractAccessCode(searchArea);
             accessCode = localCode || globalAccessCode;
@@ -146,20 +152,30 @@ async function getTracks(ext) {
 
 function extractAccessCode(text) {
     if (!text) return '';
-    // 增强正则，匹配多种格式，包括全角/半角括号
+    // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
-    match = text.match(/[（(][^）)]*?(?:访问码|密码|提取码|code)\s*[:：]?\s*([a-zA-Z0-9]{4,6})[^）)]*?[）)]/i);
+    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
     return '';
 }
 
 function normalizePanUrl(url) {
     try {
-        const urlObj = new URL(url);
-        return (urlObj.origin + urlObj.pathname).toLowerCase();
+        const urlObj = new URL(decodeURIComponent(url));
+        // Remove query parameters and hash for normalization, as they might not be part of the unique resource identifier
+        urlObj.search = "";
+        urlObj.hash = "";
+        // Specifically handle the leijing.xyz format where access code is part of the path
+        let pathname = urlObj.pathname;
+        const leijingMatch = pathname.match(/\/(t\/[a-zA-Z0-9]+)(?:%EF%BC%88%E8%AE%BF%E9%97%AE%E7%A0%81%EF%BC%9A[a-zA-Z0-9]{4,6}%EF%BC%89)?/);
+        if (leijingMatch) {
+            pathname = leijingMatch[1];
+        }
+        return (urlObj.origin + pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
+        // Fallback for invalid URLs, try to extract a basic cloud.189.cn pattern
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
@@ -194,3 +210,6 @@ async function search(ext) {
   });
   return jsonify({ list: cards });
 }
+
+
+
