@@ -1,14 +1,13 @@
 /**
  * =================================================================
- * 最终可用脚本 - 解决复杂链接格式问题
- * 版本: 22 (增强兼容版)
+ * 最终可用脚本 - 解决URL编码及复杂链接格式问题
+ * 版本: 23 (解码增强版)
  *
  * 更新日志:
- * - [核心修复] 解决了对 a 标签 href 属性中直接包含访问码文本的链接无法识别的问题。
- * - [正则增强] 升级正则表达式，以兼容全角/半角括号和冒号，以及它们之间的各种空格。
- * - [逻辑优化] 调整匹配逻辑，直接在核心内容区域的完整 HTML 中进行搜索，极大提高了识别率。
- * - [数据清洗] 增加了更强的链接清理逻辑，确保从“污染”源中提取出纯净的 URL。
- * - [保持稳定] 继承了 v21 的双重策略（精准优先+广泛回退），并对两种策略都进行了强化，兼顾了准确性和覆盖面。
+ * - [重大修正] 发现了之前失败的根本原因：href 属性中的中文字符被URL编码，导致正则匹配失败。
+ * - [核心策略改变] 在匹配前，先对整个HTML内容进行URL解码，将 `%EF%BC%88` 等编码还原为中文字符。
+ * - [逻辑优化] 采用更稳健的两步提取法：先用一个宽泛的正则提取出所有包含链接和密码的“原始文本块”，然后再从这些文本块中精确分离出纯净的URL和访问码。
+ * - [兼容性] 此版本能完美处理您提供的两个疑难链接，并对其他潜在的格式变化有更强的适应性。
  * =================================================================
  */
 
@@ -16,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 22,
+  ver: 23,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -66,7 +65,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v22 增强兼容版 ---
+// --- 详情页函数: v23 解码增强版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -78,40 +77,45 @@ async function getTracks(ext) {
         const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
         
-        // 关键改动：直接获取核心内容区的 HTML，以便同时搜索 href 和文本
-        const contentHtml = $('.topicContent').html() || $('body').html();
-        const bodyText = $('body').text(); // 纯文本备用，用于上下文搜索
+        // 关键修复：获取HTML并进行URL解码，解决%EF%BC%88等编码问题
+        let contentHtml = $('.topicContent').html() || $('body').html();
+        try {
+            contentHtml = decodeURIComponent(contentHtml);
+        } catch (e) {
+            // 解码失败也没关系，继续使用原始HTML
+            console.log("URL解码失败，部分链接可能无法识别。错误:", e);
+        }
 
-        // --- 策略一：增强的精准匹配 (优先) ---
-        // 这个正则表达式现在可以处理 URL 在 href 或文本中，并兼容多种括号和冒号
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))[^\s<]*?\s*[\(（\uff08\s]*?(?:访问码|密码|提取码|code)\s*[:：\uff1a\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09]/gi;
-        
-        let match;
-        while ((match = precisePattern.exec(contentHtml)) !== null) {
-            // 清理和规范化 URL，从URL中剔除可能混入的文本
-            let panUrl = match[1].replace(/（访问码：.*/, '').trim(); 
-            const accessCode = match[2];
-            
+        // --- 策略一：两步提取法，精准打击“链接+密码”混合体 ---
+        // 步骤1: 用一个宽泛的正则，匹配出所有包含天翼链接和访问码信息的“原始文本块”
+        const blockPattern = /https?:\/\/cloud\.189\.cn\/[^\s<>"']+/g;
+        const potentialBlocks = contentHtml.match(blockPattern ) || [];
+
+        for (const block of potentialBlocks) {
+            // 步骤2: 对每个文本块，精确提取URL和访问码
+            const linkMatch = block.match(/^(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))/);
+            if (!linkMatch) continue;
+
+            const panUrl = linkMatch[1];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
-            
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+
+            const accessCode = extractAccessCode(block); // 从整个文本块中提取密码
+
+            tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode || '' } });
             uniqueLinks.add(normalizedUrl);
         }
 
-        // --- 策略二：广泛兼容模式 (回退和补充) ---
-        // 寻找页面上所有可能的链接，然后在其附近寻找访问码
+        // --- 策略二：广泛扫描模式 (作为补充) ---
+        // 此策略用于处理链接和密码分离，且策略一未能捕获的情况
+        const bodyText = $('body').text();
         const urlPattern = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share )\/[^\s<>()"'`]+/gi;
-        
-        while ((match = urlPattern.exec(contentHtml)) !== null) {
-            let panUrl = match[0];
-            // 再次清理，防止链接尾部包含HTML标签等杂质
-            panUrl = panUrl.replace(/["'<].*/, '');
-
+        let match;
+        while ((match = urlPattern.exec(bodyText)) !== null) {
+            const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
 
-            // 在链接附近（前后50个字符）的纯文本中寻找访问码
             const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
             const accessCode = extractAccessCode(searchArea);
 
@@ -131,33 +135,20 @@ async function getTracks(ext) {
     }
 }
 
-/**
- * 辅助函数：从一段文本中提取访问码
- * @param {string} text 待搜索的文本
- * @returns {string} 找到的访问码或空字符串
- */
 function extractAccessCode(text) {
     if (!text) return '';
-    // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
-    // 再次尝试匹配被括号包围的格式
-    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
+    match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)?\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
     return '';
 }
 
-/**
- * 辅助函数：规范化URL，用于去重
- * @param {string} url 原始URL
- * @returns {string} 规范化后的URL
- */
 function normalizePanUrl(url) {
     try {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        // 如果URL构造失败（比如被污染了），则用正则尽力提取核心部分
         const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
