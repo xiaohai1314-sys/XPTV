@@ -1,14 +1,14 @@
 /**
  * =================================================================
- * 最终集大成版脚本 (The Grand Finale)
- * 版本: 29.0
+ * 最终修正版 - 严格遵循参考脚本 (The Faithful Version)
+ * 版本: 30.0
  *
  * 更新日志:
- * - [最终整合] getTracks 函数现已包含所有已知的提取策略，确保最大兼容性：
- *   1. **新增并修正了“裸文本”提取法**：采纳参考脚本的思路并修正了其正则瑕疵，作为最高优先级策略，专门解决特例问题。
- *   2. **完整保留了原始脚本的提取法**：包括对<a>标签href和其上下文文本的解析，作为补充和兼容性保障。
- * - 使用 Set 对所有提取结果进行统一去重，确保结果列表干净。
- * - getCards 和 search 函数严格保持您原始脚本的风貌，确保基础功能稳定。
+ * - [核心修正] getTracks 函数严格采纳用户参考脚本的“裸文本”提取逻辑。
+ * - [关键修复] 完全保留了参考脚本中能成功识别的正则表达式，不做任何改动。
+ * - [精确处理] 在提取出带括号的访问码后，通过字符串替换方法(.replace)将其末尾的括号去除，确保跳转功能正常。
+ * - 完整保留了参考脚本中的其他提取方式作为兼容性保障。
+ * - 严格按照用户反馈进行修改，旨在最终解决问题。
  * =================================================================
  */
 
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 29.0,
+  ver: 30.0,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -33,7 +33,7 @@ async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
-// [保持原样] 严格使用您原始脚本的版本
+// 严格使用您原始脚本的版本
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -67,69 +67,64 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// [最终整合] 融合了所有提取策略
+// [最终修正] 严格遵循参考脚本逻辑，仅修正输出结果
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
     const url = ext.url;
-    const uniqueLinks = new Set();
+    const unique = new Set();
 
     try {
-        const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+        const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
-        const title = $('.topicBox .title').text().trim() || "网盘资源";
-        
-        // --- 策略1：裸文本提取 (来自参考脚本，已修正) ---
-        const contentText = $('.topicContent').text();
-        const nakedPattern = /https?:\/\/cloud\.189\.cn\/t\/([a-zA-Z0-9]+ )[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/g;
-        let match;
-        while ((match = nakedPattern.exec(contentText)) !== null) {
-            const panUrl = `https://cloud.189.cn/t/${match[1]}`;
-            const accessCode = match[2]; // 修正后 ，不带括号
-            if (!uniqueLinks.has(panUrl)) {
-                tracks.push({ name: title, pan: panUrl, ext: { accessCode: accessCode } });
-                uniqueLinks.add(panUrl);
+        const title = $('.topicBox .title').text().trim() || '网盘资源';
+        let m;
+
+        // --- 策略1：精准组合提取 (来自参考脚本) ---
+        const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        while ((m = precise.exec(data)) !== null) {
+            const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+            if (!unique.has(panUrl )) {
+                tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+                unique.add(panUrl);
             }
         }
 
-        // --- 策略2：精准组合提取 (来自您的原始脚本) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
-        while ((match = precisePattern.exec(data)) !== null) {
-            const panUrl = `https://cloud.189.cn/${match[1] ? 't/' + match[1] : 'web/share?code=' + match[2]}`;
-            if (!uniqueLinks.has(panUrl )) {
-                tracks.push({ name: title, pan: panUrl, ext: { accessCode: match[3] } });
-                uniqueLinks.add(panUrl);
-            }
-        }
-
-        // --- 策略3：<a>标签提取 (来自您的原始脚本) ---
-        $('a[href*="cloud.189.cn"]').each((i, el) => {
+        // --- 策略2：<a>标签提取 (来自参考脚本) ---
+        $('a[href*="cloud.189.cn"]').each((_, el) => {
             const href = $(el).attr('href');
-            if (!href || uniqueLinks.has(href)) return;
-            
-            const contextText = $(el).parent().text();
-            const codeMatch = contextText.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-            const accessCode = codeMatch ? codeMatch[1] : '';
-
-            if (!uniqueLinks.has(href)) {
-                tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: accessCode } });
-                uniqueLinks.add(href);
+            if (!href || unique.has(href)) return;
+            const ctx = $(el).parent().text();
+            const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+            if (!unique.has(href)) {
+                tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
+                unique.add(href);
             }
         });
 
-        if (tracks.length > 0) {
-            return jsonify({ list: [{ title: "天翼云盘", tracks }] });
-        } else {
-            return jsonify({ list: [] });
+        // --- 策略3：裸文本 + 中文括号特例 (来自参考脚本，已修正输出) ---
+        // [关键] 严格保留能成功识别的正则表达式
+        const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6}）)/gi;
+        while ((m = naked.exec($('.topicContent').text())) !== null) {
+            const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+            if (!unique.has(panUrl )) {
+                // [关键] 在这里对提取出的、带括号的访问码进行修正
+                const correctedCode = m[3].replace('）', '');
+                tracks.push({ name: title, pan: panUrl, ext: { accessCode: correctedCode } });
+                unique.add(panUrl);
+            }
         }
 
+        return tracks.length
+            ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+            : jsonify({ list: [] });
+
     } catch (e) {
-        console.error('获取详情页失败:', e);
-        return jsonify({ list: [{ title: "资源列表", tracks: [{ name: "加载失败", pan: "请检查网络或链接", ext: { accessCode: "" } }] }] });
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
     }
 }
 
-// [保持原样] 严格使用您原始脚本的版本
+// 严格使用您原始脚本的版本
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
