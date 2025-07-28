@@ -1,8 +1,8 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 完整修复可跳转版
- * 版本: 2025-07-283-final-fix-jump
- * 说明: 修复第三部分裸链接无法跳转问题，添加 type: 'jump' 声明
+ * 雷鲸网盘资源提取脚本 - 第三部分重构版（用html解析，确保跳转）
+ * 版本: 2025-07-28-thirdpart-html-fix
+ * 说明: 仅改第三部分提取，其他保持不变
  * =================================================================
  */
 
@@ -11,7 +11,7 @@ const cheerio = createCheerio();
 
 const appConfig = {
   ver: 2025072802,
-  title: '雷鲸·跳转增强版',
+  title: '雷鲸·第三部分HTML提取',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -23,7 +23,6 @@ const appConfig = {
   ],
 };
 
-/* ============== 接口 ============== */
 async function getConfig() {
   return jsonify(appConfig);
 }
@@ -57,7 +56,6 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-/* ============== 详情页：网盘提取（全支持跳转） ============== */
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -69,7 +67,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // 1️⃣ 精准匹配：英文/中文括号
+    // 1️⃣ 精准匹配（保留原有）
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -85,12 +83,12 @@ async function getTracks(ext) {
       }
     }
 
-    // 2️⃣ HTML <a> 标签
+    // 2️⃣ HTML <a> 标签（保留原有）
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
-      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      const code = /(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
       tracks.push({
         name: $(el).text().trim() || title,
         pan: href,
@@ -100,20 +98,23 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // 3️⃣ 新增：裸文本 + 中文括号特例 + 添加 type: jump
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
-    while ((m = naked.exec($('.topicContent').text())) !== null) {
-      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
-        tracks.push({
-          name: title,
-          pan: panUrl,
-          type: 'jump',
-          ext: { accessCode: m[3] }
-        });
-        unique.add(panUrl);
-      }
-    }
+    // 3️⃣ 重构：用html加载再解析a标签，提取裸文本部分的链接和访问码
+    const contentHtml = $('.topicContent').html() || '';
+    const $content = cheerio.load(contentHtml);
+    $content('a[href*="cloud.189.cn"]').each((_, el) => {
+      const href = $content(el).attr('href');
+      if (!href || unique.has(href)) return;
+      // 访问码从父元素文本中提取
+      const ctx = $content(el).parent().text();
+      const codeMatch = /(?:访问码|密码|提取码|code)[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      tracks.push({
+        name: $content(el).text().trim() || title,
+        pan: href,
+        type: 'jump',
+        ext: { accessCode: codeMatch ? codeMatch[1] : '' }
+      });
+      unique.add(href);
+    });
 
     return tracks.length
       ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
@@ -129,7 +130,6 @@ async function getTracks(ext) {
   }
 }
 
-/* ============== 搜索接口 ============== */
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
