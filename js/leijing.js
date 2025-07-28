@@ -1,38 +1,27 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合分析与优化
- * 版本: 22.1 (完整发布版)
+ * 版本: 22.2 (分类列表修正版)
+ *
+ * 更新日志:
+ * - [修正] 解决了 getCards 函数中过滤条件过于严格，导致分类列表无法显示任何内容的问题。
+ * - [优化] 调整了 getCards 中的过滤逻辑，使其更加合理，能正确加载影视列表。
  *
  * 功能:
  * - 适配雷鲸小站 (leijing.xyz) 的影视资源抓取。
  * - 支持分类浏览（剧集、电影等）。
  * - 支持关键词搜索。
  * - 智能提取详情页中的天翼云盘链接和访问码。
- *
- * 提取逻辑核心 ([getTracks] 函数):
- * 1. **精准定位**: 将搜索范围锁定在核心内容容器 `.topicContent` 内，避免误判。
- * 2. **多层策略**:
- *    - **优先处理<a>标签**: 遍历所有天翼云盘链接，这是最可靠的来源。
- *    - **智能关联访问码**:
- *      a. 检查链接自身文本或`href`属性是否已包含访问码。
- *      b. 若无，则在链接的直接父元素文本中查找。
- *      c. 若仍无，则应用在页面中预先找到的“通用/全局”访问码。
- *    - **文本链接兜底**: 扫描并提取未被HTML标签包裹的纯文本链接，作为补充。
- * 3. **健壮去重**: 通过标准化的URL确保同一资源不会被重复添加。
- *
- * 此版本是为目标网站结构定制的稳定、精准的解决方案。
  * =================================================================
  */
 
 // --- 全局常量和初始化 ---
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
-// 假设 cheerio 是由宿主环境提供的，这里是伪代码
-// const cheerio = require('cheerio'); // 在实际环境中，这行通常由加载器处理
 const cheerio = createCheerio(); // 使用宿主环境提供的函数
 
 // --- 应用配置 ---
 const appConfig = {
-  ver: 22.1,
+  ver: 22.2,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -51,7 +40,6 @@ const appConfig = {
  * 获取应用配置
  */
 async function getConfig( ) {
-  // 假设 jsonify 和 argsify 是宿主环境提供的辅助函数
   return jsonify(appConfig);
 }
 
@@ -75,16 +63,16 @@ async function getCards(ext) {
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const r = $(each).find('.summary').text();
     const tag = $(each).find('.tag').text();
 
-    if (/content/.test(r) && !/cloud/.test(r)) return;
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return; // 过滤非影视内容
+    // **修正点**: 移除或修改了过于严格的过滤条件
+    // 只根据标签过滤非影视内容
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
 
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: '', // 可根据需要抓取图片
+      vod_pic: '',
       vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -107,7 +95,7 @@ async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
     const url = ext.url;
-    const uniqueLinks = new Set(); // 用于链接去重
+    const uniqueLinks = new Set();
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
@@ -115,7 +103,6 @@ async function getTracks(ext) {
 
         const $content = $('.topicContent');
         if ($content.length === 0) {
-            console.error('未找到 .topicContent 内容区域');
             return jsonify({ list: [] });
         }
         
@@ -207,7 +194,6 @@ async function search(ext) {
   const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
   
-  // 兼容多种可能的搜索结果列表样式
   const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
   
   searchItems.each((index, each) => {
@@ -244,10 +230,8 @@ async function search(ext) {
  */
 function extractAccessCode(text) {
     if (!text) return '';
-    // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式，支持全角半角符号
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
-    // 匹配括号包裹的格式，关键词可选
     match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)?\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
     if (match && match[1]) return match[1];
     return '';
@@ -260,12 +244,10 @@ function extractAccessCode(text) {
  */
 function normalizePanUrl(url) {
     try {
-        // 尝试移除URL中的访问码部分，得到纯净URL用于去重
         const cleanUrl = url.split(/[\(（\s]/)[0];
         const urlObj = new URL(cleanUrl);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        // 如果URL构造失败，使用正则做一次最大努力的清洗
         const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )（）]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
