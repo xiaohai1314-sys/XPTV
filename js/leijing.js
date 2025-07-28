@@ -1,8 +1,8 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 跳转修复完整版
- * 版本: 2025-07-28-jump-patched
- * 功能: 保留原结构，仅修复第三部分裸链提取的 type: 'jump' 缺失问题
+ * 雷鲸网盘资源提取脚本 - 仅第三部分修正跳转全套版
+ * 版本: 2025-07-28-jump-only-third-fixed
+ * 功能: 保留全部原结构，第一二部分不变，第三部分裸文本链接加@cloud和type: 'jump'修正跳转
  * =================================================================
  */
 
@@ -10,8 +10,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072802,
-  title: '雷鲸·跳转修复版',
+  ver: 2025072804,
+  title: '雷鲸·第三部分跳转修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -57,32 +57,36 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
+    /* 1️⃣ 保留原精准组合（英文/中文括号） */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, type: 'jump', ext: { accessCode: m[3] } });
+        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
+    /* 2️⃣ 保留原 <a> 标签提取 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
       if (!unique.has(href)) {
-        tracks.push({ name: $(el).text().trim() || title, pan: href, type: 'jump', ext: { accessCode: code ? code[1] : '' } });
+        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
         unique.add(href);
       }
     });
 
+    /* 3️⃣ 仅此处修正跳转格式，裸文本+中文括号特例 */
+    const nakedText = $('.topicContent').text();
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
-    while ((m = naked.exec($('.topicContent').text())) !== null) {
+    while ((m = naked.exec(nakedText)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, type: 'jump', ext: { accessCode: m[3] } });
+        tracks.push({ name: title, pan: panUrl + '@cloud', type: 'jump', ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
