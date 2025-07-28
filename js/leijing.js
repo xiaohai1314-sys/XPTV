@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
- * 版本: 2025-07-283-jump-final
+ * 版本: 2025-07-28-jump-final
  * 功能: 保留原有全部识别逻辑，仅新增裸文本+中文括号特例
  * 使用: 直接替换原脚本即可运行
  * =================================================================
@@ -25,7 +25,7 @@ const appConfig = {
 };
 
 /* ============== 接口 ============== */
-async function getConfig() { return jsonify(appConfig); }
+async function getConfig( ) { return jsonify(appConfig); }
 
 async function getCards(ext) {
   ext = argsify(ext);
@@ -61,11 +61,11 @@ async function getTracks(ext) {
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
     /* 1️⃣ 保留原精准组合（英文/中文括号） */
-    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
+      if (!unique.has(panUrl )) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
@@ -83,11 +83,12 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 新增：裸文本 + 中文括号特例 */
+    /* 3️⃣ 新增：裸文本 + 中文括号特例 (已修正) */
+    // 唯一的改动在这里，将访问码的捕获组 () 与后面的中文括号 ） 分开
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     while ((m = naked.exec($('.topicContent').text())) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
+      if (!unique.has(panUrl )) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
@@ -120,4 +121,4 @@ async function search(ext) {
     cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
   });
   return jsonify({ list: cards });
-}
+}```
