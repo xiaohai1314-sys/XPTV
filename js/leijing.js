@@ -15,6 +15,8 @@
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
+// 关键：在您的原始脚本中，jsonify 和 argsify 可能是由宿主环境提供的全局函数，或者挂载在初始的$上。
+// 为确保兼容，我们假设它们是全局可用的，或者由宿主环境处理。
 
 const appConfig = {
   ver: 21,
@@ -40,7 +42,7 @@ async function getCards(ext) {
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-  const $ = cheerio.load(data);
+  const $ = cheerio.load(data); // 此处的 $ 是局部变量，不影响外部
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
     const href = $(each).find('h2 a').attr('href');
@@ -76,8 +78,36 @@ async function getTracks(ext) {
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data);
+        const $ = cheerio.load(data); // **关键修正**: 在函数内部创建独立的、局部的 $ 实例
         const title = $('.topicBox .title').text().trim() || "网盘资源";
+        
+        // **核心逻辑**: 直接遍历所有<a>标签，检查其href和文本
+        $('a').each((i, el) => {
+            const $el = $(el);
+            const href = $el.attr('href') || '';
+            const text = $el.text() || '';
+            const combined = href + text; // 将href和text合并，一次性匹配
+
+            const pattern = /(https?:\/\/cloud\.189\.cn\/[^\s（]+ )（访问码：([a-zA-Z0-9]{4,6})）/;
+            const match = combined.match(pattern);
+
+            if (match) {
+                const panUrl = match[1];
+                const accessCode = match[2];
+                const normalizedUrl = normalizePanUrl(panUrl);
+                if (!uniqueLinks.has(normalizedUrl)) {
+                    tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+                    uniqueLinks.add(normalizedUrl);
+                }
+            }
+        });
+
+        // 如果新方法已经找到结果，直接返回
+        if (tracks.length > 0) {
+            return jsonify({ list: [{ title: "天翼云盘", tracks }] });
+        }
+
+        // --- 如果上面的新逻辑没找到，则执行原始的兼容逻辑 ---
         const bodyText = $('body').text();
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
@@ -85,42 +115,13 @@ async function getTracks(ext) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // ==================== 核心修正代码开始 ====================
-        // 遍历所有a标签，检查其href属性
-        $('a').each((i, el) => {
-            const href = $(el).attr('href');
-            if (!href) return;
-
-            // 正则表达式，用于从href中同时捕获链接和访问码
-            const pattern = /(https?:\/\/cloud\.189\.cn\/[^\s（]+ )（访问码：([a-zA-Z0-9]{4,6})）/;
-            const match = href.match(pattern);
-
-            if (match) {
-                const panUrl = match[1]; // 捕获到的纯链接
-                const accessCode = match[2]; // 捕获到的访问码
-                const normalizedUrl = normalizePanUrl(panUrl);
-
-                if (!uniqueLinks.has(normalizedUrl)) {
-                    tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-                    uniqueLinks.add(normalizedUrl);
-                }
-            }
-        });
-        // ==================== 核心修正代码结束 ====================
-
-        // 如果通过新方法找到了链接，可以提前返回，或者继续执行旧逻辑作为补充
-        if (tracks.length > 0) {
-            return jsonify({ list: [{ title: "天翼云盘", tracks }] });
-        }
-
-        // --- 保留原有的兼容逻辑作为回退方案 ---
         const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
             const accessCode = match[3];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
-            
             tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         }
