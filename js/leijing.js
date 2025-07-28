@@ -1,9 +1,8 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
- * 版本: 2025-07-28-jump-final
- * 功能: 保留原有全部识别逻辑，新增裸文本+中文括号特例，修复跳转问题
- * 使用: 直接替换原脚本即可运行
+ * 雷鲸网盘资源提取脚本 - 完整修复可跳转版
+ * 版本: 2025-07-283-final-fix-jump
+ * 说明: 修复第三部分裸链接无法跳转问题，添加 type: 'jump' 声明
  * =================================================================
  */
 
@@ -11,8 +10,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072801,
-  title: '雷鲸·补特例版',
+  ver: 2025072802,
+  title: '雷鲸·跳转增强版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -58,7 +57,7 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-/* ============== 详情页：网盘提取（含特例修复） ============== */
+/* ============== 详情页：网盘提取（全支持跳转） ============== */
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -70,18 +69,23 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // 1️⃣ 精准匹配：英文或中文括号
+    // 1️⃣ 精准匹配：英文/中文括号
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        tracks.push({
+          name: title,
+          pan: panUrl,
+          type: 'jump',
+          ext: { accessCode: m[3] }
+        });
         unique.add(panUrl);
       }
     }
 
-    // 2️⃣ HTML <a> 标签中的资源
+    // 2️⃣ HTML <a> 标签
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -90,17 +94,23 @@ async function getTracks(ext) {
       tracks.push({
         name: $(el).text().trim() || title,
         pan: href,
-        ext: { accessCode: code ? code[1] : '' },
+        type: 'jump',
+        ext: { accessCode: code ? code[1] : '' }
       });
       unique.add(href);
     });
 
-    // 3️⃣ 新增：裸文本 + 中文括号特例（修正右括号问题）
+    // 3️⃣ 新增：裸文本 + 中文括号特例 + 添加 type: jump
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     while ((m = naked.exec($('.topicContent').text())) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        tracks.push({
+          name: title,
+          pan: panUrl,
+          type: 'jump',
+          ext: { accessCode: m[3] }
+        });
         unique.add(panUrl);
       }
     }
