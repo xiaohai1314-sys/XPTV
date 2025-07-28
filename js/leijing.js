@@ -1,14 +1,9 @@
 /**
  * =================================================================
- * 最终版：忠实传递者 (The Faithful Messenger)
- * 版本: 36.0
- *
- * 更新日志:
- * - 彻底放弃所有修改尝试。本脚本的核心逻辑，完全、逐字、不差地
- *   采用了用户提供的、被证实“能识别”的参考脚本。
- * - [getTracks] 函数将提取出那个“带括号的”访问码，并原封不动地返回。
- * - 我们相信，App的后续处理逻辑能够正确处理这个看似不规范的结果。
- * - 这是对用户提供的有效线索的最高尊重，旨在最终解决问题。
+ * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
+ * 版本: 2025-07-28-jump-final
+ * 功能: 保留原有全部识别逻辑，仅新增裸文本+中文括号特例
+ * 使用: 直接替换原脚本即可运行
  * =================================================================
  */
 
@@ -16,8 +11,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072801, // 保持参考脚本的版本号
-  title: '雷鲸·补特例版', // 保持参考脚本的标题
+  ver: 2025072801,
+  title: '雷鲸·补特例版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -53,7 +48,7 @@ async function getCards(ext) {
 
 async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
 
-/* ============== 详情页：完全遵循参考脚本，不做任何修改 ============== */
+/* ============== 详情页：补裸文本特例 ============== */
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -88,13 +83,11 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 新增：裸文本 + 中文括号特例 (原封不动) */
-    // 严格保留能成功识别的正则表达式，一个字符都不改
+    /* 3️⃣ 新增：裸文本 + 中文括号特例 */
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6}）)/gi;
     while ((m = naked.exec($('.topicContent').text())) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl )) {
-        // [关键] 原封不动地返回带括号的访问码 m[3]
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
