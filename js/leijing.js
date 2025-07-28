@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
- * 版本: 2025-07-282-jump-final
+ * 版本: 2025-07-28-jump-final
  * 功能: 保留原有全部识别逻辑，仅新增裸文本+中文括号特例
  * 使用: 直接替换原脚本即可运行
  * =================================================================
@@ -84,12 +84,12 @@ async function getTracks(ext) {
     });
 
     /* 3️⃣ 新增：裸文本 + 中文括号特例 */
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6}）)/gi;
-    while ((m = naked.exec($('.topicContent').text())) !== null) {
-      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+    const path = m[1] ? 't/' + m[1] : 'web/share?code=' + m[2];
+    const panUrl = `https://cloud.189.cn/${path}`;
+      const correctedCode = m[3].replace(' ）', ''); // 清理访问码的括号
+      
       if (!unique.has(panUrl)) {
-        const correctedCode = m[3].replace('）', ''); // 新增这一行，清理括号
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: correctedCode } }); // 修改这一行，使用清理后的结果
+        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
