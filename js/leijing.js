@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 最终可用脚本 - 融合 v16 和 v20 优点，并增加新链接格式支持
- * 版本: 22 (增强版)
+ * 版本: 232 (增强版)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
@@ -100,7 +100,6 @@ async function getTracks(ext) {
         }
 
         // --- 策略二：v16 的广泛兼容模式 (回退) ---
-        // 仅当精准模式未找到任何链接时，或为了补充纯链接而执行
         
         // 1. 从 <a> 标签中寻找
         $('a[href*="cloud.189.cn"]').each((i, el) => {
@@ -122,7 +121,7 @@ async function getTracks(ext) {
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式或之前已添加，则跳过
 
-            // 如果 href 中没找到，则使用原有逻辑在上下文中查找
+            // 如果 href 中没找到，则回退到原有逻辑，在上下文中查找
             if (!accessCode) {
                 const contextText = $(el).parent().text(); // 获取链接所在元素的文本
                 const localCode = extractAccessCode(contextText);
@@ -174,7 +173,10 @@ function extractAccessCode(text) {
 
 function normalizePanUrl(url) {
     try {
-        const urlObj = new URL(url);
+        // 尝试从包含访问码的复杂url中提取基础部分
+        const cleanUrlMatch = url.match(/https?:\/\/cloud\.189\.cn\/[^\s（(]+/ );
+        const cleanUrl = cleanUrlMatch ? cleanUrlMatch[0] : url;
+        const urlObj = new URL(cleanUrl);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
         const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
