@@ -88,7 +88,8 @@ async function getTracks(ext) {
     while ((m = naked.exec($('.topicContent').text())) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        const correctedCode = m[3].replace('）', ''); // 新增这一行，清理括号
+        tracks.push({ name: title, pan: panUrl, ext: { accessCode: correctedCode } }); // 修改这一行，使用清理后的结果
         unique.add(panUrl);
       }
     }
