@@ -1,15 +1,18 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 最终完整可运行版
- * 版本: 2025-07-28-final
- * 功能: 提取天翼云盘链接 + 访问码（含裸文本中文括号特例）
- * 使用: 直接替换原脚本即可运行
+ * 雷鲸网盘资源提取脚本 - 终极完整版
+ * 版本: 2025-07-28-ultimate
+ * 功能: 1. 保留所有分类列表
+ *       2. 原脚本全部识别逻辑（精准组合、a 标签、纯文本）
+ *       3. 新增裸文本 + 中文括号特例
+ *       4. 一键跳转（url + type: 'web'）
  * =================================================================
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
+/* ------------- 站点配置 ------------- */
 const appConfig = {
   ver: 20250728,
   title: '雷鲸',
@@ -24,14 +27,14 @@ const appConfig = {
   ],
 };
 
-/* ---------- 工具 ---------- */
+/* ---------- 工具函数 ---------- */
 function normalizePanUrl(raw) {
   try {
     const u = new URL(raw);
-    return (u.origin + u.pathname).toLowerCase();
+    return u.origin + u.pathname;
   } catch (_) {
     const m = raw.match(/https?:\/\/cloud\.189\.cn\/[^\s<>()]+/);
-    return m ? m[0].toLowerCase() : raw.toLowerCase();
+    return m ? m[0] : raw;
 }
 function extractAccessCode(str) {
   const m = str.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
@@ -42,6 +45,7 @@ function extractAccessCode(str) {
 async function getConfig()        { return jsonify(appConfig); }
 async function getPlayinfo(ext)   { return jsonify({ urls: [] }); }
 
+/* 首页卡片（含分类） */
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -49,6 +53,7 @@ async function getCards(ext) {
   const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
   const cards = [];
+
   $('.topicItem').each((_, el) => {
     if ($(el).find('.cms-lock-solid').length) return;
     const a = $(el).find('h2 a');
@@ -56,11 +61,19 @@ async function getCards(ext) {
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
   });
   return jsonify({ list: cards });
 }
 
+/* 详情页：原逻辑 + 裸文本特例 + 一键跳转 */
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -70,37 +83,38 @@ async function getTracks(ext) {
   try {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
-    const title = $('.topicBox .title').text().trim() || '网盘资源';
+    const title = $('.topicContent, body').text().trim() || '网盘资源';
+    const text = $('.topicContent').text();
 
-    /* 1️⃣ 原脚本精准组合 */
+    /* 1️⃣ 原脚本精准组合（保留） */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        tracks.push({ name: title, url: panUrl, type: 'web', ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
-    /* 2️⃣ 原脚本 <a> 标签提取 */
+    /* 2️⃣ 原脚本 <a> 标签提取（保留） */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = extractAccessCode(ctx);
       if (!unique.has(href)) {
-        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code || '' } });
+        tracks.push({ name: $(el).text().trim() || title, url: href, type: 'web', ext: { accessCode: code || '' } });
         unique.add(href);
       }
     });
 
     /* 3️⃣ 新增：裸文本 + 中文括号特例 */
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6}）)/gi;
-    while ((m = naked.exec($('.topicContent').text())) !== null) {
+    while ((m = naked.exec(text)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        tracks.push({ name: title, url: panUrl, type: 'web', ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
@@ -110,10 +124,11 @@ async function getTracks(ext) {
       : jsonify({ list: [] });
 
   } catch (e) {
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', url: 'about:blank', type: 'web', ext: { accessCode: '' } }] }] });
   }
 }
 
+/* 搜索接口（含分类） */
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
