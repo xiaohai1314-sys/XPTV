@@ -89,7 +89,7 @@ async function getTracks(ext) {
       const correctedCode = m[3].replace(' ）', ''); // 清理访问码的括号
       
       if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+          tracks.push({ name: title, pan: panUrl, ext: { accessCode: correctedCode } });
         unique.add(panUrl);
       }
     }
