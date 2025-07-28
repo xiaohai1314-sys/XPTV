@@ -1,8 +1,8 @@
 /**
  * =================================================================
  * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
- * 版本: 2025-07-281-jump-final-optimized
- * 功能: 保留原有全部识别逻辑，仅新增裸文本+中文括号特例
+ * 版本: 2025-07-28-jump-final
+ * 功能: 保留原有全部识别逻辑，新增裸文本+中文括号特例，修复跳转问题
  * 使用: 直接替换原脚本即可运行
  * =================================================================
  */
@@ -25,7 +25,9 @@ const appConfig = {
 };
 
 /* ============== 接口 ============== */
-async function getConfig( ) { return jsonify(appConfig); }
+async function getConfig() {
+  return jsonify(appConfig);
+}
 
 async function getCards(ext) {
   ext = argsify(ext);
@@ -41,14 +43,22 @@ async function getCards(ext) {
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
   });
   return jsonify({ list: cards });
 }
 
-async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
+}
 
-/* ============== 详情页：补裸文本特例 ============== */
+/* ============== 详情页：网盘提取（含特例修复） ============== */
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -59,37 +69,37 @@ async function getTracks(ext) {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
-    const contentText = $('.topicContent').text(); // 提前获取文本，避免重复调用
 
-    /* 1️⃣ 保留原精准组合（英文/中文括号）- 这个是好的，不动 */
-    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    // 1️⃣ 精准匹配：英文或中文括号
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl )) {
+      if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
-    /* 2️⃣ 保留原 <a> 标签提取 - 这个也是好的，不动 */
+    // 2️⃣ HTML <a> 标签中的资源
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      if (!unique.has(href)) {
-        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
-        unique.add(href);
-      }
+      tracks.push({
+        name: $(el).text().trim() || title,
+        pan: href,
+        ext: { accessCode: code ? code[1] : '' },
+      });
+      unique.add(href);
     });
 
-    /* 3️⃣ 新增：裸文本 + 中文/英文括号特例 (已优化修正) */
-    // 改动点：1. 使用 [\s\S]*? 非贪婪匹配链接和括号之间的内容。 2. 用 [)）] 兼容中英文右括号。
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[\s\S]*?[\(（]访问码[:：\s]*([a-zA-Z0-9]{4,6})[)）]/gi;
-    while ((m = naked.exec(contentText)) !== null) {
+    // 3️⃣ 新增：裸文本 + 中文括号特例（修正右括号问题）
+    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
+    while ((m = naked.exec($('.topicContent').text())) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl )) {
+      if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
@@ -100,11 +110,16 @@ async function getTracks(ext) {
       : jsonify({ list: [] });
 
   } catch (e) {
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
+    return jsonify({
+      list: [{
+        title: '错误',
+        tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
+      }]
+    });
   }
 }
 
-/* ============== 搜索接口 ------------- */
+/* ============== 搜索接口 ============== */
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -119,7 +134,13 @@ async function search(ext) {
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
   });
   return jsonify({ list: cards });
 }
