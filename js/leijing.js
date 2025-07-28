@@ -78,29 +78,42 @@ async function getTracks(ext) {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text(); // 获取整个页面文本，备用
+        const bodyText = $('body').text();
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
             globalAccessCode = globalCodeMatch[1];
         }
 
-        // ==================== 新增代码开始 ====================
-        // 优先处理新样本中的 "链接(访问码:xxxx)" 格式
-        const newFormatPattern = /(https?:\/\/cloud\.189\.cn\/[^\s（]+ )（访问码：([a-zA-Z0-9]{4,6})）/g;
-        let newMatch;
-        while ((newMatch = newFormatPattern.exec(bodyText)) !== null) {
-            const panUrl = newMatch[1];
-            const accessCode = newMatch[2];
-            const normalizedUrl = normalizePanUrl(panUrl);
-            if (uniqueLinks.has(normalizedUrl)) continue;
-            
-            tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-            uniqueLinks.add(normalizedUrl);
-        }
-        // ==================== 新增代码结束 ====================
+        // ==================== 核心修正代码开始 ====================
+        // 遍历所有a标签，检查其href属性
+        $('a').each((i, el) => {
+            const href = $(el).attr('href');
+            if (!href) return;
 
-        // --- 策略一：v20 的精准匹配 (优先) ---
+            // 正则表达式，用于从href中同时捕获链接和访问码
+            const pattern = /(https?:\/\/cloud\.189\.cn\/[^\s（]+ )（访问码：([a-zA-Z0-9]{4,6})）/;
+            const match = href.match(pattern);
+
+            if (match) {
+                const panUrl = match[1]; // 捕获到的纯链接
+                const accessCode = match[2]; // 捕获到的访问码
+                const normalizedUrl = normalizePanUrl(panUrl);
+
+                if (!uniqueLinks.has(normalizedUrl)) {
+                    tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+                    uniqueLinks.add(normalizedUrl);
+                }
+            }
+        });
+        // ==================== 核心修正代码结束 ====================
+
+        // 如果通过新方法找到了链接，可以提前返回，或者继续执行旧逻辑作为补充
+        if (tracks.length > 0) {
+            return jsonify({ list: [{ title: "天翼云盘", tracks }] });
+        }
+
+        // --- 保留原有的兼容逻辑作为回退方案 ---
         const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
@@ -112,38 +125,26 @@ async function getTracks(ext) {
             uniqueLinks.add(normalizedUrl);
         }
 
-        // --- 策略二：v16 的广泛兼容模式 (回退) ---
-        
-        // 1. 从 <a> 标签中寻找
         $('a[href*="cloud.189.cn"]').each((i, el) => {
             const href = $(el).attr('href');
             if (!href) return;
-
             const normalizedUrl = normalizePanUrl(href);
-            if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
-
-            let accessCode = '';
-            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
+            if (uniqueLinks.has(normalizedUrl)) return;
+            const contextText = $(el).parent().text();
             const localCode = extractAccessCode(contextText);
-            accessCode = localCode || globalAccessCode; // 优先局部，再用全局
-
+            const accessCode = localCode || globalAccessCode;
             tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
 
-        // 2. 从纯文本中寻找 (作为最后的补充)
         const urlPattern = /https?:\/\/cloud\.189\.cn\/(t|web\/share  )\/[^\s<>()]+/gi;
         while ((match = urlPattern.exec(bodyText)) !== null) {
             const panUrl = match[0];
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) continue;
-
-            let accessCode = '';
-            // 在链接前后 50 个字符范围内寻找密码
             const searchArea = bodyText.substring(Math.max(0, match.index - 50), match.index + panUrl.length + 50);
             const localCode = extractAccessCode(searchArea);
-            accessCode = localCode || globalAccessCode;
-
+            const accessCode = localCode || globalAccessCode;
             tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         }
@@ -162,7 +163,6 @@ async function getTracks(ext) {
 
 function extractAccessCode(text) {
     if (!text) return '';
-    // 匹配 (访问码:xxxx) 【访问码:xxxx】 访问码:xxxx 等多种格式
     let match = text.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
     if (match && match[1]) return match[1];
     match = text.match(/[\(（\uff08\[【]\s*(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})\s*[\)）\uff09\]】]/i);
