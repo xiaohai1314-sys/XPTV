@@ -22,7 +22,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig() { return jsonify(appConfig); }
+async function getConfig( ) { return jsonify(appConfig); }
 
 async function getCards(ext) {
   ext = argsify(ext);
@@ -57,11 +57,11 @@ async function getTracks(ext) {
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
     // 1️⃣ 原精准匹配（括号内带码）
-    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
+      if (!unique.has(panUrl )) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
@@ -79,20 +79,25 @@ async function getTracks(ext) {
       }
     });
 
-    // 3️⃣ 修改第三部分，带@cloud，type=jump，整体编码链接带访问码
+    // 3️⃣【已修改】此部分已修改为支持自动转存的模式
     const nakedText = $('.topicContent').text();
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+)[^）]*（访问码[:：\s]*[a-zA-Z0-9]{4,6}）/gi;
+    // 新的正则表达式，增加了捕获组来分别提取链接和访问码
+    const naked = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+ ))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     while ((m = naked.exec(nakedText)) !== null) {
-      const fullLink = m[0];
-      const encodedLink = encodeURI(fullLink);
-      if (!unique.has(encodedLink)) {
+      // m[1] 会捕获到纯净的 URL
+      // m[2] 会捕获到访问码
+      const panUrl = m[1];
+      const accessCode = m[2];
+
+      // 使用和第一、二部分相同的逻辑，检查链接是否已处理过
+      if (!unique.has(panUrl)) {
+        // 按照标准格式 push 数据，不再使用 'jump' 类型
         tracks.push({
           name: title,
-          pan: encodedLink + '@cloud',
-          type: 'jump',
-          ext: { accessCode: '' }
+          pan: panUrl,
+          ext: { accessCode: accessCode }
         });
-        unique.add(encodedLink);
+        unique.add(panUrl);
       }
     }
 
