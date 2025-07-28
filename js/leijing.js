@@ -1,141 +1,116 @@
-// ==UserScript==
-// @name         雷鲸资源站 - 完整修复版
-// @description  支持分类、搜索、详情、跳转，修复天翼云盘第三段跳转问题
-// @version      2025.07.28
-// ==/UserScript==
+/**
+ * =================================================================
+ * 雷鲸网盘资源提取脚本 - 跳转修复完整版
+ * 版本: 2025-07-28-jump-patched
+ * 功能: 保留原结构，仅修复第三部分裸链提取的 type: 'jump' 缺失问题
+ * =================================================================
+ */
 
-const site = 'https://www.leijing.xyz';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
+const cheerio = createCheerio();
 
-export default {
-  // 分类结构：保持 tabs/ext 格式不变
+const appConfig = {
+  ver: 2025072802,
+  title: '雷鲸·跳转修复版',
+  site: 'https://www.leijing.xyz',
   tabs: [
-    { name: '电影', type: '1' },
-    { name: '剧集', type: '2' },
-    { name: '动漫', type: '3' },
-    { name: '综艺', type: '4' },
+    { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
+    { name: '电影',       ext: { id: '?tagId=42204681950354' } },
+    { name: '动漫',       ext: { id: '?tagId=42204792950357' } },
+    { name: '纪录片',     ext: { id: '?tagId=42204697150356' } },
+    { name: '综艺',       ext: { id: '?tagId=42210356650363' } },
+    { name: '影视原盘',   ext: { id: '?tagId=42212287587456' } },
   ],
-  ext: async ({ type, page }) => {
-    const res = await $fetch(`${site}/thread?topicId=${type}&page=${page}`);
-    const $ = createCheerio(res);
-    const list = [];
-
-    $('.post-list .post-item').each((i, item) => {
-      const a = $(item).find('.post-title a');
-      const url = a.attr('href');
-      const title = a.text().trim();
-      const img = $(item).find('.post-img img').attr('src');
-      if (url && title) {
-        list.push({
-          id: site + url,
-          name: title,
-          pic: img?.startsWith('http') ? img : site + img,
-        });
-      }
-    });
-
-    return list;
-  },
-
-  // 搜索接口：保留原样
-  search: async (key, page) => {
-    const res = await $fetch(`${site}/search?keyword=${encodeURIComponent(key)}&page=${page}`);
-    const $ = createCheerio(res);
-    const list = [];
-
-    $('.post-list .post-item').each((i, item) => {
-      const a = $(item).find('.post-title a');
-      const url = a.attr('href');
-      const title = a.text().trim();
-      const img = $(item).find('.post-img img').attr('src');
-      if (url && title) {
-        list.push({
-          id: site + url,
-          name: title,
-          pic: img?.startsWith('http') ? img : site + img,
-        });
-      }
-    });
-
-    return list;
-  },
-
-  // ✅ 详情页：包含三段天翼云盘链接提取逻辑，已修复第三段跳转
-  detail: async ({ url, id, name }) => {
-    const html = await $fetch(url);
-    const $ = createCheerio(html);
-    const title = $('h1').text().trim();
-    const tracks = [];
-    const unique = new Set();
-
-    // 第一部分：attachlist 区块
-    $('.attachlist a[href*="cloud.189.cn"]').each((_, el) => {
-      const pan = $(el).attr('href');
-      if (!pan || unique.has(pan)) return;
-      const text = $(el).parent().text();
-      const codeMatch = /(?:提取码|访问码|密码)[:：\s]*([a-zA-Z0-9]{4,6})/.exec(text);
-      tracks.push({
-        name: $(el).text().trim() || title,
-        pan,
-        type: 'jump',
-        ext: { accessCode: codeMatch ? codeMatch[1] : '' }
-      });
-      unique.add(pan);
-    });
-
-    // 第二部分：quote 区块
-    $('.quote').each((_, q) => {
-      const text = $(q).text();
-      const regex = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share\?code)=([a-zA-Z0-9]+).*?(?:提取码|密码|访问码)[:：]?\s*([a-zA-Z0-9]{4,6})?/ig;
-      let match;
-      while ((match = regex.exec(text)) !== null) {
-        const pan = `https://cloud.189.cn/t/${match[1]}`;
-        const code = match[2] || '';
-        if (unique.has(pan)) continue;
-        tracks.push({
-          name: `天翼云盘资源`,
-          pan,
-          type: 'jump',
-          ext: { accessCode: code }
-        });
-        unique.add(pan);
-      }
-    });
-
-    // ✅ 第三部分：正文 .topicContent 中的裸链接（已修复跳转问题）
-    const contentHtml = $('.topicContent').html() || '';
-    const $inner = createCheerio(contentHtml);
-
-    $inner('body').contents().each((_, el) => {
-      const nodeText = $inner(el).text();
-      const naked = /https?:\/\/cloud\.189\.cn\/(?:t|web\/share\?code)=([a-zA-Z0-9]+).*?[（(]?(?:提取码|访问码|密码)?[:：\s]*([a-zA-Z0-9]{4,6})[）)]?/ig;
-      let match;
-      while ((match = naked.exec(nodeText)) !== null) {
-        const url = `https://cloud.189.cn/t/${match[1]}`;
-        const code = match[2];
-        if (unique.has(url)) continue;
-        tracks.push({
-          name: `天翼云盘资源（正文提取）`,
-          pan: url,
-          type: 'jump',
-          ext: { accessCode: code }
-        });
-        unique.add(url);
-      }
-    });
-
-    return {
-      id,
-      name,
-      tracks
-    };
-  },
-
-  // 播放接口：走跳转逻辑
-  play: async ({ pan, ext }) => {
-    return {
-      type: 'jump',
-      url: pan,
-      ext
-    };
-  }
 };
+
+async function getConfig() { return jsonify(appConfig); }
+
+async function getCards(ext) {
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  const url = `${appConfig.site}/${id}&page=${page}`;
+  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  const $ = cheerio.load(data);
+  const cards = [];
+  $('.topicItem').each((_, el) => {
+    if ($(el).find('.cms-lock-solid').length) return;
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
+    const tag = $(el).find('.tag').text();
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+  });
+  return jsonify({ list: cards });
+}
+
+async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
+
+async function getTracks(ext) {
+  ext = argsify(ext);
+  const tracks = [];
+  const url = ext.url;
+  const unique = new Set();
+
+  try {
+    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+    const title = $('.topicBox .title').text().trim() || '网盘资源';
+
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    let m;
+    while ((m = precise.exec(data)) !== null) {
+      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+      if (!unique.has(panUrl)) {
+        tracks.push({ name: title, pan: panUrl, type: 'jump', ext: { accessCode: m[3] } });
+        unique.add(panUrl);
+      }
+    }
+
+    $('a[href*="cloud.189.cn"]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (!href || unique.has(href)) return;
+      const ctx = $(el).parent().text();
+      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      if (!unique.has(href)) {
+        tracks.push({ name: $(el).text().trim() || title, pan: href, type: 'jump', ext: { accessCode: code ? code[1] : '' } });
+        unique.add(href);
+      }
+    });
+
+    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
+    while ((m = naked.exec($('.topicContent').text())) !== null) {
+      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+      if (!unique.has(panUrl)) {
+        tracks.push({ name: title, pan: panUrl, type: 'jump', ext: { accessCode: m[3] } });
+        unique.add(panUrl);
+      }
+    }
+
+    return tracks.length
+      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+      : jsonify({ list: [] });
+
+  } catch (e) {
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
+  }
+}
+
+async function search(ext) {
+  ext = argsify(ext);
+  let cards = [];
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
+  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  const $ = cheerio.load(data);
+  $('.topicItem').each((_, el) => {
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
+    const tag = $(el).find('.tag').text();
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+  });
+  return jsonify({ list: cards });
+}
