@@ -1,8 +1,8 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 仅第三部分修正跳转全套版
- * 版本: 2025-07-28-jump-only-third-fixed
- * 功能: 保留全部原结构，第一二部分不变，第三部分裸文本链接加@cloud和type: 'jump'修正跳转
+ * 雷鲸网盘资源提取脚本 - 修正第三部分跳转（整体链接编码带访问码）
+ * 版本: 2025-07-28-jump-full-link-encode
+ * 功能: 仅第三部分提取整体含访问码链接并编码，保证跳转生效
  * =================================================================
  */
 
@@ -10,8 +10,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072804,
-  title: '雷鲸·第三部分跳转修正版',
+  ver: 2025072805,
+  title: '雷鲸·第三部分整体链接编码跳转',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -80,14 +80,20 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 仅此处修正跳转格式，裸文本+中文括号特例 */
+    /* 3️⃣ 修正裸文本 + 中文括号整体链接编码带访问码跳转 */
     const nakedText = $('.topicContent').text();
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
+    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+)[^）]*（访问码[:：\s]*[a-zA-Z0-9]{4,6}）/gi;
     while ((m = naked.exec(nakedText)) !== null) {
-      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl + '@cloud', type: 'jump', ext: { accessCode: m[3] } });
-        unique.add(panUrl);
+      const fullLink = m[0];
+      const encodedLink = encodeURI(fullLink);
+      if (!unique.has(encodedLink)) {
+        tracks.push({
+          name: title,
+          pan: encodedLink,
+          type: 'jump',
+          ext: { accessCode: '' } // 码已包含链接内，无需单独字段
+        });
+        unique.add(encodedLink);
       }
     }
 
