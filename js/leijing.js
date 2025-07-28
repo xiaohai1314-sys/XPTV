@@ -1,8 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 修正第三部分跳转（整体链接编码带访问码）
- * 版本: 2025-07-28-jump-full-link-encode
- * 功能: 仅第三部分提取整体含访问码链接并编码，保证跳转生效
+ * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（第三部分跳转修正）
+ * 功能: 仅修改第三部分，跳转链接带@cloud且type='jump'保证跳转生效
  * =================================================================
  */
 
@@ -10,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072805,
-  title: '雷鲸·第三部分整体链接编码跳转',
+  ver: 2025072806,
+  title: '雷鲸·完整版带跳转@cloud',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -57,7 +56,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    /* 1️⃣ 保留原精准组合（英文/中文括号） */
+    // 1️⃣ 原精准匹配（括号内带码）
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -68,7 +67,7 @@ async function getTracks(ext) {
       }
     }
 
-    /* 2️⃣ 保留原 <a> 标签提取 */
+    // 2️⃣ 保留原 <a> 标签提取
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -80,7 +79,7 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 修正裸文本 + 中文括号整体链接编码带访问码跳转 */
+    // 3️⃣ 修改第三部分，带@cloud，type=jump，整体编码链接带访问码
     const nakedText = $('.topicContent').text();
     const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+)[^）]*（访问码[:：\s]*[a-zA-Z0-9]{4,6}）/gi;
     while ((m = naked.exec(nakedText)) !== null) {
@@ -89,9 +88,9 @@ async function getTracks(ext) {
       if (!unique.has(encodedLink)) {
         tracks.push({
           name: title,
-          pan: encodedLink,
+          pan: encodedLink + '@cloud',
           type: 'jump',
-          ext: { accessCode: '' } // 码已包含链接内，无需单独字段
+          ext: { accessCode: '' }
         });
         unique.add(encodedLink);
       }
