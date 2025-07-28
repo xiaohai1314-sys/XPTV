@@ -1,8 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（第三部分跳转已修正）
- * 功能：支持剧集/电影/动漫等分类浏览、搜索、精准提取天翼云盘直链
- * 说明：第三部分裸文本链接已拆分为干净URL+@cloud，type=jump，可正常跳转
+ * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（仅第三部分修正）
+ * 说明：只改动第三部分，输出与第一、第二部分完全一致的干净短链
  * =================================================================
  */
 
@@ -10,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072807,
-  title: '雷鲸·天翼云盘直链脚本',
+  ver: 2025072808,
+  title: '雷鲸·仅第三部分修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -68,7 +67,7 @@ async function getTracks(ext) {
       }
     }
 
-    /* 2️⃣ <a href="..."> 标签提取 */
+    /* 2️⃣ 保留 <a> 标签提取 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -80,21 +79,15 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 裸文本「url（访问码：xxxx）」→ 拆出干净URL+@cloud */
+    /* 3️⃣ 仅第三部分：裸文本→干净短链（与1、2部分一致） */
     const nakedText = $('.topicContent').text();
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
       const cleanUrl = n[1];
-      const code     = n[2];
-      const jumpUrl  = `${cleanUrl}@cloud`;
+      const code = n[2];
       if (!unique.has(cleanUrl)) {
-        tracks.push({
-          name: title,
-          pan: jumpUrl,
-          type: 'jump',          // 告诉解析器：跳转外链
-          ext: { accessCode: code }
-        });
+        tracks.push({ name: title, pan: cleanUrl, ext: { accessCode: code } });
         unique.add(cleanUrl);
       }
     }
