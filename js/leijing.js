@@ -1,7 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 最终版（适配多设备，包括Apple TV）
- * 说明：保持原始识别能力，仅修正输出链接为兼容性最好的长链格式。
+ * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（第三部分修正+链接格式统一）
+ * 说明：修正第三部分匹配逻辑，并统一转换短链为有效长链格式
  * =================================================================
  */
 
@@ -9,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072808,
-  title: '雷鲸·多设备兼容版',
+  ver: 2025072809,
+  title: '雷鲸·链接格式统一版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -22,7 +22,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig( ) { return jsonify(appConfig); }
+async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
   ext = argsify(ext);
@@ -45,6 +45,18 @@ async function getCards(ext) {
 
 async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
 
+// 统一转换天翼云盘链接为有效格式
+function normalizePanUrl(url) {
+  // 处理短链格式：/t/xxx → /web/share?code=xxx
+  const shortMatch = url.match(/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)/i);
+  if (shortMatch) {
+    return `https://cloud.189.cn/web/share?code=${shortMatch[1]}`;
+  }
+  
+  // 处理编码问题：删除URL中的多余字符（如中文括号）
+  return url.replace(/[^a-zA-Z0-9?=&%.:\/#_-]|%EF%BC%88|%EF%BC%89/g, '');
+}
+
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -57,11 +69,12 @@ async function getTracks(ext) {
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
     /* 1️⃣ 精准匹配：链接(访问码：xxxx) */
-    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
-      const panUrl = `https://cloud.189.cn/t/${m[1] || m[2]}`;
-      if (!unique.has(panUrl )) {
+      const rawUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
+      const panUrl = normalizePanUrl(rawUrl);
+      if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
@@ -69,29 +82,37 @@ async function getTracks(ext) {
 
     /* 2️⃣ 保留 <a> 标签提取 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
-      const href = $(el).attr('href');
+      let href = $(el).attr('href');
       if (!href || unique.has(href)) return;
+      
+      // 统一链接格式
+      href = normalizePanUrl(href);
+      if (unique.has(href)) return;
+      
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      if (!unique.has(href)) {
-        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
-        unique.add(href);
-      }
+      tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
+      unique.add(href);
     });
 
-    /* 3️⃣ 裸文本 → 干净短链（兼容长短链并统一成短链） */
+    /* 3️⃣ 仅第三部分：裸文本→干净短链（与1、2部分一致） */
     const nakedText = $('.topicContent').text();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9%]+))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
+    // 修正后的正则表达式：只匹配干净的URL部分
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      const key  = n[1] || n[2];
-      const code = n[3];
-      // 关键修正：不再生成无法访问的短链，而是生成可直接访问的、最通用的长链。
-      const cleanUrl = `https://cloud.189.cn/web/share?code=${key}`;
-      if (!unique.has(cleanUrl )) {
-        tracks.push({ name: title, pan: cleanUrl, ext: { accessCode: code } });
-        unique.add(cleanUrl);
-      }
+      let cleanUrl = n[1];
+      // 统一链接格式
+      cleanUrl = normalizePanUrl(cleanUrl);
+      if (unique.has(cleanUrl)) continue;
+      
+      // 在匹配位置后查找访问码
+      const afterText = nakedText.substring(n.index + n[0].length, n.index + n[0].length + 50);
+      const codeMatch = afterText.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
+      const code = codeMatch ? codeMatch[1] : '';
+      
+      tracks.push({ name: title, pan: cleanUrl, ext: { accessCode: code } });
+      unique.add(cleanUrl);
     }
 
     return tracks.length
