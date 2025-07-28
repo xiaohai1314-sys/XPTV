@@ -1,8 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28 第三部分最终完整版
- * 功能：仅第三部分修正，按钮显示短链，实际跳转 web/share?code=xxx
- * 其余逻辑保持不变，可直接整段覆盖
+ * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（仅第三部分修正）
+ * 说明：只改动第三部分，输出与第一、第二部分完全一致的干净短链
  * =================================================================
  */
 
@@ -10,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072810,
-  title: '雷鲸·第三部分最终完整版',
+  ver: 2025072808,
+  title: '雷鲸·仅第三部分修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -57,19 +56,18 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    /* 1️⃣ 精准匹配：括号内带码 → 按钮显示短链，实际跳转 web/share */
+    /* 1️⃣ 精准匹配：链接(访问码：xxxx) */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
-      const codeKey = m[1] || m[2];
-      const panUrl  = `https://cloud.189.cn/web/share?code=${codeKey}`;
+      const panUrl = `https://cloud.189.cn/t/${m[1] || m[2]}`;
       if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
-    /* 2️⃣ <a> 标签提取（保持原样） */
+    /* 2️⃣ 保留 <a> 标签提取 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -81,17 +79,17 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 第三部分：裸文本 → 按钮显示短链，实际跳转 web/share */
+    /* 3️⃣ 裸文本 → 干净短链（兼容长短链并统一成短链） */
     const nakedText = $('.topicContent').text();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9%]+)))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
+    const nakedRe = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]{6,12})|web\/share\?code=([a-zA-Z0-9]{6,12}))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      const codeKey = n[2] || n[3];
-      const panUrl  = `https://cloud.189.cn/web/share?code=${codeKey}`;
-      const access  = n[4];
-      if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: access } });
-        unique.add(panUrl);
+      const key  = n[1] || n[2];
+      const code = n[3];
+      const cleanUrl = `https://cloud.189.cn/t/${key}`;
+      if (!unique.has(cleanUrl)) {
+        tracks.push({ name: title, pan: cleanUrl, ext: { accessCode: code } });
+        unique.add(cleanUrl);
       }
     }
 
