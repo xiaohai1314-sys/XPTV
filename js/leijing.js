@@ -1,13 +1,14 @@
 /**
  * =================================================================
- * 最终解密版脚本 (The Decryption Attempt)
- * 版本: 26.0
+ * 最终钥匙版脚本 (The Final Key)
+ * 版本: 27.0
  *
  * 更新日志:
- * - [根本性尝试] getTracks 函数增加了一个全新的策略：在解析HTML之前，首先尝试直接请求一个可能的“内容解密”API。
- *   这旨在绕过所有潜在的JS动态加载或懒加载问题，直接获取核心数据。
- * - 如果API请求成功，将直接解析返回的数据；如果失败，则无缝回退到我们之前所有成熟的HTML解析逻辑。
- * - 这是为了解决“所有逻辑都正确，但依然无结果”的最终尝试。
+ * - [决定性重构] getTracks 函数被彻底重写，以模拟网站真实的“先POST解锁，再GET获取”逻辑。
+ * - [解锁步骤] 脚本会先向 /topic/unhide API 发送一个POST请求，以获取查看隐藏内容的权限。
+ * - [获取步骤] 发送解锁请求后，脚本会再次请求原始详情页URL，以获取包含真实链接的、解锁后的HTML。
+ * - [头部修正] 模拟的POST请求增加了 'Content-Type' 和 'X-Requested-With' 请求头，以确保服务器能正确处理。
+ * - 此版本旨在从根本上解决因内容隐藏机制导致的提取失败问题。
  * =================================================================
  */
 
@@ -15,7 +16,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 26.0,
+  ver: 27.0,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -32,7 +33,7 @@ async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
-// [已修复] 使用极度健壮的选择器
+// [已验证] 使用健壮的选择器
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -69,41 +70,42 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// [最终解密尝试]
+// [决定性重构] 模拟“先解锁，再获取”的真实逻辑
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
-    const url = ext.url;
+    const pageUrl = ext.url;
     const uniqueLinks = new Set();
-    let contentHtml = ''; // 用于存储最终要解析的HTML内容
 
     try {
-        // [新增策略] 尝试直接请求隐藏内容API
-        const topicIdMatch = url.match(/topicId=(\d+)/);
+        // [解锁步骤]
+        const topicIdMatch = pageUrl.match(/topicId=(\d+)/);
         if (topicIdMatch) {
             const topicId = topicIdMatch[1];
-            const apiUrl = `${appConfig.site}/topic/topicUnhide?topicId=${topicId}`;
+            const apiUrl = `${appConfig.site}/user/control/topic/unhide`;
+            const postData = `topicId=${topicId}&hideType=10&password=`; // 模拟一个空的密码提交来解锁
             try {
-                const apiRes = await $fetch.post(apiUrl, {}, { headers: { 'Referer': url, 'User-Agent': UA, 'X-Requested-With': 'XMLHttpRequest' } });
-                const apiData = JSON.parse(apiRes.data);
-                if (apiData.data && apiData.data.content) {
-                    contentHtml = apiData.data.content; // 如果API成功返回内容，就用它
-                }
+                // 发送解锁请求，我们不关心其返回值，目的是在服务器端获得权限
+                await $fetch.post(apiUrl, postData, {
+                    headers: {
+                        'Referer': pageUrl,
+                        'User-Agent': UA,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                    }
+                });
             } catch (apiError) {
-                // API请求失败，不是关键错误，忽略即可，后面会用原始页面解析
+                // 即使API请求失败（例如因为内容无需解锁），我们依然继续尝试解析原始页面
             }
         }
 
-        // 如果API没有获取到内容，则加载整个页面作为备用
-        if (!contentHtml) {
-            const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-            contentHtml = data;
-        }
-
-        // --- 后续解析逻辑不变，只是数据源可能是API返回的干净HTML ---
-        const $ = cheerio.load(contentHtml);
+        // [获取步骤] 再次请求原始页面，此时应已包含解锁后的内容
+        const { data } = await $fetch.get(pageUrl, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+        const $ = cheerio.load(data);
+        
+        // --- 后续解析逻辑与之前成熟的版本一致 ---
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text() || $(contentHtml).text(); // 兼容纯HTML片段
+        const bodyText = $('body').text();
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
@@ -188,7 +190,7 @@ function normalizePanUrl(url) {
     }
 }
 
-// [已修复] 使用极度健壮的选择器
+// [已验证] 使用健壮的选择器
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
