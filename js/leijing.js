@@ -1,14 +1,13 @@
 /**
  * =================================================================
- * 最终修正版 - 严格忠于原作
- * 版本: 24.0
+ * 最终解密版脚本 (The Decryption Attempt)
+ * 版本: 26.0
  *
  * 更新日志:
- * - 严格基于用户提供的、功能完好的原始脚本进行修改。
- * - [getCards] 函数：完全保持原样，不做任何改动，以确保列表功能正常。
- * - [search] 函数：完全保持原样，不做任何改动。
- * - [getTracks] 函数：在原有逻辑上，仅增加对href属性内嵌访问码格式的提取能力，确保对新旧格式的兼容。
- * - 本次修改旨在精确解决特例链接的提取问题，同时保证所有原有功能不受影响。
+ * - [根本性尝试] getTracks 函数增加了一个全新的策略：在解析HTML之前，首先尝试直接请求一个可能的“内容解密”API。
+ *   这旨在绕过所有潜在的JS动态加载或懒加载问题，直接获取核心数据。
+ * - 如果API请求成功，将直接解析返回的数据；如果失败，则无缝回退到我们之前所有成熟的HTML解析逻辑。
+ * - 这是为了解决“所有逻辑都正确，但依然无结果”的最终尝试。
  * =================================================================
  */
 
@@ -16,7 +15,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 24.0,
+  ver: 26.0,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -33,7 +32,7 @@ async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
-// [严格保持原样] - 确保列表功能与您的一致
+// [已修复] 使用极度健壮的选择器
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -41,15 +40,18 @@ async function getCards(ext) {
   const url = appConfig.site + `/${id}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
   const $ = cheerio.load(data);
-  $('.topicItem').each((index, each) => {
-    if ($(each).find('.cms-lock-solid').length > 0) return;
-    const href = $(each).find('h2 a').attr('href');
-    const title = $(each).find('h2 a').text();
+  $('.topicItem, .topic-item').each((index, each) => {
+    const $item = $(each);
+    if ($item.find('.cms-lock-solid').length > 0) return;
+    const a = $item.find('h2 a, .title a');
+    const href = a.attr('href');
+    const title = a.text();
+    if (!href || !title) return;
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const r = $(each).find('.summary').text();
-    const tag = $(each).find('.tag').text();
+    const r = $item.find('.summary').text();
+    const tag = $item.find('.tag').text();
     if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
@@ -67,18 +69,41 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// [精确增强] - 唯一进行修改的函数
+// [最终解密尝试]
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
     const url = ext.url;
     const uniqueLinks = new Set();
+    let contentHtml = ''; // 用于存储最终要解析的HTML内容
 
     try {
-        const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
-        const $ = cheerio.load(data);
+        // [新增策略] 尝试直接请求隐藏内容API
+        const topicIdMatch = url.match(/topicId=(\d+)/);
+        if (topicIdMatch) {
+            const topicId = topicIdMatch[1];
+            const apiUrl = `${appConfig.site}/topic/topicUnhide?topicId=${topicId}`;
+            try {
+                const apiRes = await $fetch.post(apiUrl, {}, { headers: { 'Referer': url, 'User-Agent': UA, 'X-Requested-With': 'XMLHttpRequest' } });
+                const apiData = JSON.parse(apiRes.data);
+                if (apiData.data && apiData.data.content) {
+                    contentHtml = apiData.data.content; // 如果API成功返回内容，就用它
+                }
+            } catch (apiError) {
+                // API请求失败，不是关键错误，忽略即可，后面会用原始页面解析
+            }
+        }
+
+        // 如果API没有获取到内容，则加载整个页面作为备用
+        if (!contentHtml) {
+            const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+            contentHtml = data;
+        }
+
+        // --- 后续解析逻辑不变，只是数据源可能是API返回的干净HTML ---
+        const $ = cheerio.load(contentHtml);
         const title = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text();
+        const bodyText = $('body').text() || $(contentHtml).text(); // 兼容纯HTML片段
         let globalAccessCode = '';
         const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
         if (globalCodeMatch) {
@@ -101,19 +126,14 @@ async function getTracks(ext) {
             if (!href) return;
             let panUrl = href;
             let accessCode = '';
-            
-            // [新增的逻辑] 优先解析href属性本身
             const hrefPattern = /(https?:\/\/cloud\.189\.cn\/[^\s（(]+ )[\s（(]+(?:访问码|密码|code)[:：\s]*([a-zA-Z0-9]{4,6})/;
             const hrefMatch = href.match(hrefPattern);
             if (hrefMatch) {
                 panUrl = hrefMatch[1].trim();
                 accessCode = hrefMatch[2];
             }
-
             const normalizedUrl = normalizePanUrl(panUrl);
             if (uniqueLinks.has(normalizedUrl)) return;
-
-            // [原有的逻辑] 如果href中没码，则在上下文中找
             if (!accessCode) {
                 const contextText = $(el).parent().text();
                 const localCode = extractAccessCode(contextText);
@@ -168,7 +188,7 @@ function normalizePanUrl(url) {
     }
 }
 
-// [严格保持原样] - 确保搜索功能与您的一致
+// [已修复] 使用极度健壮的选择器
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -177,10 +197,10 @@ async function search(ext) {
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
-  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item');
+  const searchItems = $('.search-result ul > li, .topic-list > .topic-item, .result-list > .item, ul.search-results > li.result-item, .topicItem, .searchModule .item, .topic-item');
   searchItems.each((index, each) => {
     const $item = $(each);
-    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a');
+    const a = $item.find('a.title, h2 a, h3 a, .item-title a, .title > span a, .title a');
     const href = a.attr('href');
     const title = a.text();
     if (!href || !title) return;
