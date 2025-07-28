@@ -1,14 +1,14 @@
 /**
  * =================================================================
- * 最终修正版 - 严格遵循参考脚本 (The Faithful Version)
- * 版本: 30.0
+ * 最终修正版 - 严格遵循参考，仅清理结果
+ * 版本: 31.0 (The Faithful Fix)
  *
  * 更新日志:
- * - [核心修正] getTracks 函数严格采纳用户参考脚本的“裸文本”提取逻辑。
- * - [关键修复] 完全保留了参考脚本中能成功识别的正则表达式，不做任何改动。
- * - [精确处理] 在提取出带括号的访问码后，通过字符串替换方法(.replace)将其末尾的括号去除，确保跳转功能正常。
- * - 完整保留了参考脚本中的其他提取方式作为兼容性保障。
- * - 严格按照用户反馈进行修改，旨在最终解决问题。
+ * - 彻底放弃所有我自己的复杂逻辑，回归本源。
+ * - [getTracks] 函数的逻辑，完全、逐字地基于用户提供的、被证实“能识别”的参考脚本。
+ * - [关键修正] 完全保留参考脚本中能成功识别的正则表达式，不做任何改动。
+ * - 在提取出带括号的访问码后，通过一次简单的字符串清理 (.replace)，确保最终结果的正确性，以解决“无法跳转”的问题。
+ * - 这是对您提供的有效线索的最忠实实现，旨在直接解决问题。
  * =================================================================
  */
 
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 30.0,
+  ver: 31.0,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -67,7 +67,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// [最终修正] 严格遵循参考脚本逻辑，仅修正输出结果
+// [最终修正] 严格遵循参考脚本逻辑，仅清理输出结果
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -102,14 +102,14 @@ async function getTracks(ext) {
             }
         });
 
-        // --- 策略3：裸文本 + 中文括号特例 (来自参考脚本，已修正输出) ---
-        // [关键] 严格保留能成功识别的正则表达式
+        // --- 策略3：裸文本 + 中文括号特例 (来自参考脚本，仅修正输出) ---
+        // [关键] 严格保留能成功识别的正则表达式，一个字符都不改
         const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6}）)/gi;
         while ((m = naked.exec($('.topicContent').text())) !== null) {
             const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
             if (!unique.has(panUrl )) {
-                // [关键] 在这里对提取出的、带括号的访问码进行修正
-                const correctedCode = m[3].replace('）', '');
+                // [关键] 在这里对提取出的、带括号的访问码 m[3] 进行无害化清理
+                const correctedCode = m[3].replace(/）/g, '');
                 tracks.push({ name: title, pan: panUrl, ext: { accessCode: correctedCode } });
                 unique.add(panUrl);
             }
