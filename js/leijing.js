@@ -1,15 +1,15 @@
 /**
  * =================================================================
- * 最终可用脚本 - 融合 v16 和 v20 优点
- * 版本: 23 (融合版)
+ * 最终可用脚本 - 融合 v16 和 v20 优点，并增加新链接格式支持
+ * 版本: 22 (增强版)
  *
  * 更新日志:
  * - 融合了 v16 的广泛链接识别能力和 v20 的精准访问码提取能力。
- * - [getTracks] 函数采用双重策略：
+ * - [新增] 增加了对 href 属性内直接包含 "（访问码：xxxx）" 格式的链接提取支持。
+ * - [getTracks] 函数采用多重策略：
  *   1. **精准优先**: 首先尝试用 v20 的精确正则匹配 "链接+访问码" 的组合。
- *   2. **兼容回退**: 如果精准匹配找不到结果，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
- * - 解决了 v20 因正则过严而漏掉纯净链接或格式不规范链接的问题。
- * - 解决了 v16 可能将访问码错误匹配的问题，因为精准模式已优先处理。
+ *   2. **href 属性提取 (新增)**: 在遍历<a>标签时，优先检查 href 自身是否包含链接和访问码。
+ *   3. **兼容回退**: 如果以上方法找不到，则启动 v16 的广泛链接扫描模式，先找链接，再在附近找访问码。
  * - 这是目前最稳定、兼容性最强的版本。
  * =================================================================
  */
@@ -18,7 +18,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21,
+  ver: 22, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,7 +31,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
@@ -68,7 +68,7 @@ async function getPlayinfo(ext) {
   return jsonify({ 'urls': [] });
 }
 
-// --- 详情页函数: v21 融合版 ---
+// --- 详情页函数: v22 融合增强版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -87,7 +87,8 @@ async function getTracks(ext) {
         }
 
         // --- 策略一：v20 的精准匹配 (优先) ---
-        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             const panUrl = match[0].split(/[\(（\uff08]/)[0].trim();
             const accessCode = match[3];
@@ -106,15 +107,29 @@ async function getTracks(ext) {
             const href = $(el).attr('href');
             if (!href) return;
 
-            const normalizedUrl = normalizePanUrl(href);
-            if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式已添加，则跳过
-
+            let panUrl = href;
             let accessCode = '';
-            const contextText = $(el).parent().text(); // 获取链接所在元素的文本
-            const localCode = extractAccessCode(contextText);
-            accessCode = localCode || globalAccessCode; // 优先局部，再用全局
+            
+            // [新增逻辑] 优先尝试从 href 自身提取链接和访问码
+            const hrefPattern = /(https?:\/\/cloud\.189\.cn\/[^\s（(]+ )[\s（(]+(?:访问码|密码|code)[:：\s]*([a-zA-Z0-9]{4,6})/;
+            const hrefMatch = href.match(hrefPattern);
 
-            tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode } });
+            if (hrefMatch) {
+                panUrl = hrefMatch[1].trim();
+                accessCode = hrefMatch[2];
+            }
+
+            const normalizedUrl = normalizePanUrl(panUrl);
+            if (uniqueLinks.has(normalizedUrl)) return; // 如果精准模式或之前已添加，则跳过
+
+            // 如果 href 中没找到，则使用原有逻辑在上下文中查找
+            if (!accessCode) {
+                const contextText = $(el).parent().text(); // 获取链接所在元素的文本
+                const localCode = extractAccessCode(contextText);
+                accessCode = localCode || globalAccessCode; // 优先局部，再用全局
+            }
+
+            tracks.push({ name: $(el).text().trim() || title, pan: panUrl, ext: { accessCode } });
             uniqueLinks.add(normalizedUrl);
         });
 
@@ -162,7 +177,7 @@ function normalizePanUrl(url) {
         const urlObj = new URL(url);
         return (urlObj.origin + urlObj.pathname).toLowerCase();
     } catch (e) {
-        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>( )]+/);
+        const match = url.match(/https?:\/\/cloud\.189\.cn\/[^\s<>(  )]+/);
         return match ? match[0].toLowerCase() : url.toLowerCase();
     }
 }
@@ -197,6 +212,3 @@ async function search(ext) {
   });
   return jsonify({ list: cards });
 }
-
-
-
