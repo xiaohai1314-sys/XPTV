@@ -1,7 +1,7 @@
 /**
  * =================================================================
  * 雷鲸网盘资源提取脚本 - 最终完整可跳转版
- * 版本: 2025-07-28-jump-final
+ * 版本: 2025-07-28-jump-final-optimized
  * 功能: 保留原有全部识别逻辑，仅新增裸文本+中文括号特例
  * 使用: 直接替换原脚本即可运行
  * =================================================================
@@ -59,8 +59,9 @@ async function getTracks(ext) {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
+    const contentText = $('.topicContent').text(); // 提前获取文本，避免重复调用
 
-    /* 1️⃣ 保留原精准组合（英文/中文括号） */
+    /* 1️⃣ 保留原精准组合（英文/中文括号）- 这个是好的，不动 */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -71,7 +72,7 @@ async function getTracks(ext) {
       }
     }
 
-    /* 2️⃣ 保留原 <a> 标签提取 */
+    /* 2️⃣ 保留原 <a> 标签提取 - 这个也是好的，不动 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -83,10 +84,10 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 新增：裸文本 + 中文括号特例 (已修正) */
-    // 唯一的改动在这里，将访问码的捕获组 () 与后面的中文括号 ） 分开
-    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[^（]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
-    while ((m = naked.exec($('.topicContent').text())) !== null) {
+    /* 3️⃣ 新增：裸文本 + 中文/英文括号特例 (已优化修正) */
+    // 改动点：1. 使用 [\s\S]*? 非贪婪匹配链接和括号之间的内容。 2. 用 [)）] 兼容中英文右括号。
+    const naked = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))[\s\S]*?[\(（]访问码[:：\s]*([a-zA-Z0-9]{4,6})[)）]/gi;
+    while ((m = naked.exec(contentText)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl )) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
@@ -121,4 +122,4 @@ async function search(ext) {
     cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
   });
   return jsonify({ list: cards });
-}```
+}
