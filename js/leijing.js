@@ -1,7 +1,8 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28 第三部分修正版
- * 说明：仅改动第三部分，统一输出 web/share?code=xxx 格式
+ * 雷鲸网盘资源提取脚本 - 2025-07-28 第三部分最终完整版
+ * 功能：仅第三部分修正，按钮显示短链，实际跳转 web/share?code=xxx
+ * 其余逻辑保持不变，可直接整段覆盖
  * =================================================================
  */
 
@@ -9,8 +10,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072809,
-  title: '雷鲸·第三部分统一web版',
+  ver: 2025072810,
+  title: '雷鲸·第三部分最终完整版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -56,12 +57,12 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    /* 1️⃣ 精准匹配（括号内带码） */
+    /* 1️⃣ 精准匹配：括号内带码 → 按钮显示短链，实际跳转 web/share */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const codeKey = m[1] || m[2];
-      const panUrl = `https://cloud.189.cn/web/share?code=${codeKey}`;
+      const panUrl  = `https://cloud.189.cn/web/share?code=${codeKey}`;
       if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
@@ -80,7 +81,7 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 第三部分：裸文本 → web/share?code=xxx */
+    /* 3️⃣ 第三部分：裸文本 → 按钮显示短链，实际跳转 web/share */
     const nakedText = $('.topicContent').text();
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9%]+)))[^）]*（访问码[:：\s]*([a-zA-Z0-9]{4,6})）/gi;
     let n;
