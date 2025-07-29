@@ -1,6 +1,6 @@
 /*
- * 雷鲸资源站脚本 - 纯前端最终正确版2
- * 保留1、2，并基于对 .text() 和 .html() 的正确理解修正第3部分
+ * 雷鲸资源站脚本 - 纯前端终极精准修正版3
+ * 仅在原始脚本的第2部分(a标签提取)中增加URL编码逻辑
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -71,44 +71,40 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致 ---
+    // --- 2️⃣ <a> 标签提取：【唯一修正点】在这里处理混合链接 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
-      const href = $(el).attr('href');
-      if (!href || unique.has(href)) return;
-      const ctx = $(el).parent().text();
-      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      tracks.push({
-        name: $(el).text().trim() || title,
-        pan: href,
-        ext: { accessCode: code ? code[1] : '' },
-      });
-      unique.add(href);
+      let finalUrl = $(el).attr('href');
+      if (!finalUrl || unique.has(finalUrl)) return;
+
+      // 检查 href 属性本身是否就是混合链接
+      const separatorIndex = finalUrl.search(/[（(]访问码/);
+      if (separatorIndex !== -1) {
+        // 如果是混合链接，则进行URL编码
+        const pureUrl = finalUrl.substring(0, separatorIndex);
+        const suffix = finalUrl.substring(separatorIndex);
+        finalUrl = pureUrl + encodeURIComponent(suffix); // 更新 finalUrl 为编码后的链接
+        
+        tracks.push({
+          name: $(el).text().trim() || title,
+          pan: finalUrl, // 提交编码后的单一链接
+          type: 'jump',
+          ext: { accessCode: '' }, // accessCode 必须为空
+        });
+
+      } else {
+        // 如果不是混合链接，则按原逻辑处理
+        const ctx = $(el).parent().text();
+        const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+        tracks.push({
+          name: $(el).text().trim() || title,
+          pan: finalUrl,
+          ext: { accessCode: code ? code[1] : '' },
+        });
+      }
+      unique.add(finalUrl);
     });
 
-    // --- 3️⃣ 裸文本提取：【唯一修正点】使用 .html() 来查找 ---
-    const contentHtml = $('.topicContent').html(); // 【关键修正】使用 .html() 而不是 .text()
-    
-    // 正则表达式：查找混合链接
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9?=&_.\/-]+ )([（(]访问码[:：\s]*[a-zA-Z0-9]{4,6}[）)])/gi;
-    
-    let n;
-    while ((n = nakedRe.exec(contentHtml)) !== null) {
-      const pureUrl = n[1];
-      const suffix = n[2];
-      
-      const encodedSuffix = encodeURIComponent(suffix);
-      const finalUrl = pureUrl + encodedSuffix;
-
-      if (!unique.has(finalUrl)) {
-        tracks.push({ 
-          name: title,
-          pan: finalUrl,
-          type: 'jump', 
-          ext: { accessCode: '' }
-        });
-        unique.add(finalUrl);
-      }
-    }
+    // --- 不再需要第3部分 ---
 
     return tracks.length
       ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
