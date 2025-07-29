@@ -1,12 +1,11 @@
 /*
  * ====================================================================
- *  雷鲸资源站脚本 - 最终回退版 (纯前端)
+ *  雷鲸资源站脚本 - 最终测试版 (纯前端)
  * ====================================================================
- *  遵照用户要求，回退到最稳定可靠的纯前端方案。
  *  核心逻辑：
- *  1. 严格使用用户原始脚本的提取逻辑。
- *  2. 只修正最终组合链接和访问码的方式，解决“无法保存”的问题。
- *  3. 废弃所有后端和Puppeteer方案。
+ *  1. 严格保留提取方式1和2为用户原始版本，一字不差。
+ *  2. 只修正提取方式3，采用“提取完整原始字符串”的逻辑进行测试。
+ *  3. 废弃所有画蛇添足的 'type: jump' 和独立的 accessCode。
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -70,7 +69,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ 精准匹配：与您原脚本完全一致 ---
+    // --- 1️⃣ 精准匹配：与您原脚本完全一致，一字不差 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -81,7 +80,7 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致 ---
+    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致，一字不差 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -95,25 +94,22 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // --- 3️⃣ 裸文本提取：使用您原始脚本的正则，但修正组合方式 ---
+    // --- 3️⃣ 裸文本提取：【【【唯一的修改点，用于测试】】】 ---
     const nakedText = $('.topicContent').text();
-    // 这个正是您原始脚本的正则表达式
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
+    // 一个更强大的正则表达式，能匹配中英文括号和各种空格
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+(?:[\s\S]{0,10})?[\(（\uff08][\s\S]*?[:：\uff1a\s]*[a-zA-Z0-9]{4,6}[\)）\uff09])/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1]; // 提取出纯净的URL部分
-      const accessCode = n[2]; // 提取出访问码
+      const fullOriginalLink = n[0].trim(); // n[0] 就是正则表达式匹配到的完整字符串！
 
-      if (!unique.has(rawUrl)) {
-        // 【【【 最终核心修正点在这里 】】】
-        // 我们不再使用 type: 'jump'，而是直接将纯净的URL和访问码分开提供
-        // 这与提取方式1和2的行为完全一致，确保App能正确处理
+      if (!unique.has(fullOriginalLink)) {
+        // 直接将这个完整的、原始的字符串，作为 pan 传给App
         tracks.push({
           name: title,
-          pan: rawUrl,
-          ext: { accessCode: accessCode }
+          pan: fullOriginalLink,
+          ext: {} // ext 留空，不提供任何画蛇添足的信息
         });
-        unique.add(rawUrl);
+        unique.add(fullOriginalLink);
       }
     }
 
@@ -130,7 +126,7 @@ async function getTracks(ext) {
             {
               name: '加载失败: ' + e.message,
               pan: 'about:blank',
-              ext: { accessCode: '' },
+              ext: {},
             },
           ],
         },
