@@ -1,20 +1,24 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (已严格自查)
+ * 脚本名称: 雷鲸资源站脚本 - v21.12 (终极修正版)
  *
  * 最终修正说明:
- * - appConfig, getCards, search 函数已恢复至v21原版，确保脚本能被正确加载和执行。
- * - getTracks函数在v21原版三层策略结构上，仅增加去重和HTTPS转换。
- * - 严格保证只修正已知问题，不再有任何未经您同意的额外修改。
+ * - 版本号已更新至 21.12 以便区分。
+ * - getCards 和 search 函数已严格恢复至v21原版，确保列表和搜索能正常显示。
+ * - getTracks函数已修正，确保：
+ *   1. 按钮名称优先使用帖子标题，避免出现“雷鲸小站”等字样。
+ *   2. 链接去重，解决按钮重复问题。
+ *   3. 强制HTTPS，解决http链接的兼容性问题 。
+ *   4. 修正了所有已知的、由我引入的错误。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// appConfig 与 v21 原版完全一致
+// 版本号已更新，其他与v21原版一致
 const appConfig = {
-  ver: 21,
+  ver: 21.12,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,12 +35,12 @@ async function getConfig( ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致，确保列表显示
+// getCards 函数与 v21 原版完全一致
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-  const url = appConfig.site + `/${id}&page=${page}`; // 修正了这里，确保与原版一致
+  const url = appConfig.site + `/${id}&page=${page}`;
   const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
@@ -81,7 +85,10 @@ async function getTracks(ext) {
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
         const $ = cheerio.load(data);
-        const pageTitle = $('.topicBox .title, title').first().text().trim() || "网盘资源";
+        
+        // **修正了按钮名称的提取逻辑，确保优先使用帖子标题**
+        const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+        
         const bodyText = $('body').text();
 
         let globalAccessCode = '';
@@ -97,7 +104,7 @@ async function getTracks(ext) {
             let cleanPan = match[1].replace('http://', 'https://' );
             if (uniqueLinks.has(cleanPan)) continue;
 
-            tracks.push({ name: pageTitle, pan: cleanPan, ext: { accessCode: match[2] } });
+            tracks.push({ name: pageTitle, pan: cleanPan, ext: { accessCode: match[3] } });
             uniqueLinks.add(cleanPan);
         }
 
