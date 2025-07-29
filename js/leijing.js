@@ -1,4 +1,4 @@
-/* 1雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
+/* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
