@@ -97,7 +97,7 @@ async function getTracks(ext) {
     // --- 3️⃣ 裸文本提取：【【【唯一的、最终的修正点】】】 ---
     const nakedText = $('.topicContent').text();
     // 一个更强大的正则表达式，能匹配中英文括号和各种空格
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+(?:[\s\S]{0,10})?[\(（\uff08][\s\S]*?[:：\uff1a\s]*[a-zA-Z0-9]{4,6}[\)）\uff09])/gi;
+    const nakedRe = /(http:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+(?:[\s\S]{0,10})?[\(（\uff08][\s\S]*?[:：\uff1a\s]*[a-zA-Z0-9]{4,6}[\)）\uff09])/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
       const fullOriginalLink = n[0].trim(); // n[0] 就是正则表达式匹配到的完整字符串！
