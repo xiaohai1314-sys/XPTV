@@ -1,10 +1,10 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v26 (终极修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v27 (终极修正版)
  *
  * 最终修正说明:
  * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
- * - 引入“全局、多形态”去重逻辑，彻底解决所有策略之间的重复按钮问题。
+ * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
  * - 保留“脏链接”以适应App的特殊工作机制。
  * - 修正所有已知的、由我引入的错误。
  * =================================================================
@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 
 // appConfig 与 v21 原版完全一致
 const appConfig = {
-  ver: 26,
+  ver: 27,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -66,10 +66,10 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 辅助函数：从任何链接中提取纯净URL用于去重
-function getCleanUrlForDedup(rawUrl) {
+// 辅助函数：从任何链接中提取“协议无关”的纯净URL用于去重
+function getProtocolAgnosticUrl(rawUrl) {
     if (!rawUrl) return null;
-    const match = rawUrl.match(/https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/ );
+    const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
     return match ? match[0] : null;
 }
 
@@ -91,11 +91,11 @@ async function getTracks(ext) {
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             let panUrl = match[0].replace('http://', 'https://' );
-            let cleanUrl = getCleanUrlForDedup(panUrl);
-            if (uniqueLinks.has(cleanUrl)) continue;
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+            if (uniqueLinks.has(agnosticUrl)) continue;
 
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-            uniqueLinks.add(cleanUrl);
+            uniqueLinks.add(agnosticUrl);
         }
 
         // --- 策略二：<a>标签扫描 (已修正) ---
@@ -104,8 +104,8 @@ async function getTracks(ext) {
             let href = $el.attr('href');
             if (!href) return;
             
-            let cleanUrl = getCleanUrlForDedup(href);
-            if (!cleanUrl || uniqueLinks.has(cleanUrl)) return;
+            let agnosticUrl = getProtocolAgnosticUrl(href);
+            if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
 
             href = href.replace('http://', 'https://' );
 
@@ -115,18 +115,18 @@ async function getTracks(ext) {
             }
 
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
-            uniqueLinks.add(cleanUrl);
+            uniqueLinks.add(agnosticUrl);
         });
 
         // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
         while ((match = urlPattern.exec(bodyText )) !== null) {
             let panUrl = match[0].replace('http://', 'https://' );
-            let cleanUrl = getCleanUrlForDedup(panUrl);
-            if (uniqueLinks.has(cleanUrl)) continue;
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+            if (uniqueLinks.has(agnosticUrl)) continue;
 
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-            uniqueLinks.add(cleanUrl);
+            uniqueLinks.add(agnosticUrl);
         }
 
         return tracks.length
