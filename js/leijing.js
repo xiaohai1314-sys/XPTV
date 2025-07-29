@@ -1,19 +1,19 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (已验证)
+ * 脚本名称: 雷鲸资源站脚本 - v21 核心缺陷修正版 (严格执行)
  *
- * 最终修正说明:
+ * 修正说明 (严格基于v21原版):
  * - getCards 和 search 函数已恢复至v21原版，确保列表和搜索能正常显示。
  * - getTracks函数在v21原版三层策略结构上，仅增加去重和HTTPS转换。
  * - 严格保证只修正已知问题，不再有任何未经您同意的额外修改。
  * =================================================================
  */
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21.10, // 最终修正版本号
+  ver: 21.11, // 最终修正版本号
   title: '雷鲸·v21最终修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -30,7 +30,7 @@ async function getConfig( ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致
+// getCards 函数与 v21 原版完全一致，确保列表显示
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
