@@ -1,7 +1,7 @@
 /* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
-const cheerio = createCheerio();
+const cheerio = createCheerio(); // <--- 已将此行修正回正确的全局位置
 
 const appConfig = {
   ver: 2025072915,
@@ -89,26 +89,20 @@ async function getTracks(ext) {
     /* 3️⃣ 后备纯文本提取：*** 此处是唯一修改的部分 *** */
     const content$ = $('.topicContent');
     if (content$.length > 0) {
-        // 复制一份内容进行清理，避免影响其他操作
         const cleanHtml = content$.clone();
-        // 移除所有脚本和样式块
         cleanHtml.find('script, style').remove();
-        // 将  
-和<p>替换为换行符，以便正则处理
         let plainText = cleanHtml.html().replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n');
-        // 移除所有剩余的HTML标签
-        plainText = plainText.replace(/<[^>]+>/g, '');
-        // 移除HTML实体编码
+        plainText = plainText.replace(/<[^>]+>/g, ' ');
         plainText = plainText.replace(/&nbsp;/g, ' ').replace(/&[a-zA-Z]+;/g, '');
 
-        const backupRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)\s*（访问码[：\s]*([a-zA-Z0-9]{4,6})）/g;
+        const backupRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[\s\S]*?（访问码[：\s]*([a-zA-Z0-9]{4,6})）/g;
         let backupMatch;
         while ((backupMatch = backupRe.exec(plainText)) !== null) {
             const rawUrl = backupMatch[1];
             if (!unique.has(rawUrl)) {
                 const accessCode = backupMatch[2];
                 tracks.push({
-                    name: title, // 确保对象结构一致
+                    name: title,
                     pan: rawUrl,
                     ext: { accessCode }
                 });
