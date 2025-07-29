@@ -1,12 +1,12 @@
 /*
  * ====================================================================
- *  雷鲸资源站脚本 - 最终完整版
+ *  雷鲸资源站脚本 - 最终回退版 (纯前端)
  * ====================================================================
- *  遵照用户最终要求：
- *  1. 提取方式1和2，与用户原始脚本一字不差，完全相同。
- *  2. Puppeteer后端调用作为独立的第3部分，只用于补充特例。
- *  3. 使用最安全、最健壮的方式处理后端返回的数据。
- *  4. 提供未经任何省略的完整代码。
+ *  遵照用户要求，回退到最稳定可靠的纯前端方案。
+ *  核心逻辑：
+ *  1. 严格使用用户原始脚本的提取逻辑。
+ *  2. 只修正最终组合链接和访问码的方式，解决“无法保存”的问题。
+ *  3. 废弃所有后端和Puppeteer方案。
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -25,11 +25,6 @@ const appConfig = {
     { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
   ],
 };
-
-// 【重要】在这里配置您后端服务的地址
-// 请将 "您的电脑IP地址" 替换为运行 server.js 的电脑的真实局域网IP
-const PUPPETEER_API_URL = 'http://192.168.10.111:3002/api/clickAndGetFinalUrl';
-
 
 async function getConfig( ) {
   return jsonify(appConfig);
@@ -67,15 +62,15 @@ async function getPlayinfo(ext) {
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
-  const pageUrl = ext.url;
+  const url = ext.url;
   const unique = new Set();
 
   try {
-    const { data } = await $fetch.get(pageUrl, { headers: { 'User-Agent': UA } });
+    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ 精准匹配：与您原脚本完全一致，一字不差 ---
+    // --- 1️⃣ 精准匹配：与您原脚本完全一致 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -86,7 +81,7 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致，一字不差 ---
+    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -100,48 +95,26 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // --- 3️⃣ Puppeteer 提取：作为补充，处理特例 ---
-    try {
-      // 只有当页面上可能存在特例，并且前两种方式没找到任何链接时，才调用后端
-      if (data.includes("访问码") && data.includes("cloud.189.cn") && tracks.length === 0) {
-        console.log('Calling Puppeteer backend for special case...');
-        const response = await $fetch.post(PUPPETEER_API_URL, { url: pageUrl }, { headers: { 'Content-Type': 'application/json' } });
-        
-        console.log('Received response from backend. Raw response: ' + JSON.stringify(response));
+    // --- 3️⃣ 裸文本提取：使用您原始脚本的正则，但修正组合方式 ---
+    const nakedText = $('.topicContent').text();
+    // 这个正是您原始脚本的正则表达式
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
+    let n;
+    while ((n = nakedRe.exec(nakedText)) !== null) {
+      const rawUrl = n[1]; // 提取出纯净的URL部分
+      const accessCode = n[2]; // 提取出访问码
 
-        let result = null;
-        // 使用最安全的方式解析返回的数据
-        if (response && response.data) {
-            try {
-                result = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
-            } catch (e) {
-                console.log('Failed to parse response.data: ' + e.message);
-            }
-        }
-        if (!result) {
-            try {
-                result = (typeof response === 'string') ? JSON.parse(response) : response;
-            } catch (e) {
-                console.log('Failed to parse response directly: ' + e.message);
-            }
-        }
-
-        if (result && result.success && result.url) {
-          console.log('Successfully parsed result. URL: ' + result.url);
-          if (!unique.has(result.url)) {
-            tracks.push({
-              name: `${title} [P]`,
-              pan: result.url,
-              ext: { accessCode: result.accessCode },
-            });
-            unique.add(result.url);
-          }
-        } else {
-          console.log('Could not find a valid success result in the response.');
-        }
+      if (!unique.has(rawUrl)) {
+        // 【【【 最终核心修正点在这里 】】】
+        // 我们不再使用 type: 'jump'，而是直接将纯净的URL和访问码分开提供
+        // 这与提取方式1和2的行为完全一致，确保App能正确处理
+        tracks.push({
+          name: title,
+          pan: rawUrl,
+          ext: { accessCode: accessCode }
+        });
+        unique.add(rawUrl);
       }
-    } catch (puppeteerError) {
-      console.log('Puppeteer backend call failed catastrophically.', puppeteerError.message);
     }
 
     return tracks.length
@@ -150,7 +123,18 @@ async function getTracks(ext) {
 
   } catch (e) {
     return jsonify({
-      list: [{ title: '脚本执行错误', tracks: [{ name: e.message, pan: 'about:blank', ext: { accessCode: '' } }] }],
+      list: [
+        {
+          title: '错误',
+          tracks: [
+            {
+              name: '加载失败: ' + e.message,
+              pan: 'about:blank',
+              ext: { accessCode: '' },
+            },
+          ],
+        },
+      ],
     });
   }
 }
