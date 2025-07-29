@@ -7,7 +7,7 @@ const cheerio = createCheerio();
 
 // 【需要您修改的地方】
 // 请将此地址替换为您部署的后端服务的实际公网地址
-const BACKEND_API_URL = 'https://your-backend-server.com/api/extractNakedText'; 
+const BACKEND_API_URL = 'http://192.168.10.111:3002/api/extractNakedText'; 
 
 // --- 以下部分与您的原始脚本完全一致 ---
 
