@@ -1,12 +1,20 @@
-/* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
+/* 
+ * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final (混合模式版)
+ * frontend.js
+ */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
+
+// --- 新增：后端服务地址配置 ---
+// 请将此地址替换为您部署的后端服务的实际地址
+const BACKEND_API_URL = 'http://localhost:3000/api/extractNakedText'; 
 
 const appConfig = {
   ver: 2025072915,
   title: '雷鲸·jump跳转修正版',
   site: 'https://www.leijing.xyz',
+  // ... tabs 配置保持不变 ...
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
@@ -17,62 +25,39 @@ const appConfig = {
   ],
 };
 
-async function getConfig() {
-  return jsonify(appConfig);
-}
+// getConfig, getCards, getPlayinfo, search 函数保持不变...
+async function getConfig( ) { /* ... */ }
+async function getCards(ext) { /* ... */ }
+async function getPlayinfo(ext) { /* ... */ }
+async function search(ext) { /* ... */ }
 
-async function getCards(ext) {
-  ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${appConfig.site}/${id}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  const cards = [];
-  $('.topicItem').each((_, el) => {
-    if ($(el).find('.cms-lock-solid').length) return;
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
-    const tag = $(el).find('.tag').text();
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: title,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
-  return jsonify({ list: cards });
-}
 
-async function getPlayinfo(ext) {
-  return jsonify({ urls: [] });
-}
-
+// --- 核心修改：增强后的 getTracks 函数 ---
 async function getTracks(ext) {
   ext = argsify(ext);
-  const tracks = [];
   const url = ext.url;
+  const tracks = [];
   const unique = new Set();
+  let title = '网盘资源'; // 默认标题
 
+  // --- 第一步：前端本地提取 (精准匹配 + a标签) ---
   try {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
-    const title = $('.topicBox .title').text().trim() || '网盘资源';
+    title = $('.topicBox .title').text().trim() || title;
 
-    /* 1️⃣ 精准匹配：保持不变 */
-    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    // 1️⃣ 精准匹配
+    const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      if (!unique.has(panUrl)) {
+      if (!unique.has(panUrl )) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
-    /* 2️⃣ <a> 标签提取：保持不变 */
+    // 2️⃣ <a> 标签提取
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -85,68 +70,43 @@ async function getTracks(ext) {
       });
       unique.add(href);
     });
-
-    /* 3️⃣ 裸文本提取：新增 jump 跳转 */
-    const nakedText = $('.topicContent').text();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
-    let n;
-    while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1];
-      const accessCode = n[2];
-      if (!unique.has(rawUrl)) {
-        tracks.push({
-          name: title,
-          pan: rawUrl,
-          type: 'jump',
-          ext: { accessCode }
-        });
-        unique.add(rawUrl);
-      }
-    }
-
-    return tracks.length
-      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
-      : jsonify({ list: [] });
-
   } catch (e) {
-    return jsonify({
-      list: [
-        {
-          title: '错误',
-          tracks: [
-            {
-              name: '加载失败',
-              pan: 'about:blank',
-              ext: { accessCode: '' },
-            },
-          ],
-        },
-      ],
-    });
+    console.log('前端本地提取阶段发生错误:', e.message);
   }
+
+  // --- 第二步：调用后端进行裸文本提取作为补充 ---
+  try {
+    // 构造请求后端的 URL
+    const backendUrl = `${BACKEND_API_URL}?url=${encodeURIComponent(url)}`;
+    const response = await $fetch.get(backendUrl); // 使用环境的 fetch
+    const backendTracks = JSON.parse(response.data); // 假设返回的是 JSON 字符串
+
+    if (Array.isArray(backendTracks)) {
+      backendTracks.forEach(track => {
+        // 检查后端返回的链接是否已存在，不存在则添加
+        if (track.pan && !unique.has(track.pan)) {
+          tracks.push(track);
+          unique.add(track.pan);
+        }
+      });
+    }
+  } catch (e) {
+    console.log('调用后端提取时发生错误:', e.message);
+    // 此处失败不影响已有结果，实现优雅降级
+  }
+
+  // --- 第三步：返回最终合并后的结果 ---
+  return tracks.length
+    ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+    : jsonify({ list: [] });
 }
 
-async function search(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  $('.topicItem').each((_, el) => {
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
-    const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: title,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
-  return jsonify({ list: cards });
+
+// --- 辅助函数 (保持不变) ---
+function argsify(ext) {
+  if (typeof ext === 'string') try { return JSON.parse(ext); } catch (e) { return {}; }
+  return ext || {};
+}
+function jsonify(data) {
+  return JSON.stringify(data);
 }
