@@ -1,11 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v21 核心缺陷修正版
+ * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (仅修复核心缺陷)
  *
- * 修正说明 (严格基于v21原版):
- * 1. [已修正] 增加统一去重机制，解决按钮重复问题。
- * 2. [已修正] 增加HTTP到HTTPS的强制转换，解决链接兼容性问题。
- * - (保留v21原版对所有链接形式的识别能力，包括直达链接)
+ * 最终修正说明:
+ * - getCards函数已恢复至v21原版，确保列表能正常显示。
+ * - getTracks函数在v21原版三层策略结构上，仅增加去重和HTTPS转换。
+ * - 严格保证只修正已知问题，不再做任何额外修改。
  * =================================================================
  */
 
@@ -13,7 +13,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21.7, // 最终修正版本号
+  ver: 21.8, // 最终修正版本号
   title: '雷鲸·v21最终修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -30,25 +30,30 @@ async function getConfig( ) {
   return jsonify(appConfig);
 }
 
+// getCards 函数已恢复至v21原版，不做任何修改
 async function getCards(ext) {
   ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${appConfig.site}/${id}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  let cards = [];
+  let { page = 1, id } = ext;
+  const url = appConfig.site + `/${id}&page=${page}`;
+  const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
   const $ = cheerio.load(data);
-  const cards = [];
-  $('.topicItem').each((_, el) => {
-    if ($(el).find('.cms-lock-solid').length) return;
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
-    const tag = $(el).find('.tag').text();
+  $('.topicItem').each((index, each) => {
+    if ($(each).find('.cms-lock-solid').length > 0) return;
+    const href = $(each).find('h2 a').attr('href');
+    const title = $(each).find('h2 a').text();
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
+    if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
-      vod_name: title,
+      vod_name: dramaName,
       vod_pic: '',
-      vod_remarks: tag,
+      vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
