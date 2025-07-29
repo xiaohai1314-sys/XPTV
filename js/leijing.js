@@ -1,12 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (已严格自查)
+ * 脚本名称: 雷鲸资源站脚本 - v24 (终极修正版)
  *
  * 最终修正说明:
  * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
- * - 严格保持 getTracks 函数原有的三层提取策略。
- * - 仅在每个策略内部，增加去重和HTTPS转换的修正。
- * - 严格保证只修正已知问题，不再有任何未经您同意的额外修改。
+ * - 引入“清洗后去重”的逻辑，彻底解决重复按钮问题。
+ * - 保留“脏链接”以适应App的特殊工作机制。
+ * - 修正所有已知的、由我引入的错误。
  * =================================================================
  */
 
@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 
 // appConfig 与 v21 原版完全一致
 const appConfig = {
-  ver: 21,
+  ver: 24,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -66,11 +66,18 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
+// 辅助函数：从任何链接中提取纯净URL用于去重
+function getCleanUrlForDedup(rawUrl) {
+    if (!rawUrl) return null;
+    const match = rawUrl.match(/https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/ );
+    return match ? match[0] : null;
+}
+
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
     const url = ext.url;
-    const uniqueLinks = new Set();
+    const uniqueLinks = new Set(); // 用于去重的“登记簿”
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
@@ -79,21 +86,16 @@ async function getTracks(ext) {
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        let globalAccessCode = '';
-        const globalCodeMatch = bodyText.match(/(?:通用|访问|提取|解压)[密碼码][：:]?\s*([a-z0-9]{4,6})\b/i);
-        if (globalCodeMatch) {
-            globalAccessCode = globalCodeMatch[1];
-        }
-
         // --- 策略一：精准匹配 (已修正) ---
         const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
             let panUrl = match[0].replace('http://', 'https://' );
-            if (uniqueLinks.has(panUrl)) continue;
+            let cleanUrl = getCleanUrlForDedup(panUrl);
+            if (uniqueLinks.has(cleanUrl)) continue;
 
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-            uniqueLinks.add(panUrl);
+            uniqueLinks.add(cleanUrl);
         }
 
         // --- 策略二：<a>标签扫描 (已修正) ---
@@ -102,8 +104,10 @@ async function getTracks(ext) {
             let href = $el.attr('href');
             if (!href) return;
             
+            let cleanUrl = getCleanUrlForDedup(href);
+            if (!cleanUrl || uniqueLinks.has(cleanUrl)) return;
+
             href = href.replace('http://', 'https://' );
-            if (uniqueLinks.has(href)) return;
 
             let trackName = $el.text().trim();
             if (trackName.startsWith('http' ) || trackName === '') {
@@ -111,17 +115,18 @@ async function getTracks(ext) {
             }
 
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
-            uniqueLinks.add(href);
+            uniqueLinks.add(cleanUrl);
         });
 
         // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
         while ((match = urlPattern.exec(bodyText )) !== null) {
             let panUrl = match[0].replace('http://', 'https://' );
-            if (uniqueLinks.has(panUrl)) continue;
+            let cleanUrl = getCleanUrlForDedup(panUrl);
+            if (uniqueLinks.has(cleanUrl)) continue;
 
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-            uniqueLinks.add(panUrl);
+            uniqueLinks.add(cleanUrl);
         }
 
         return tracks.length
