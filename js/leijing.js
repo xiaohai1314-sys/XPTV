@@ -86,27 +86,33 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    /* 3️⃣ HTML内容穿透提取：*** 此处是唯一修改的部分 *** */
-    const contentHtml = $('.topicContent').html();
-    if (contentHtml) {
-        const linkRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)/g;
-        const codeRe = /访问码[：\s]*([a-zA-Z0-9]{4,6})/;
-        let linkMatch;
-        while ((linkMatch = linkRe.exec(contentHtml)) !== null) {
-            const rawUrl = linkMatch[1];
+    /* 3️⃣ 后备纯文本提取：*** 此处是唯一修改的部分 *** */
+    const content$ = $('.topicContent');
+    if (content$.length > 0) {
+        // 复制一份内容进行清理，避免影响其他操作
+        const cleanHtml = content$.clone();
+        // 移除所有脚本和样式块
+        cleanHtml.find('script, style').remove();
+        // 将  
+和<p>替换为换行符，以便正则处理
+        let plainText = cleanHtml.html().replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n');
+        // 移除所有剩余的HTML标签
+        plainText = plainText.replace(/<[^>]+>/g, '');
+        // 移除HTML实体编码
+        plainText = plainText.replace(/&nbsp;/g, ' ').replace(/&[a-zA-Z]+;/g, '');
+
+        const backupRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)\s*（访问码[：\s]*([a-zA-Z0-9]{4,6})）/g;
+        let backupMatch;
+        while ((backupMatch = backupRe.exec(plainText)) !== null) {
+            const rawUrl = backupMatch[1];
             if (!unique.has(rawUrl)) {
-                // 在链接出现位置之后，查找最近的访问码
-                const searchArea = contentHtml.substring(linkMatch.index);
-                const codeMatch = searchArea.match(codeRe);
-                if (codeMatch) {
-                    const accessCode = codeMatch[1];
-                    tracks.push({
-                        name: title,
-                        pan: rawUrl,
-                        ext: { accessCode }
-                    });
-                    unique.add(rawUrl);
-                }
+                const accessCode = backupMatch[2];
+                tracks.push({
+                    name: title, // 确保对象结构一致
+                    pan: rawUrl,
+                    ext: { accessCode }
+                });
+                unique.add(rawUrl);
             }
         }
     }
