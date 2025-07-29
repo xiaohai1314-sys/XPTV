@@ -1,5 +1,6 @@
 /*
- * 雷鲸资源站脚本 - 纯前端完整最终版 (保留1、2，修正3)
+ * 雷鲸资源站脚本 - 纯前端最小化修改最终版
+ * 基于用户原始脚本，仅修正第3部分
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -63,65 +64,61 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ 精准匹配：完全保持不变 ---
+    // --- 1️⃣ 精准匹配：与您原脚本完全一致 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl )) {
-        // 分离链接和访问码，适用于需要手动输入的App
-        tracks.push({ name: `${title} (访问码: ${m[3]})`, pan: panUrl, ext: { accessCode: '' } });
+        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
       }
     }
 
-    // --- 2️⃣ <a> 标签提取：完全保持不变 ---
+    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
-      
-      // 检查是否是混合链接，如果是，则跳过，交给第3部分处理
-      if (/[（(]访问码/.test(href)) {
-          return; 
-      }
-
       const ctx = $(el).parent().text();
-      const codeMatch = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      const accessCode = codeMatch ? codeMatch[1] : '';
-      
-      // 分离链接和访问码
+      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
       tracks.push({
-        name: `${$(el).text().trim() || title} (访问码: ${accessCode})`,
+        name: $(el).text().trim() || title,
         pan: href,
-        ext: { accessCode: '' },
+        ext: { accessCode: code ? code[1] : '' },
       });
       unique.add(href);
     });
 
-    // --- 3️⃣ 裸文本提取：使用URL编码修正 ---
-    const contentToParse = $('.topicContent').html(); // 使用 .html() 获取原始HTML内容
-    // 正则表达式：捕获链接的前半部分(pureUrl)和后半部分(suffix)
-    const re = /(https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9?=&_.\/-]+ )([（(]访问码[:：\s]*[a-zA-Z0-9]{4,6}[）)])/gi;
+    // --- 3️⃣ 裸文本提取：这是唯一的修改点 ---
+    const nakedText = $('.topicContent').text();
+    // 这个正则表达式与您原版几乎一样，只是为了确保能捕获到链接
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t|web\/share )\/[a-zA-Z0-9?=&_.\/-]+[（(]访问码[:：\s]*[a-zA-Z0-9]{4,6}[）)])/gi;
     
     let n;
-    while ((n = re.exec(contentToParse)) !== null) {
-      const pureUrl = n[1];
-      const suffix = n[2];
+    while ((n = nakedRe.exec(nakedText)) !== null) {
+      const mixedUrl = n[0]; // 捕获到的混合链接，例如 "http://...（访问码：... ）"
       
-      // 将后缀进行URL编码
-      const encodedSuffix = encodeURIComponent(suffix);
-      
-      // 拼接成最终的、App能识别的完整链接
-      const finalUrl = pureUrl + encodedSuffix;
+      // 为了进行URL编码，我们需要先分离出纯净链接和后缀
+      const separatorIndex = mixedUrl.search(/[（(]访问码/);
+      if (separatorIndex !== -1) {
+        const pureUrl = mixedUrl.substring(0, separatorIndex);
+        const suffix = mixedUrl.substring(separatorIndex);
+        
+        // 将后缀进行URL编码
+        const encodedSuffix = encodeURIComponent(suffix);
+        
+        // 拼接成最终的、App能识别的完整链接
+        const finalUrl = pureUrl + encodedSuffix;
 
-      if (!unique.has(finalUrl)) {
-        tracks.push({ 
-          name: title,
-          pan: finalUrl,
-          type: 'jump', 
-          ext: { accessCode: '' }
-        });
-        unique.add(finalUrl);
+        if (!unique.has(finalUrl)) {
+          tracks.push({ 
+            name: title,
+            pan: finalUrl,
+            type: 'jump', 
+            ext: { accessCode: '' } // accessCode必须为空
+          });
+          unique.add(finalUrl);
+        }
       }
     }
 
@@ -130,8 +127,9 @@ async function getTracks(ext) {
       : jsonify({ list: [] });
 
   } catch (e) {
+    // 增强的错误处理，确保页面不会白屏
     return jsonify({
-      list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }],
+      list: [{ title: '脚本执行错误', tracks: [{ name: e.message, pan: 'about:blank', ext: { accessCode: '' } }] }],
     });
   }
 }
