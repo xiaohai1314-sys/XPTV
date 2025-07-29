@@ -1,7 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28-appletv-final-pure
- * 原则：只改动第三部分中的裸文本提取段，其他全部保持一字不动
+ * 雷鲸网盘资源提取脚本 - 2025-07-28-mobile-h5-final
+ * 原则：只修改“裸文本提取”部分为 h5 跳转，其他全部保持不变
  * =================================================================
  */
 
@@ -9,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072813,
-  title: '雷鲸·AppleTV裸文兼容版',
+  ver: 2025072814,
+  title: '雷鲸·手机H5跳转兼容版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -89,20 +89,20 @@ async function getTracks(ext) {
       }
     });
 
-    /* 3️⃣ 裸文本提取（仅此段修改，Apple TV 兼容拼接） */
+    /* 3️⃣ 裸文本提取（仅此段修改为 h5 格式） */
     const nakedText = $('.topicContent').text();
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[^）]*[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1].split(/[（(]/)[0]; // 去除中文括号尾巴
+      const rawUrl = n[1].split(/[（(]/)[0];
       const accessCode = n[2];
       const resourceId = rawUrl.match(/(?:t\/|code=)([a-zA-Z0-9]+)/)?.[1];
       if (!resourceId) continue;
 
-      const panUrl = `https://cloud.189.cn/web/share?code=${resourceId}&accessCode=${accessCode}`;
-      if (!unique.has(panUrl)) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
-        unique.add(panUrl);
+      const h5Url = `https://h5.cloud.189.cn/share.html#/t/${resourceId}?accessCode=${accessCode}`;
+      if (!unique.has(h5Url)) {
+        tracks.push({ name: title, pan: h5Url, ext: { accessCode } });
+        unique.add(h5Url);
       }
     }
 
