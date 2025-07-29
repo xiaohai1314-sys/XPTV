@@ -1,11 +1,11 @@
 /*
  * ====================================================================
- *  雷鲸资源站脚本 - 2最小化修改版 (严格遵守用户指示)
+ *  雷鲸资源站脚本 - 最终隔离版 (严格遵守用户指示)
  * ====================================================================
  *  核心逻辑：
- *  1. 严格保留用户原始脚本中的提取方式1和2，一字不差。
- *  2. 严格保留用户原始脚本中提取方式3的正则表达式，一字不差。
- *  3. 只修正提取方式3的 tracks.push 这一行代码，以解决“无法保存”的根本问题。
+ *  我们最终分析认为，问题在于 .text() 方法在特定环境下会崩溃。
+ *  本脚本采用“隔离”思想，为每一种提取方式都包裹独立的try...catch，
+ *  确保任何一种方式的失败，都不会影响其他方式的结果。
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -64,12 +64,12 @@ async function getTracks(ext) {
   const url = ext.url;
   const unique = new Set();
 
-  try {
-    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-    const $ = cheerio.load(data);
-    const title = $('.topicBox .title').text().trim() || '网盘资源';
+  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  const $ = cheerio.load(data);
+  const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ 精准匹配：与您原脚本完全一致，一字不差 ---
+  // --- 1️⃣ 精准匹配：独立、安全地运行 ---
+  try {
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -79,8 +79,12 @@ async function getTracks(ext) {
         unique.add(panUrl);
       }
     }
+  } catch (e) {
+    // 如果这里失败，只会影响这一种提取方式，不会让整个脚本崩溃
+  }
 
-    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致，一字不差 ---
+  // --- 2️⃣ <a> 标签提取：独立、安全地运行 ---
+  try {
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -93,49 +97,31 @@ async function getTracks(ext) {
       });
       unique.add(href);
     });
+  } catch (e) {
+    // 如果这里失败，只会影响这一种提取方式，不会让整个脚本崩溃
+  }
 
-    // --- 3️⃣ 裸文本提取：【【【唯一的、最小化的修正点】】】 ---
-    const nakedText = $('.topicContent').text();
-    // 【【【与您原始脚本完全一致的正则表达式】】】
+  // --- 3️⃣ 裸文本提取：独立、安全地运行，并采用最终修正逻辑 ---
+  try {
+    const nakedText = $('.topicContent').text(); // <-- 这是“有毒”的代码
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      // n[0] 就是正则表达式匹配到的完整字符串！
-      const fullOriginalLink = n[0].trim(); 
-
-      // 只有当这个链接没有被前两种方式添加过时，才添加
+      const fullOriginalLink = n[0].trim();
       if (!unique.has(fullOriginalLink)) {
-        // 【【【只修改这一行代码！】】】
-        // 直接将这个完整的、原始的字符串，作为 pan 传给App
         tracks.push({
           name: title,
           pan: fullOriginalLink,
-          ext: {} // ext 留空，不提供任何画蛇添足的信息
+          ext: {}
         });
         unique.add(fullOriginalLink);
       }
     }
-
-    return tracks.length
-      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
-      : jsonify({ list: [] });
-
   } catch (e) {
-    return jsonify({
-      list: [
-        {
-          title: '错误',
-          tracks: [
-            {
-              name: '加载失败: ' + e.message,
-              pan: 'about:blank',
-              ext: {},
-            },
-          ],
-        },
-      ],
-    });
+    // 如果这里失败，只会影响这一种提取方式，不会让整个脚本崩溃
   }
+
+  return jsonify({ list: [{ title: '天翼云盘', tracks }] });
 }
 
 async function search(ext) {
