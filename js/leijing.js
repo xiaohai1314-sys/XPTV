@@ -1,7 +1,4 @@
-/*
- * 雷鲸资源站脚本 - 纯前端终极精准修正版3
- * 仅在原始脚本的第2部分(a标签提取)中增加URL编码逻辑
- */
+/* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
@@ -20,8 +17,10 @@ const appConfig = {
   ],
 };
 
-// 其他函数 getConfig, getCards, getPlayinfo, search 保持不变
-async function getConfig( ) { return jsonify(appConfig); }
+async function getConfig( ) {
+  return jsonify(appConfig);
+}
+
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -35,7 +34,7 @@ async function getCards(ext) {
     const href = a.attr('href');
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
       vod_name: title,
@@ -46,8 +45,10 @@ async function getCards(ext) {
   });
   return jsonify({ list: cards });
 }
-async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
 
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
+}
 
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -60,7 +61,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ 精准匹配：与您原脚本完全一致 ---
+    /* 1️⃣ 精准匹配：保持不变 */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -71,40 +72,37 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 2️⃣ <a> 标签提取：【唯一修正点】在这里处理混合链接 ---
+    /* 2️⃣ <a> 标签提取：保持不变 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
-      let finalUrl = $(el).attr('href');
-      if (!finalUrl || unique.has(finalUrl)) return;
-
-      // 检查 href 属性本身是否就是混合链接
-      const separatorIndex = finalUrl.search(/[（(]访问码/);
-      if (separatorIndex !== -1) {
-        // 如果是混合链接，则进行URL编码
-        const pureUrl = finalUrl.substring(0, separatorIndex);
-        const suffix = finalUrl.substring(separatorIndex);
-        finalUrl = pureUrl + encodeURIComponent(suffix); // 更新 finalUrl 为编码后的链接
-        
-        tracks.push({
-          name: $(el).text().trim() || title,
-          pan: finalUrl, // 提交编码后的单一链接
-          type: 'jump',
-          ext: { accessCode: '' }, // accessCode 必须为空
-        });
-
-      } else {
-        // 如果不是混合链接，则按原逻辑处理
-        const ctx = $(el).parent().text();
-        const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-        tracks.push({
-          name: $(el).text().trim() || title,
-          pan: finalUrl,
-          ext: { accessCode: code ? code[1] : '' },
-        });
-      }
-      unique.add(finalUrl);
+      const href = $(el).attr('href');
+      if (!href || unique.has(href)) return;
+      const ctx = $(el).parent().text();
+      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      tracks.push({
+        name: $(el).text().trim() || title,
+        pan: href,
+        ext: { accessCode: code ? code[1] : '' },
+      });
+      unique.add(href);
     });
 
-    // --- 不再需要第3部分 ---
+    /* 3️⃣ 裸文本提取：新增 jump 跳转 */
+    const nakedText = $('.topicContent').text();
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
+    let n;
+    while ((n = nakedRe.exec(nakedText)) !== null) {
+      const rawUrl = n[1];
+      const accessCode = n[2];
+      if (!unique.has(rawUrl)) {
+        tracks.push({
+          name: title,
+          pan: rawUrl,
+          type: 'jump',
+          ext: { accessCode }
+        });
+        unique.add(rawUrl);
+      }
+    }
 
     return tracks.length
       ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
@@ -112,7 +110,18 @@ async function getTracks(ext) {
 
   } catch (e) {
     return jsonify({
-      list: [{ title: '脚本执行错误', tracks: [{ name: e.message, pan: 'about:blank', ext: { accessCode: '' } }] }],
+      list: [
+        {
+          title: '错误',
+          tracks: [
+            {
+              name: '加载失败',
+              pan: 'about:blank',
+              ext: { accessCode: '' },
+            },
+          ],
+        },
+      ],
     });
   }
 }
