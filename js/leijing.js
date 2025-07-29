@@ -74,17 +74,42 @@ async function getTracks(ext) {
 
     /* 2️⃣ <a> 标签提取：*** 此处是唯一修改的部分 *** */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
-      const href = $(el).attr('href');
-      if (!href || unique.has(href)) return;
-      const ctx = $(el).parent().text();
-      // 修改正则表达式，增加对中文括号和冒号的支持
-      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      tracks.push({
-        name: $(el).text().trim() || title,
-        pan: href,
-        ext: { accessCode: code ? code[1] : '' },
-      });
-      unique.add(href);
+        const originalHref = $(el).attr('href');
+        if (!originalHref) return;
+
+        let cleanHref = originalHref;
+        let accessCode = '';
+
+        // 正则表达式，用于从一个字符串中分离出纯净URL和访问码
+        const universalRe = /^(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[\s\S]*?(?:访问码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/;
+        
+        // 首先尝试从href属性本身进行解析
+        const hrefMatch = originalHref.match(universalRe);
+
+        if (hrefMatch) {
+            // 情况1：访问码在href属性内部 (如辅助文件1)
+            cleanHref = hrefMatch[1];
+            accessCode = hrefMatch[2];
+        } else {
+            // 情况2：href是纯净的，从旁边的文本中寻找访问码 (如辅助文件2的原有逻辑)
+            const ctx = $(el).parent().text();
+            const codeMatch = ctx.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
+            if (codeMatch) {
+                accessCode = codeMatch[1];
+            }
+        }
+        
+        // 确保最终的链接是纯净的
+        cleanHref = cleanHref.split(/[(（]/)[0].trim();
+
+        if (unique.has(cleanHref)) return;
+
+        tracks.push({
+            name: $(el).text().trim() || title,
+            pan: cleanHref,
+            ext: { accessCode: accessCode },
+        });
+        unique.add(cleanHref);
     });
 
     /* 3️⃣ 裸文本提取：保持不变 */
