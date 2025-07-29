@@ -86,21 +86,29 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    /* 3️⃣ 裸文本提取：*** 此处是唯一修改的部分 *** */
-    const nakedText = $('.topicContent').html();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[\s\S]*?（访问码[：\s]*([a-zA-Z0-9]{4,6})）/gi;
-    let n;
-    while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1];
-      const accessCode = n[2];
-      if (!unique.has(rawUrl)) {
-        tracks.push({
-          name: title,
-          pan: rawUrl,
-          ext: { accessCode }
-        });
-        unique.add(rawUrl);
-      }
+    /* 3️⃣ HTML内容穿透提取：*** 此处是唯一修改的部分 *** */
+    const contentHtml = $('.topicContent').html();
+    if (contentHtml) {
+        const linkRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)/g;
+        const codeRe = /访问码[：\s]*([a-zA-Z0-9]{4,6})/;
+        let linkMatch;
+        while ((linkMatch = linkRe.exec(contentHtml)) !== null) {
+            const rawUrl = linkMatch[1];
+            if (!unique.has(rawUrl)) {
+                // 在链接出现位置之后，查找最近的访问码
+                const searchArea = contentHtml.substring(linkMatch.index);
+                const codeMatch = searchArea.match(codeRe);
+                if (codeMatch) {
+                    const accessCode = codeMatch[1];
+                    tracks.push({
+                        name: title,
+                        pan: rawUrl,
+                        ext: { accessCode }
+                    });
+                    unique.add(rawUrl);
+                }
+            }
+        }
     }
 
     return tracks.length
