@@ -1,11 +1,11 @@
-/* 雷鲸资源站脚本 - 2025-07-29-final-cleanlink */
+/* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072914,
-  title: '雷鲸·cleanLink修正版',
+  ver: 2025072915,
+  title: '雷鲸·jump跳转修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
@@ -86,7 +86,7 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    /* 3️⃣ 裸文本修正：去除中文括号尾缀 + 解析访问码 */
+    /* 3️⃣ 裸文本提取：新增 jump 跳转 */
     const nakedText = $('.topicContent').text();
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
@@ -97,7 +97,8 @@ async function getTracks(ext) {
         tracks.push({
           name: title,
           pan: rawUrl,
-          ext: { accessCode },
+          type: 'jump',
+          ext: { accessCode }
         });
         unique.add(rawUrl);
       }
