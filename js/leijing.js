@@ -22,7 +22,7 @@ const appConfig = {
   ],
 };
 
-const PUPPETEER_API_URL = 'http://您的电脑IP地址:3002/api/clickAndGetFinalUrl';
+const PUPPETEER_API_URL = 'http://192.168.10.111:3002/api/clickAndGetFinalUrl';
 
 
 async function getConfig( ) {
