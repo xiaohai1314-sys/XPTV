@@ -1,5 +1,5 @@
 /* 
- * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final (最终混合模式版)
+ * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final (最终修正版 - 已添加海报)
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -8,8 +8,6 @@ const cheerio = createCheerio();
 // 【需要您修改的地方】
 // 请将此地址替换为您部署的后端服务的实际公网地址
 const BACKEND_API_URL = 'https://your-backend-server.com/api/extractNakedText'; 
-
-// --- 以下部分与您的原始脚本完全一致 ---
 
 const appConfig = {
   ver: 2025072915,
@@ -29,6 +27,7 @@ async function getConfig( ) {
   return jsonify(appConfig);
 }
 
+// --- getCards 函数：已添加海报抓取逻辑 ---
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -42,11 +41,18 @@ async function getCards(ext) {
     const href = a.attr('href');
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
+    
+    // 【新增的海报提取逻辑】
+    // 查找图片元素，通常在 .topic-img a img 结构下
+    // 使用 data-src 或 src 属性来获取图片链接
+    const pic = $(el).find('.topic-img img').attr('data-src') || $(el).find('.topic-img img').attr('src');
+
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    
     cards.push({
       vod_id: href,
       vod_name: title,
-      vod_pic: '',
+      vod_pic: pic || '', // 如果找到图片则使用，否则为空
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -58,7 +64,7 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// --- getTracks 函数：在您的原始逻辑基础上，增加后端调用 ---
+// --- getTracks 函数：保持我们之前确认的最终版本 ---
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = ext.url;
@@ -66,13 +72,13 @@ async function getTracks(ext) {
   const unique = new Set();
   let title = '网盘资源';
 
-  // --- 您的原始提取逻辑 (保持原样，确保基础功能) ---
+  // --- 您的原始提取逻辑 (保持原样) ---
   try {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
     title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // 1️⃣ 精准匹配 (工作正常)
+    // 1️⃣ 精准匹配 (一字不差)
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -83,7 +89,7 @@ async function getTracks(ext) {
       }
     }
 
-    // 2️⃣ <a> 标签提取 (工作正常)
+    // 2️⃣ <a> 标签提取 (一字不差)
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -93,7 +99,7 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // 3️⃣ 裸文本提取 (前端尝试，即使失败也没关系)
+    // 3️⃣ 裸文本提取 (前端尝试)
     const nakedText = $('.topicContent').text();
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
@@ -109,7 +115,6 @@ async function getTracks(ext) {
   }
 
   // --- 【新增的后端调用逻辑】 ---
-  // 这是一个独立的补充步骤，它的成败不影响前面的结果
   try {
     const backendUrl = `${BACKEND_API_URL}?url=${encodeURIComponent(url)}`;
     const response = await $fetch.get(backendUrl);
@@ -117,13 +122,13 @@ async function getTracks(ext) {
     if (Array.isArray(backendTracks)) {
       backendTracks.forEach(track => {
         if (track.pan && !unique.has(track.pan)) {
-          tracks.push(track); // 将后端找到的、且不重复的链接补充进来
+          tracks.push(track);
           unique.add(track.pan);
         }
       });
     }
   } catch (e) {
-    // 如果后端调用失败，脚本不会报错，只会静默地跳过这一步
+    // 调用后端失败，静默跳过
   }
 
   return jsonify({ list: tracks.length ? [{ title: '天翼云盘', tracks }] : [] });
@@ -142,11 +147,12 @@ async function search(ext) {
     const href = a.attr('href');
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
+    const pic = $(el).find('.topic-img img').attr('data-src') || $(el).find('.topic-img img').attr('src');
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
       vod_name: title,
-      vod_pic: '',
+      vod_pic: pic || '',
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
