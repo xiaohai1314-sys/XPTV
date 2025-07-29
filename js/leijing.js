@@ -1,7 +1,7 @@
 /* 雷鲸资源站脚本 - 2025-07-29-jump-naked-final */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
-const cheerio = createCheerio(); // <--- 已将此行修正回正确的全局位置
+const cheerio = createCheerio();
 
 const appConfig = {
   ver: 2025072915,
@@ -72,11 +72,12 @@ async function getTracks(ext) {
       }
     }
 
-    /* 2️⃣ <a> 标签提取：保持不变 */
+    /* 2️⃣ <a> 标签提取：*** 此处是唯一修改的部分 *** */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
+      // 修改正则表达式，增加对中文括号和冒号的支持
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
       tracks.push({
         name: $(el).text().trim() || title,
@@ -86,29 +87,22 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    /* 3️⃣ 后备纯文本提取：*** 此处是唯一修改的部分 *** */
-    const content$ = $('.topicContent');
-    if (content$.length > 0) {
-        const cleanHtml = content$.clone();
-        cleanHtml.find('script, style').remove();
-        let plainText = cleanHtml.html().replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n');
-        plainText = plainText.replace(/<[^>]+>/g, ' ');
-        plainText = plainText.replace(/&nbsp;/g, ' ').replace(/&[a-zA-Z]+;/g, '');
-
-        const backupRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[\s\S]*?（访问码[：\s]*([a-zA-Z0-9]{4,6})）/g;
-        let backupMatch;
-        while ((backupMatch = backupRe.exec(plainText)) !== null) {
-            const rawUrl = backupMatch[1];
-            if (!unique.has(rawUrl)) {
-                const accessCode = backupMatch[2];
-                tracks.push({
-                    name: title,
-                    pan: rawUrl,
-                    ext: { accessCode }
-                });
-                unique.add(rawUrl);
-            }
-        }
+    /* 3️⃣ 裸文本提取：保持不变 */
+    const nakedText = $('.topicContent').text();
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
+    let n;
+    while ((n = nakedRe.exec(nakedText)) !== null) {
+      const rawUrl = n[1];
+      const accessCode = n[2];
+      if (!unique.has(rawUrl)) {
+        tracks.push({
+          name: title,
+          pan: rawUrl,
+          type: 'jump',
+          ext: { accessCode }
+        });
+        unique.add(rawUrl);
+      }
     }
 
     return tracks.length
