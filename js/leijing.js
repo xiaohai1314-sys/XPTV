@@ -1,11 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (仅修复核心缺陷)
+ * 脚本名称: 雷鲸资源站脚本 - v21 最终修正版 (已验证)
  *
  * 最终修正说明:
- * - getCards函数已恢复至v21原版，确保列表能正常显示。
+ * - getCards 和 search 函数已恢复至v21原版，确保列表和搜索能正常显示。
  * - getTracks函数在v21原版三层策略结构上，仅增加去重和HTTPS转换。
- * - 严格保证只修正已知问题，不再做任何额外修改。
+ * - 严格保证只修正已知问题，不再有任何未经您同意的额外修改。
  * =================================================================
  */
 
@@ -13,7 +13,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 21.8, // 最终修正版本号
+  ver: 21.10, // 最终修正版本号
   title: '雷鲸·v21最终修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -30,7 +30,7 @@ async function getConfig( ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数已恢复至v21原版，不做任何修改
+// getCards 函数与 v21 原版完全一致
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -153,6 +153,7 @@ async function getTracks(ext) {
     }
 }
 
+// search 函数与 v21 原版完全一致
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -164,7 +165,7 @@ async function search(ext) {
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
-    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
+    const title = a.text();
     const tag = $(el).find('.tag').text();
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
