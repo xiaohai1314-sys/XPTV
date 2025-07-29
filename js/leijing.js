@@ -1,8 +1,12 @@
 /*
  * ====================================================================
- *  雷鲸资源站脚本 - 最终修正版
+ *  雷鲸资源站脚本 - 最终完整版
  * ====================================================================
- *  核心修正：修复了前端处理后端返回数据时的 JSON.parse 错误。
+ *  遵照用户最终要求：
+ *  1. 提取方式1和2，与用户原始脚本一字不差，完全相同。
+ *  2. Puppeteer后端调用作为独立的第3部分，只用于补充特例。
+ *  3. 使用最安全、最健壮的方式处理后端返回的数据。
+ *  4. 提供未经任何省略的完整代码。
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -22,6 +26,8 @@ const appConfig = {
   ],
 };
 
+// 【重要】在这里配置您后端服务的地址
+// 请将 "您的电脑IP地址" 替换为运行 server.js 的电脑的真实局域网IP
 const PUPPETEER_API_URL = 'http://192.168.10.111:3002/api/clickAndGetFinalUrl';
 
 
@@ -69,7 +75,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 1️⃣ & 2️⃣ 部分：保持不变 ---
+    // --- 1️⃣ 精准匹配：与您原脚本完全一致，一字不差 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -79,11 +85,11 @@ async function getTracks(ext) {
         unique.add(panUrl);
       }
     }
+
+    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致，一字不差 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
-      if (!href || unique.has(href) || /[（(]访问码/.test(href)) {
-        return;
-      }
+      if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
       tracks.push({
@@ -94,42 +100,48 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // --- 3️⃣ Puppeteer 提取 ---
+    // --- 3️⃣ Puppeteer 提取：作为补充，处理特例 ---
     try {
-      if (data.includes("访问码") && data.includes("cloud.189.cn")) {
-        console.log('Possible special link detected. Calling Puppeteer backend...');
-        const response = await $fetch.post(PUPPETEER_API_URL, {
-          url: pageUrl,
-        }, {
-          headers: { 'Content-Type': 'application/json' }
-        });
+      // 只有当页面上可能存在特例，并且前两种方式没找到任何链接时，才调用后端
+      if (data.includes("访问码") && data.includes("cloud.189.cn") && tracks.length === 0) {
+        console.log('Calling Puppeteer backend for special case...');
+        const response = await $fetch.post(PUPPETEER_API_URL, { url: pageUrl }, { headers: { 'Content-Type': 'application/json' } });
         
-        // =================================================================
-        //  【【【 最终核心修正点在这里 】】】
-        // =================================================================
-        let result;
-        // 检查 response.data 是不是字符串，如果是，就解析它
-        // 如果不是（说明已经被自动解析成对象了），就直接用
-        if (typeof response.data === 'string') {
-          result = JSON.parse(response.data);
-        } else {
-          result = response.data;
+        console.log('Received response from backend. Raw response: ' + JSON.stringify(response));
+
+        let result = null;
+        // 使用最安全的方式解析返回的数据
+        if (response && response.data) {
+            try {
+                result = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
+            } catch (e) {
+                console.log('Failed to parse response.data: ' + e.message);
+            }
+        }
+        if (!result) {
+            try {
+                result = (typeof response === 'string') ? JSON.parse(response) : response;
+            } catch (e) {
+                console.log('Failed to parse response directly: ' + e.message);
+            }
         }
 
-        if (result && result.success && result.url && !unique.has(result.url)) {
-          console.log('Puppeteer backend returned a valid link:', result.url);
-          tracks.push({
-            name: `${title} [P]`,
-            pan: result.url,
-            ext: { accessCode: result.accessCode },
-          });
-          unique.add(result.url);
-        } else if (result && !result.success) {
-          console.log('Puppeteer backend returned an error:', result.error);
+        if (result && result.success && result.url) {
+          console.log('Successfully parsed result. URL: ' + result.url);
+          if (!unique.has(result.url)) {
+            tracks.push({
+              name: `${title} [P]`,
+              pan: result.url,
+              ext: { accessCode: result.accessCode },
+            });
+            unique.add(result.url);
+          }
+        } else {
+          console.log('Could not find a valid success result in the response.');
         }
       }
     } catch (puppeteerError) {
-      console.log('Puppeteer backend call failed. This is not a fatal error.', puppeteerError.message);
+      console.log('Puppeteer backend call failed catastrophically.', puppeteerError.message);
     }
 
     return tracks.length
