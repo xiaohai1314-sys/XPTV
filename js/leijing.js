@@ -1,7 +1,7 @@
 /**
  * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28 最终完整版（第三部分修正+链接格式统一）
- * 说明：修正第三部分匹配逻辑，并统一转换短链为有效长链格式
+ * 雷鲸网盘资源提取脚本 - 2025-07-28-appletv-final-pure
+ * 原则：只改动第三部分中的裸文本提取段，其他全部保持一字不动
  * =================================================================
  */
 
@@ -9,8 +9,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072809,
-  title: '雷鲸·链接格式统一版',
+  ver: 2025072813,
+  title: '雷鲸·AppleTV裸文兼容版',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
@@ -22,7 +22,9 @@ const appConfig = {
   ],
 };
 
-async function getConfig() { return jsonify(appConfig); }
+async function getConfig() {
+  return jsonify(appConfig);
+}
 
 async function getCards(ext) {
   ext = argsify(ext);
@@ -38,23 +40,19 @@ async function getCards(ext) {
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
   });
   return jsonify({ list: cards });
 }
 
-async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
-
-// 统一转换天翼云盘链接为有效格式
-function normalizePanUrl(url) {
-  // 处理短链格式：/t/xxx → /web/share?code=xxx
-  const shortMatch = url.match(/cloud\.189\.cn\/t\/([a-zA-Z0-9]+)/i);
-  if (shortMatch) {
-    return `https://cloud.189.cn/web/share?code=${shortMatch[1]}`;
-  }
-  
-  // 处理编码问题：删除URL中的多余字符（如中文括号）
-  return url.replace(/[^a-zA-Z0-9?=&%.:\/#_-]|%EF%BC%88|%EF%BC%89/g, '');
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
 }
 
 async function getTracks(ext) {
@@ -72,8 +70,7 @@ async function getTracks(ext) {
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
-      const rawUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
-      const panUrl = normalizePanUrl(rawUrl);
+      const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl)) {
         tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
         unique.add(panUrl);
@@ -82,37 +79,31 @@ async function getTracks(ext) {
 
     /* 2️⃣ 保留 <a> 标签提取 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
-      let href = $(el).attr('href');
+      const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
-      
-      // 统一链接格式
-      href = normalizePanUrl(href);
-      if (unique.has(href)) return;
-      
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
-      unique.add(href);
+      if (!unique.has(href)) {
+        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
+        unique.add(href);
+      }
     });
 
-    /* 3️⃣ 仅第三部分：裸文本→干净短链（与1、2部分一致） */
+    /* 3️⃣ 裸文本提取（仅此段修改，Apple TV 兼容拼接） */
     const nakedText = $('.topicContent').text();
-    // 修正后的正则表达式：只匹配干净的URL部分
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))/gi;
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[^）]*[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      let cleanUrl = n[1];
-      // 统一链接格式
-      cleanUrl = normalizePanUrl(cleanUrl);
-      if (unique.has(cleanUrl)) continue;
-      
-      // 在匹配位置后查找访问码
-      const afterText = nakedText.substring(n.index + n[0].length, n.index + n[0].length + 50);
-      const codeMatch = afterText.match(/(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i);
-      const code = codeMatch ? codeMatch[1] : '';
-      
-      tracks.push({ name: title, pan: cleanUrl, ext: { accessCode: code } });
-      unique.add(cleanUrl);
+      const rawUrl = n[1].split(/[（(]/)[0]; // 去除中文括号尾巴
+      const accessCode = n[2];
+      const resourceId = rawUrl.match(/(?:t\/|code=)([a-zA-Z0-9]+)/)?.[1];
+      if (!resourceId) continue;
+
+      const panUrl = `https://cloud.189.cn/web/share?code=${resourceId}&accessCode=${accessCode}`;
+      if (!unique.has(panUrl)) {
+        tracks.push({ name: title, pan: panUrl, ext: { accessCode } });
+        unique.add(panUrl);
+      }
     }
 
     return tracks.length
@@ -120,7 +111,20 @@ async function getTracks(ext) {
       : jsonify({ list: [] });
 
   } catch (e) {
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
+    return jsonify({
+      list: [
+        {
+          title: '错误',
+          tracks: [
+            {
+              name: '加载失败',
+              pan: 'about:blank',
+              ext: { accessCode: '' },
+            },
+          ],
+        },
+      ],
+    });
   }
 }
 
@@ -138,7 +142,13 @@ async function search(ext) {
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({ vod_id: href, vod_name: title, vod_pic: '', vod_remarks: tag, ext: { url: `${appConfig.site}/${href}` } });
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
   });
   return jsonify({ list: cards });
 }
