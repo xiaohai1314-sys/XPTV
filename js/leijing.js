@@ -1,19 +1,16 @@
 /*
  * ====================================================================
- *  雷鲸资源站脚本 - 最终完整测试版 (包含所有功能)
+ *  雷鲸资源站脚本 - 最终测试版 (严格遵守用户指示)
  * ====================================================================
  *  核心逻辑：
- *  1. 这是一个包含所有功能的完整脚本。
- *  2. 严格保留提取方式1和2为用户原始版本，一字不差。
- *  3. 对提取方式3，使用一个更强大的正则进行尝试。
- *  4. 如果提取方式3失败，则将详情页全部文本作为一个备用链接，
- *     以便用户能复制并提供给我们进行最终分析。
+ *  1. 严格保留用户原始脚本中的提取方式1和2，一字不差。
+ *  2. 只修正提取方式3，使其遵循“提取完整原始字符串”的原则。
+ *  3. 除此之外，不进行任何其他画蛇添足的修改。
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
-// 1. 分类和基础配置 (appConfig)
 const appConfig = {
   ver: 2025072915,
   title: '雷鲸·jump跳转修正版',
@@ -28,12 +25,10 @@ const appConfig = {
   ],
 };
 
-// 2. 获取配置函数 (getConfig )
-async function getConfig() {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
-// 3. 获取分类卡片列表函数 (getCards)
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -59,12 +54,10 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. 播放信息函数 (getPlayinfo) - 通常用不到，保持为空
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 5. 获取详情页链接函数 (getTracks) - 我们聚焦的核心
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -76,7 +69,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // --- 提取方式 1 & 2：与您原脚本完全一致，一字不差 ---
+    // --- 1️⃣ 精准匹配：与您原脚本完全一致，一字不差 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -86,6 +79,8 @@ async function getTracks(ext) {
         unique.add(panUrl);
       }
     }
+
+    // --- 2️⃣ <a> 标签提取：与您原脚本完全一致，一字不差 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
@@ -99,32 +94,24 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // --- 提取方式 3：裸文本提取 - 【【【最终的、合理的测试点】】】 ---
+    // --- 3️⃣ 裸文本提取：【【【唯一的、最终的修正点】】】 ---
     const nakedText = $('.topicContent').text();
+    // 一个更强大的正则表达式，能匹配中英文括号和各种空格
     const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+(?:[\s\S]{0,10})?[\(（\uff08][\s\S]*?[:：\uff1a\s]*[a-zA-Z0-9]{4,6}[\)）\uff09])/gi;
-    
-    let matchFoundInNakedText = false;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      matchFoundInNakedText = true;
-      const fullOriginalLink = n[0].trim();
+      const fullOriginalLink = n[0].trim(); // n[0] 就是正则表达式匹配到的完整字符串！
+
+      // 只有当这个链接没有被前两种方式添加过时，才添加
       if (!unique.has(fullOriginalLink)) {
+        // 直接将这个完整的、原始的字符串，作为 pan 传给App
         tracks.push({
           name: title,
           pan: fullOriginalLink,
-          ext: {}
+          ext: {} // ext 留空，不提供任何画蛇添足的信息
         });
         unique.add(fullOriginalLink);
       }
-    }
-
-    // 如果上面所有方式都失败了，并且页面上确实有“访问码”字样
-    if (tracks.length === 0 && (data.includes('访问码') || data.includes('accessCode'))) {
-        tracks.push({
-            name: `[请复制这里的全部内容给我] ${nakedText}`,
-            pan: 'about:blank', // 只是个占位符
-            ext: {}
-        });
     }
 
     return tracks.length
@@ -133,12 +120,22 @@ async function getTracks(ext) {
 
   } catch (e) {
     return jsonify({
-      list: [{ title: '错误', tracks: [{ name: '加载失败: ' + e.message, pan: 'about:blank', ext: {} }] }],
+      list: [
+        {
+          title: '错误',
+          tracks: [
+            {
+              name: '加载失败: ' + e.message,
+              pan: 'about:blank',
+              ext: {},
+            },
+          ],
+        },
+      ],
     });
   }
 }
 
-// 6. 搜索函数 (search)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
