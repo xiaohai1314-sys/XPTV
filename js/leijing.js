@@ -1,15 +1,14 @@
-/* 
- * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final (最终混合模式版)
+/*
+ * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final - 前后端分离最终版
  */
 
+// --- 配置区 ---
+// 请将此地址替换为您部署的后端服务的实际公网或局域网地址
+const BACKEND_API_URL = 'http://192.168.10.111:3002/api/extractNakedText';
+
+// --- 核心代码区 (请勿修改 ) ---
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
-
-// 【需要您修改的地方】
-// 请将此地址替换为您部署的后端服务的实际公网地址
-const BACKEND_API_URL = 'http://192.168.10.111:3002/api/extractNakedText'; 
-
-// --- 以下部分与您的原始脚本完全一致 ---
 
 const appConfig = {
   ver: 2025072915,
@@ -42,11 +41,11 @@ async function getCards(ext) {
     const href = a.attr('href');
     const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
     const tag = $(el).find('.tag').text();
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
       vod_name: title,
-      vod_pic: '',
+      vod_pic: '', // 海报在详情页，此处留空
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -58,21 +57,18 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// --- getTracks 函数：在您的原始逻辑基础上，增加后端调用 ---
 async function getTracks(ext) {
   ext = argsify(ext);
-  const url = ext.url;
   const tracks = [];
+  const url = ext.url;
   const unique = new Set();
-  let title = '网盘资源';
 
-  // --- 您的原始提取逻辑 (保持原样，确保基础功能) ---
   try {
     const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
-    title = $('.topicBox .title').text().trim() || '网盘资源';
+    const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // 1️⃣ 精准匹配 (工作正常)
+    // 1️⃣ 精准匹配 (保持不变)
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -83,50 +79,53 @@ async function getTracks(ext) {
       }
     }
 
-    // 2️⃣ <a> 标签提取 (工作正常)
+    // 2️⃣ <a> 标签提取 (保持不变)
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
+      tracks.push({
+        name: $(el).text().trim() || title,
+        pan: href,
+        ext: { accessCode: code ? code[1] : '' },
+      });
       unique.add(href);
     });
 
-    // 3️⃣ 裸文本提取 (前端尝试，即使失败也没关系)
-    const nakedText = $('.topicContent').text();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code= )[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
-    let n;
-    while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1];
-      if (!unique.has(rawUrl)) {
-        tracks.push({ name: title, pan: rawUrl, type: 'jump', ext: { accessCode: n[2] } });
-        unique.add(rawUrl);
+    // 3️⃣ 调用后端进行裸文本提取
+    if (BACKEND_API_URL) {
+      try {
+        const backendUrl = `${BACKEND_API_URL}?url=${encodeURIComponent(url)}`;
+        const { data: backendTracks } = await $fetch.get(backendUrl);
+        
+        // --- 【核心修正】---
+        // 确保后端返回的是一个数组，并且有内容
+        if (Array.isArray(backendTracks) && backendTracks.length > 0) {
+          backendTracks.forEach(track => {
+            // 检查链接是否已存在，防止重复添加
+            if (track.pan && !unique.has(track.pan)) {
+              // 直接将后端返回的、结构正确的 track 对象推入数组
+              tracks.push(track);
+              unique.add(track.pan);
+            }
+          });
+        }
+      } catch (e) {
+        // 后端请求失败，不影响已有结果，静默处理
       }
     }
-  } catch (e) {
-    // 即使前端提取失败，也会继续尝试后端调用
-  }
 
-  // --- 【新增的后端调用逻辑】 ---
-  // 这是一个独立的补充步骤，它的成败不影响前面的结果
-  try {
-    const backendUrl = `${BACKEND_API_URL}?url=${encodeURIComponent(url)}`;
-    const response = await $fetch.get(backendUrl);
-    const backendTracks = JSON.parse(response.data); 
-    if (Array.isArray(backendTracks)) {
-      backendTracks.forEach(track => {
-        if (track.pan && !unique.has(track.pan)) {
-          tracks.push(track); // 将后端找到的、且不重复的链接补充进来
-          unique.add(track.pan);
-        }
-      });
-    }
-  } catch (e) {
-    // 如果后端调用失败，脚本不会报错，只会静默地跳过这一步
-  }
+    // 根据最终的 tracks 数组决定返回内容
+    return tracks.length
+      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+      : jsonify({ list: [] });
 
-  return jsonify({ list: tracks.length ? [{ title: '天翼云盘', tracks }] : [] });
+  } catch (e) {
+    return jsonify({
+      list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }],
+    });
+  }
 }
 
 async function search(ext) {
@@ -152,12 +151,4 @@ async function search(ext) {
     });
   });
   return jsonify({ list: cards });
-}
-
-function argsify(ext) {
-  if (typeof ext === 'string') try { return JSON.parse(ext); } catch (e) { return {}; }
-  return ext || {};
-}
-function jsonify(data) {
-  return JSON.stringify(data);
 }
