@@ -1,24 +1,19 @@
-/**
- * =================================================================
- * 雷鲸网盘资源提取脚本 - 2025-07-28-mobile-h5-final
- * 原则：只修改“裸文本提取”部分为 h5 跳转，其他全部保持不变
- * =================================================================
- */
+/* 雷鲸资源站脚本 - 2025-07-29-final-cleanlink */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
 const appConfig = {
-  ver: 2025072814,
-  title: '雷鲸·手机H5跳转兼容版',
+  ver: 2025072914,
+  title: '雷鲸·cleanLink修正版',
   site: 'https://www.leijing.xyz',
   tabs: [
-    { name: '剧集',       ext: { id: '?tagId=42204684250355' } },
-    { name: '电影',       ext: { id: '?tagId=42204681950354' } },
-    { name: '动漫',       ext: { id: '?tagId=42204792950357' } },
-    { name: '纪录片',     ext: { id: '?tagId=42204697150356' } },
-    { name: '综艺',       ext: { id: '?tagId=42210356650363' } },
-    { name: '影视原盘',   ext: { id: '?tagId=42212287587456' } },
+    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
+    { name: '电影', ext: { id: '?tagId=42204681950354' } },
+    { name: '动漫', ext: { id: '?tagId=42204792950357' } },
+    { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
+    { name: '综艺', ext: { id: '?tagId=42210356650363' } },
+    { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
   ],
 };
 
@@ -66,7 +61,7 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    /* 1️⃣ 精准匹配：链接(访问码：xxxx) */
+    /* 1️⃣ 精准匹配：保持不变 */
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+)|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
@@ -77,32 +72,34 @@ async function getTracks(ext) {
       }
     }
 
-    /* 2️⃣ 保留 <a> 标签提取 */
+    /* 2️⃣ <a> 标签提取：保持不变 */
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
       const ctx = $(el).parent().text();
       const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
-      if (!unique.has(href)) {
-        tracks.push({ name: $(el).text().trim() || title, pan: href, ext: { accessCode: code ? code[1] : '' } });
-        unique.add(href);
-      }
+      tracks.push({
+        name: $(el).text().trim() || title,
+        pan: href,
+        ext: { accessCode: code ? code[1] : '' },
+      });
+      unique.add(href);
     });
 
-    /* 3️⃣ 裸文本提取（仅此段修改为 h5 格式） */
+    /* 3️⃣ 裸文本修正：去除中文括号尾缀 + 解析访问码 */
     const nakedText = $('.topicContent').text();
-    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[^）]*[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/(?:t\/|web\/share\?code=)[a-zA-Z0-9]+)[（(]访问码[:：\s]*([a-zA-Z0-9]{4,6})[）)]/gi;
     let n;
     while ((n = nakedRe.exec(nakedText)) !== null) {
-      const rawUrl = n[1].split(/[（(]/)[0];
+      const rawUrl = n[1];
       const accessCode = n[2];
-      const resourceId = rawUrl.match(/(?:t\/|code=)([a-zA-Z0-9]+)/)?.[1];
-      if (!resourceId) continue;
-
-      const h5Url = `https://h5.cloud.189.cn/share.html#/t/${resourceId}?accessCode=${accessCode}`;
-      if (!unique.has(h5Url)) {
-        tracks.push({ name: title, pan: h5Url, ext: { accessCode } });
-        unique.add(h5Url);
+      if (!unique.has(rawUrl)) {
+        tracks.push({
+          name: title,
+          pan: rawUrl,
+          ext: { accessCode },
+        });
+        unique.add(rawUrl);
       }
     }
 
