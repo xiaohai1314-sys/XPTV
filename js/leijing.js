@@ -1,12 +1,7 @@
 /*
- * 雷鲸资源站脚本 - 2025-07-29-jump-naked-final - 前后端分离最终版1
+ * 雷鲸资源站脚本 - 纯前端完整最终版 (保留1、2，修正3)
  */
 
-// --- 配置区 ---
-// 请将此地址替换为您部署的后端服务的实际公网或局域网地址
-const BACKEND_API_URL = 'http://192.168.10.111:3002/api/extractNakedText';
-
-// --- 核心代码区 (请勿修改 ) ---
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
@@ -45,7 +40,7 @@ async function getCards(ext) {
     cards.push({
       vod_id: href,
       vod_name: title,
-      vod_pic: '', // 海报在详情页，此处留空
+      vod_pic: '',
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -68,55 +63,68 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     const title = $('.topicBox .title').text().trim() || '网盘资源';
 
-    // 1️⃣ 精准匹配 (保持不变)
+    // --- 1️⃣ 精准匹配：完全保持不变 ---
     const precise = /https?:\/\/cloud\.189\.cn\/(?:t\/([a-zA-Z0-9]+ )|web\/share\?code=([a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let m;
     while ((m = precise.exec(data)) !== null) {
       const panUrl = `https://cloud.189.cn/${m[1] ? 't/' + m[1] : 'web/share?code=' + m[2]}`;
       if (!unique.has(panUrl )) {
-        tracks.push({ name: title, pan: panUrl, ext: { accessCode: m[3] } });
+        // 分离链接和访问码，适用于需要手动输入的App
+        tracks.push({ name: `${title} (访问码: ${m[3]})`, pan: panUrl, ext: { accessCode: '' } });
         unique.add(panUrl);
       }
     }
 
-    // 2️⃣ <a> 标签提取 (保持不变)
+    // --- 2️⃣ <a> 标签提取：完全保持不变 ---
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const href = $(el).attr('href');
       if (!href || unique.has(href)) return;
+      
+      // 检查是否是混合链接，如果是，则跳过，交给第3部分处理
+      if (/[（(]访问码/.test(href)) {
+          return; 
+      }
+
       const ctx = $(el).parent().text();
-      const code = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      const codeMatch = /(?:访问码|密码|提取码|code)\s*[:：\s]*([a-zA-Z0-9]{4,6})/i.exec(ctx);
+      const accessCode = codeMatch ? codeMatch[1] : '';
+      
+      // 分离链接和访问码
       tracks.push({
-        name: $(el).text().trim() || title,
+        name: `${$(el).text().trim() || title} (访问码: ${accessCode})`,
         pan: href,
-        ext: { accessCode: code ? code[1] : '' },
+        ext: { accessCode: '' },
       });
       unique.add(href);
     });
 
-    // 3️⃣ 调用后端进行裸文本提取
-    if (BACKEND_API_URL) {
-      try {
-        const backendUrl = `${BACKEND_API_URL}?url=${encodeURIComponent(url)}`;
-        const { data: backendTracks } = await $fetch.get(backendUrl);
-        
-        // --- 【核心修正】---
-        // 确保后端返回的是一个数组，并且有内容
-        if (Array.isArray(backendTracks) && backendTracks.length > 0) {
-          backendTracks.forEach(track => {
-            // 检查链接是否已存在，防止重复添加
-            if (track.pan && !unique.has(track.pan)) {
-              // 直接将后端返回的、结构正确的 track 对象推入数组
-              tracks.push(track);
-              unique.add(track.pan);
-            }
-          });
-        }
-      } catch (e) {
-        // 后端请求失败，不影响已有结果，静默处理
+    // --- 3️⃣ 裸文本提取：使用URL编码修正 ---
+    const contentToParse = $('.topicContent').html(); // 使用 .html() 获取原始HTML内容
+    // 正则表达式：捕获链接的前半部分(pureUrl)和后半部分(suffix)
+    const re = /(https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9?=&_.\/-]+ )([（(]访问码[:：\s]*[a-zA-Z0-9]{4,6}[）)])/gi;
+    
+    let n;
+    while ((n = re.exec(contentToParse)) !== null) {
+      const pureUrl = n[1];
+      const suffix = n[2];
+      
+      // 将后缀进行URL编码
+      const encodedSuffix = encodeURIComponent(suffix);
+      
+      // 拼接成最终的、App能识别的完整链接
+      const finalUrl = pureUrl + encodedSuffix;
+
+      if (!unique.has(finalUrl)) {
+        tracks.push({ 
+          name: title,
+          pan: finalUrl,
+          type: 'jump', 
+          ext: { accessCode: '' }
+        });
+        unique.add(finalUrl);
       }
     }
 
-    // 根据最终的 tracks 数组决定返回内容
     return tracks.length
       ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
       : jsonify({ list: [] });
