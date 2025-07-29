@@ -1,6 +1,6 @@
 /*
- * 雷鲸资源站脚本 - 纯前端URL编码终极稳定版1
- * 保留1、2，仅修正3，采用最安全的方式实现URL编码
+ * 雷鲸资源站脚本 - 纯前端最终正确版2
+ * 保留1、2，并基于对 .text() 和 .html() 的正确理解修正第3部分
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0 Safari/537.36';
@@ -22,7 +22,30 @@ const appConfig = {
 
 // 其他函数 getConfig, getCards, getPlayinfo, search 保持不变
 async function getConfig( ) { return jsonify(appConfig); }
-async function getCards(ext) { /* ...与您原脚本一致... */ }
+async function getCards(ext) {
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  const url = `${appConfig.site}/${id}&page=${page}`;
+  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  const $ = cheerio.load(data);
+  const cards = [];
+  $('.topicItem').each((_, el) => {
+    if ($(el).find('.cms-lock-solid').length) return;
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
+    const tag = $(el).find('.tag').text();
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
+}
 async function getPlayinfo(ext) { return jsonify({ urls: [] }); }
 
 
@@ -62,33 +85,28 @@ async function getTracks(ext) {
       unique.add(href);
     });
 
-    // --- 3️⃣ 裸文本提取：终极安全URL编码方案 ---
-    const nakedText = $('.topicContent').text();
-    // 步骤一：用一个非常简单的正则，只找到包含“访问码”的混合链接文本
-    const findRe = /https?:\/\/cloud\.189\.cn[^\s]+?访问码[^\s ）)]+[）)]/g;
-    const mixedUrls = nakedText.match(findRe) || [];
+    // --- 3️⃣ 裸文本提取：【唯一修正点】使用 .html() 来查找 ---
+    const contentHtml = $('.topicContent').html(); // 【关键修正】使用 .html() 而不是 .text()
+    
+    // 正则表达式：查找混合链接
+    const nakedRe = /(https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9?=&_.\/-]+ )([（(]访问码[:：\s]*[a-zA-Z0-9]{4,6}[）)])/gi;
+    
+    let n;
+    while ((n = nakedRe.exec(contentHtml)) !== null) {
+      const pureUrl = n[1];
+      const suffix = n[2];
+      
+      const encodedSuffix = encodeURIComponent(suffix);
+      const finalUrl = pureUrl + encodedSuffix;
 
-    // 步骤二：遍历找到的每一个混合链接
-    for (const mixedUrl of mixedUrls) {
-      // 步骤三：用字符串分割来分离链接和后缀
-      const separatorIndex = mixedUrl.search(/[（(]访问码/);
-      if (separatorIndex !== -1) {
-        const pureUrl = mixedUrl.substring(0, separatorIndex);
-        const suffix = mixedUrl.substring(separatorIndex);
-        
-        // 步骤四：URL编码
-        const encodedSuffix = encodeURIComponent(suffix);
-        const finalUrl = pureUrl + encodedSuffix;
-
-        if (!unique.has(finalUrl)) {
-          tracks.push({ 
-            name: title,
-            pan: finalUrl, // 【关键】提交编码后的单一链接
-            type: 'jump', 
-            ext: { accessCode: '' } // 【关键】accessCode必须为空
-          });
-          unique.add(finalUrl);
-        }
+      if (!unique.has(finalUrl)) {
+        tracks.push({ 
+          name: title,
+          pan: finalUrl,
+          type: 'jump', 
+          ext: { accessCode: '' }
+        });
+        unique.add(finalUrl);
       }
     }
 
@@ -101,34 +119,6 @@ async function getTracks(ext) {
       list: [{ title: '脚本执行错误', tracks: [{ name: e.message, pan: 'about:blank', ext: { accessCode: '' } }] }],
     });
   }
-}
-
-async function search(ext) { /* ...与您原脚本一致... */ }
-
-// 为了让代码完整，我把 getCards 和 search 的内容也补上
-async function getCards(ext) {
-  ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${appConfig.site}/${id}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-  const $ = cheerio.load(data);
-  const cards = [];
-  $('.topicItem').each((_, el) => {
-    if ($(el).find('.cms-lock-solid').length) return;
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text().replace(/【.*?】|（.*?）/g, '').trim();
-    const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: title,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
-  return jsonify({ list: cards });
 }
 
 async function search(ext) {
