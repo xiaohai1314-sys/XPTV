@@ -1,161 +1,202 @@
-//小改
-const cheerio = createCheerio()
+/**
+ * hmxz-frontend (海绵小站前端 - 最终版)
+ *
+ * 功能:
+ * - 与后端API交互，获取海绵小站的内容。
+ * - 支持精简后的分类浏览、搜索、详情查看。
+ * - 智能识别网盘类型并显示提取码。
+ */
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+// --- 配置区 ---
+// 【重要】请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.7:3000/api'; 
+// --- 配置区 ---
 
-const appConfig = {
-    ver: 1,
-    title: '云盘吧',
-    site: 'https://yunpan8.net',
+// XPTV App 环境函数
+function log(msg ) {
+  try { 
+    $log(`[海绵小站插件] ${msg}`); 
+  } catch (_) { 
+    console.log(`[海绵小站插件] ${msg}`); 
+  }
 }
+
+async function request(url) {
+  log(`发起请求: ${url}`);
+  try {
+    const response = await $fetch.get(url, {
+      headers: { 'Accept': 'application/json' },
+      timeout: 30000,
+    });
+    
+    if (response.status !== 200) {
+      throw new Error(`HTTP错误! 状态: ${response.status}`);
+    }
+    
+    const data = JSON.parse(response.data);
+    if (data.error) {
+      throw new Error(`API返回错误: ${data.error}`);
+    }
+    
+    log(`请求成功, 收到 ${data.list?.length || 0} 条数据`);
+    return data;
+  } catch (error) {
+    log(`请求失败: ${error.message}`);
+    return { error: true, message: error.message, list: [] };
+  }
+}
+
+// --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    let config = appConfig
-    config.tabs = await getTabs()
-    return jsonify(config)
-}
-
-async function getTabs() {
-    let url = appConfig.site + '/tags'
-    let tabs = []
-    let ignore = ['求助', '公告', '游戏', '书籍', '软件', '课程', '音乐', '其他', '百度网盘', '迅雷云盘']
-    function isIgnoreClassName(className) {
-        return ignore.some((element) => className.includes(element))
-    }
-
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-        },
-    })
-    const $ = cheerio.load(data)
-    const script = $('#flarum-json-payload').text()
-    const json = argsify(script)
-    json.apiDocument.data.forEach((e) => {
-        const name = e.attributes.name
-        if (isIgnoreClassName(name)) {
-            return
-        }
-        const id = e.attributes.slug
-        tabs.push({
-            name,
-            ext: {
-                id,
-            },
-        })
-    })
-
-    return tabs
+  log(`插件初始化，后端API地址: ${API_BASE_URL}`);
+  const appConfig = {
+    ver: 1,
+    title: '海绵小站',
+    site: API_BASE_URL,
+    cookie: '',
+    tabs: [
+      { name: '电影', ext: { id: 'forum-1.htm' } },
+      { name: '剧集', ext: { id: 'forum-2.htm' } },
+      { name: '动漫', ext: { id: 'forum-3.htm' } },
+      { name: '综艺', ext: { id: 'forum-5.htm' } }
+    ],
+  };
+  return jsonify(appConfig);
 }
 
 async function getCards(ext) {
-    ext = argsify(ext)
-    let cards = []
-    let { page = 1, id } = ext
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  log(`获取分类数据: id=${id}, page=${page}`);
+  
+  const url = `${API_BASE_URL}/vod?type_id=${encodeURIComponent(id)}&page=${page}`;
+  const data = await request(url);
 
-    const offset = 20 * (page - 1)
-    const url = `${appConfig.site}/api/discussions?include=user%2ClastPostedUser%2Ctags%2Ctags.parent%2CfirstPost&filter%5Btag%5D=${id}&sort&page%5Boffset%5D=${offset}`
+  if (data.error) {
+    log(`获取分类数据失败: ${data.message}`);
+    return jsonify({ list: [] });
+  }
 
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-        },
-    })
+  const cards = (data.list || []).map(item => ({
+    vod_id: item.vod_id,
+    vod_name: item.vod_name,
+    vod_pic: item.vod_pic || '',
+    vod_remarks: item.vod_remarks || '',
+    ext: { url: item.vod_id },
+  }));
 
-    const json = argsify(data)
-    const videos = json.data
-    videos.forEach((e) => {
-        const title = e.attributes.title
-        const match = title.match(/《(.*?)》/);
-        const dramaName = match && match[1] ? match[1] : title;
-        const id = e.attributes.slug
-        const createdAt = e.attributes.createdAt.split('+')[0].replace('T', ' ')
-
-        cards.push({
-            vod_id: id,
-            vod_name: dramaName,
-            vod_pic: '',
-            vod_pubdate: createdAt,
-            ext: {
-                id,
-            },
-        })
-    })
-
-    return jsonify({
-        list: cards,
-    })
+  log(`成功处理 ${cards.length} 条分类数据`);
+  return jsonify({ list: cards });
 }
 
 async function getTracks(ext) {
-    ext = argsify(ext)
-    let id = ext.id
-    let tracks = []
+  ext = argsify(ext);
+  const { url } = ext;
+  if (!url) {
+    log('获取详情失败: 缺少URL参数');
+    return jsonify({ list: [] });
+  }
 
-    const url = `${appConfig.site}/d/${id}`
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-        },
-    })
-    const $ = cheerio.load(data)
-    const html = $('noscript#flarum-content').text()
-    const $2 = cheerio.load(html)
-    const urls = $2('a')
-    urls.each((_, e) => {
-        const panShareUrl = $(e).attr('href')
-        const name = $(e).prev('strong').text().replace('：', '')
+  log(`获取详情数据: url=${url}`);
+  const detailUrl = `${API_BASE_URL}/detail?id=${encodeURIComponent(url)}`;
+  const data = await request(detailUrl);
+
+  if (data.error || !data.list || data.list.length === 0) {
+    log(`获取详情数据失败或内容为空: ${data.message || '无有效列表'}`);
+    return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '获取资源失败或帖子无内容', pan: '', ext: {} }] }] });
+  }
+
+  const tracks = [];
+  const detailItem = data.list[0];
+
+  if (detailItem.vod_play_url && detailItem.vod_play_url.trim() !== '' && detailItem.vod_play_url !== '暂无有效网盘链接') {
+    const playUrls = detailItem.vod_play_url.split('$$$');
+    
+    playUrls.forEach((playUrl, index) => {
+      if (playUrl.trim()) {
+        let panName = `网盘 ${index + 1}`;
+        let cleanUrl = playUrl.trim();
+        let passCode = '';
+
+        const passCodeMatch = playUrl.match(/^(.*?)\s*\(提取码:\s*([a-zA-Z0-9]+)\)$/);
+        
+        if (passCodeMatch && passCodeMatch[1] && passCodeMatch[2]) {
+          cleanUrl = passCodeMatch[1].trim();
+          passCode = passCodeMatch[2];
+        }
+        
+        if (cleanUrl.includes('cloud.189.cn')) panName = `天翼云盘 ${index + 1}`;
+        else if (cleanUrl.includes('baidu')) panName = `百度网盘 ${index + 1}`;
+        else if (cleanUrl.includes('aliyundrive')) panName = `阿里云盘 ${index + 1}`;
+        else if (cleanUrl.includes('quark')) panName = `夸克网盘 ${index + 1}`;
+        else if (cleanUrl.includes('115')) panName = `115网盘 ${index + 1}`;
+        
+        if (passCode) {
+          panName += ` [码:${passCode}] (请手动输入)`;
+        }
+        
         tracks.push({
-            name,
-            pan: panShareUrl,
-        })
-    })
+          name: panName,
+          pan: cleanUrl,
+          ext: {},
+        });
+        
+        log(`添加网盘链接: ${panName}, URL: ${cleanUrl}`);
+      }
+    });
+  }
 
-    return jsonify({
-        list: [
-            {
-                title: '默认分组',
-                tracks,
-            },
-        ],
-    })
-}
+  if (tracks.length === 0) {
+    tracks.push({ name: '暂无有效资源链接', pan: '', ext: {} });
+    log('该帖子不含有效链接或所有链接解析失败');
+  }
 
-async function getPlayinfo(ext) {
-    return jsonify({ urls: [] })
+  log(`成功处理 ${tracks.length} 个播放链接`);
+  return jsonify({ list: [{ title: '资源列表', tracks }] });
 }
 
 async function search(ext) {
-    ext = argsify(ext)
-    let cards = []
-    let text = encodeURIComponent(ext.text)
-    let url = `${appConfig.site}/?sort=top&q=${text}`
+  ext = argsify(ext);
+  const text = ext.text || '';
+  if (!text) {
+    log('搜索失败: 缺少关键词');
+    return jsonify({ list: [] });
+  }
+  
+  log(`执行搜索: keyword=${text}`);
+  const url = `${API_BASE_URL}/search?keyword=${encodeURIComponent(text)}`;
+  const data = await request(url);
 
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-        },
-    })
+  if (data.error) {
+    log(`搜索失败: ${data.message}`);
+    return jsonify({ list: [] });
+  }
 
-    const $ = cheerio.load(data)
+  const cards = (data.list || []).map(item => ({
+    vod_id: item.vod_id,
+    vod_name: item.vod_name,
+    vod_pic: item.vod_pic || '',
+    vod_remarks: item.vod_remarks || '',
+    ext: { url: item.vod_id },
+  }));
 
-    const videos = $('.DiscussionListItem-main')
-    videos.each((_, e) => {
-        const href = $(e).attr('href')
-        const title = $(e).find('.DiscussionListItem-title').text()
-        const match = title.match(/《(.*?)》/);
-        const dramaName = match && match[1] ? match[1] : title; 
-        
-        cards.push({
-            vod_id: href,
-            vod_name: dramaName,
-            ext: {
-                'url': `${appConfig.site}${href}`,
-            },
-        })
-    })
-
-    return jsonify({
-        list: cards,
-    })
+  log(`搜索成功，找到 ${cards.length} 条结果`);
+  return jsonify({ list: cards });
 }
+
+// --- 兼容旧版 XPTV App 接口 ---
+async function init() { return getConfig(); }
+async function home() { 
+  const c = await getConfig(); 
+  const config = JSON.parse(c);
+  return jsonify({ class: config.tabs, filters: {} }); 
+}
+async function category(tid, pg) { 
+  const id = typeof tid === 'object' ? tid.id : tid;
+  return getCards({ id: id, page: pg }); 
+}
+async function detail(id) { return getTracks({ url: id }); }
+async function play(flag, id) { return jsonify({ url: id }); }
+
+log('海绵小站插件加载完成');
