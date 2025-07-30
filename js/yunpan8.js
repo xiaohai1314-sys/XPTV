@@ -1,15 +1,14 @@
 /**
- * hmxz-frontend (海绵小站前端 - 最终版)
+ * 海绵小站 XPTV App 插件前端代码
  *
  * 功能:
- * - 与后端API交互，获取海绵小站的内容。
- * - 支持精简后的分类浏览、搜索、详情查看。
- * - 智能识别网盘类型并显示提取码。
+ * - 与后端API交互，获取海绵小站的内容
+ * - 支持分类浏览、搜索、详情查看
+ * - 智能识别网盘类型并显示提取码
  */
 
 // --- 配置区 ---
-// 【重要】请务必替换为你的后端服务实际地址
-const API_BASE_URL = 'http://192.168.1.7:3000/api'; 
+const API_BASE_URL = 'http://192.168.1.7:3000/api'; // 【重要】请务必替换为你的后端服务实际IP地址和端口
 // --- 配置区 ---
 
 // XPTV App 环境函数
@@ -26,7 +25,7 @@ async function request(url) {
   try {
     const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
-      timeout: 30000,
+      timeout: 60000, // 延长超时以应对海报抓取
     });
     
     if (response.status !== 200) {
@@ -115,22 +114,16 @@ async function getTracks(ext) {
     
     playUrls.forEach((playUrl, index) => {
       if (playUrl.trim()) {
-        let panName = `网盘 ${index + 1}`;
+        let panName = `天翼云盘 ${index + 1}`;
         let cleanUrl = playUrl.trim();
         let passCode = '';
 
-        const passCodeMatch = playUrl.match(/^(.*?)\s*\(提取码:\s*([a-zA-Z0-9]+)\)$/);
+        const passCodeMatch = playUrl.match(/^(.*?)\s*\((?:访问码|提取码):\s*([a-zA-Z0-9*]+)\)$/);
         
         if (passCodeMatch && passCodeMatch[1] && passCodeMatch[2]) {
           cleanUrl = passCodeMatch[1].trim();
           passCode = passCodeMatch[2];
         }
-        
-        if (cleanUrl.includes('cloud.189.cn')) panName = `天翼云盘 ${index + 1}`;
-        else if (cleanUrl.includes('baidu')) panName = `百度网盘 ${index + 1}`;
-        else if (cleanUrl.includes('aliyundrive')) panName = `阿里云盘 ${index + 1}`;
-        else if (cleanUrl.includes('quark')) panName = `夸克网盘 ${index + 1}`;
-        else if (cleanUrl.includes('115')) panName = `115网盘 ${index + 1}`;
         
         if (passCode) {
           panName += ` [码:${passCode}] (请手动输入)`;
@@ -177,7 +170,7 @@ async function search(ext) {
     vod_id: item.vod_id,
     vod_name: item.vod_name,
     vod_pic: item.vod_pic || '',
-    vod_remarks: item.vod_remarks || '',
+    vod_remarks: '',
     ext: { url: item.vod_id },
   }));
 
