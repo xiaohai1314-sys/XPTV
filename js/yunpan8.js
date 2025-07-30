@@ -1,10 +1,5 @@
 /**
- * 海绵小站 XPTV App 插件前端代码
- *
- * 功能:
- * - 与后端API交互，获取海绵小站的内容
- * - 支持分类浏览、搜索、详情查看
- * - 智能识别网盘类型并显示提取码
+ * 海绵小站 XPTV App 插件前端代码 (最终版)
  */
 
 // --- 配置区 ---
@@ -25,7 +20,7 @@ async function request(url) {
   try {
     const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
-      timeout: 60000, // 延长超时以应对海报抓取
+      timeout: 120000,
     });
     
     if (response.status !== 200) {
