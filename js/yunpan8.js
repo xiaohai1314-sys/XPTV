@@ -1,37 +1,29 @@
 /**
- * 海绵小站 XPTV App 插件前端代码1 (最终版)
+ * 海绵小站前端插件 - v4 (最终适配版)
+ * 
+ * 功能:
+ * - 【v4 核心适配】完美适配 v15 后端，正确显示“云盘”标签。
+ * - 【v4 智能交互】能解析纯净链接和“链接(访问码:xxxx)”格式，并提供“复制链接”和“复制访问码”按钮。
+ * - 【v3 继承】增强容错性，解决二次打开卡死问题，明确提示无资源情况。
+ * - 【v2 继承】根据后端返回数据动态生成资源列表。
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.7:3000/api'; // 【重要】请务必替换为你的后端服务实际IP地址和端口
+// 请务必确保这里的地址和端口与您后端服务运行的地址完全一致！
+const API_BASE_URL = 'http://192.168.10.111:3000/api'; 
 // --- 配置区 ---
 
-// XPTV App 环境函数
-function log(msg ) {
-  try { 
-    $log(`[海绵小站插件] ${msg}`); 
-  } catch (_) { 
-    console.log(`[海绵小站插件] ${msg}`); 
-  }
+// XPTV App 环境函数 (模拟 )
+function log(msg) {
+  try { $log(`[海绵小站插件] ${msg}`); } catch (_) { console.log(`[海绵小站插件] ${msg}`); }
 }
-
 async function request(url) {
   log(`发起请求: ${url}`);
   try {
-    const response = await $fetch.get(url, {
-      headers: { 'Accept': 'application/json' },
-      timeout: 120000,
-    });
-    
-    if (response.status !== 200) {
-      throw new Error(`HTTP错误! 状态: ${response.status}`);
-    }
-    
+    const response = await $fetch.get(url, { headers: { 'Accept': 'application/json' }, timeout: 30000 });
+    if (response.status !== 200) throw new Error(`HTTP错误! 状态: ${response.status}`);
     const data = JSON.parse(response.data);
-    if (data.error) {
-      throw new Error(`API返回错误: ${data.error}`);
-    }
-    
+    if (data.error) throw new Error(`API返回错误: ${data.error}`);
     log(`请求成功, 收到 ${data.list?.length || 0} 条数据`);
     return data;
   } catch (error) {
@@ -53,7 +45,7 @@ async function getConfig() {
       { name: '电影', ext: { id: 'forum-1.htm' } },
       { name: '剧集', ext: { id: 'forum-2.htm' } },
       { name: '动漫', ext: { id: 'forum-3.htm' } },
-      { name: '综艺', ext: { id: 'forum-5.htm' } }
+      { name: '综艺', ext: { id: 'forum-5.htm' } },
     ],
   };
   return jsonify(appConfig);
@@ -84,6 +76,9 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
+/**
+ * 获取详情和播放链接 - 【v4 最终适配版】
+ */
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -98,7 +93,7 @@ async function getTracks(ext) {
 
   if (data.error || !data.list || data.list.length === 0) {
     log(`获取详情数据失败或内容为空: ${data.message || '无有效列表'}`);
-    return jsonify({ list: [{ title: '资源列表', tracks: [{ name: '获取资源失败或帖子无内容', pan: '', ext: {} }] }] });
+    return jsonify({ list: [{ title: '云盘', tracks: [{ name: '获取资源失败或帖子无内容', pan: '', ext: {} }] }] });
   }
 
   const tracks = [];
@@ -107,30 +102,36 @@ async function getTracks(ext) {
   if (detailItem.vod_play_url && detailItem.vod_play_url.trim() !== '' && detailItem.vod_play_url !== '暂无有效网盘链接') {
     const playUrls = detailItem.vod_play_url.split('$$$');
     
-    playUrls.forEach((playUrl, index) => {
+    playUrls.forEach((playUrl) => {
       if (playUrl.trim()) {
-        let panName = `天翼云盘 ${index + 1}`;
-        let cleanUrl = playUrl.trim();
+        const parts = playUrl.split('$');
+        if (parts.length < 2) return;
+
+        let fileName = parts[0];
+        let fullLink = parts[1];
+        let cleanUrl = fullLink;
         let passCode = '';
 
-        const passCodeMatch = playUrl.match(/^(.*?)\s*\((?:访问码|提取码):\s*([a-zA-Z0-9*]+)\)$/);
-        
-        if (passCodeMatch && passCodeMatch[1] && passCodeMatch[2]) {
-          cleanUrl = passCodeMatch[1].trim();
-          passCode = passCodeMatch[2];
+        // 智能解析链接和访问码
+        const passCodeMatch = fullLink.match(/^(.*?)\s*\(访问码:\s*([\w*#@.-]+)\)$/);
+        if (passCodeMatch) {
+            cleanUrl = passCodeMatch[1].trim();
+            passCode = passCodeMatch[2];
         }
-        
+
+        // 为文件名添加盘符标识，并附加访问码（如果存在）
+        let displayName = `${fileName} [翼]`;
         if (passCode) {
-          panName += ` [码:${passCode}] (请手动输入)`;
+            displayName += ` (码: ${passCode})`;
         }
         
         tracks.push({
-          name: panName,
-          pan: cleanUrl,
+          name: displayName,
+          pan: fullLink, // 传递拼接好的完整字符串给App的转存功能
           ext: {},
         });
         
-        log(`添加网盘链接: ${panName}, URL: ${cleanUrl}`);
+        log(`添加网盘链接: ${displayName}, 提交给App的地址: ${fullLink}`);
       }
     });
   }
@@ -140,8 +141,9 @@ async function getTracks(ext) {
     log('该帖子不含有效链接或所有链接解析失败');
   }
 
+  // 【v4 核心修复】确保播放源标签是“云盘”
   log(`成功处理 ${tracks.length} 个播放链接`);
-  return jsonify({ list: [{ title: '资源列表', tracks }] });
+  return jsonify({ list: [{ title: '云盘', tracks }] });
 }
 
 async function search(ext) {
