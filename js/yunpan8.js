@@ -1,16 +1,16 @@
 /**
- * 海绵小站前端插件 - v4 (最终适配版)
+ * 海绵小站前端插件 - v5 (纯净显示版)
  * 
  * 功能:
- * - 【v4 核心适配】完美适配 v15 后端，正确显示“云盘”标签。
- * - 【v4 智能交互】能解析纯净链接和“链接(访问码:xxxx)”格式，并提供“复制链接”和“复制访问码”按钮。
+ * - 【v5 最终修复】完美适配 v46 后端，不再对显示名称做任何多余处理（如添加[翼]），将后端返回的“数据包”原样传递给App。
+ * - 【v4 继承】能解析后端返回的`文件名$数据包`格式。
+ * - 【v4 继承】智能交互，能正确处理纯净链接和带访问码的数据包。
  * - 【v3 继承】增强容错性，解决二次打开卡死问题，明确提示无资源情况。
- * - 【v2 继承】根据后端返回数据动态生成资源列表。
  */
 
 // --- 配置区 ---
 // 请务必确保这里的地址和端口与您后端服务运行的地址完全一致！
-const API_BASE_URL = 'http://192.168.10.111:3000/api'; 
+const API_BASE_URL = 'http://192.168.1.7:3000/api'; 
 // --- 配置区 ---
 
 // XPTV App 环境函数 (模拟 )
@@ -20,7 +20,7 @@ function log(msg) {
 async function request(url) {
   log(`发起请求: ${url}`);
   try {
-    const response = await $fetch.get(url, { headers: { 'Accept': 'application/json' }, timeout: 30000 });
+    const response = await $fetch.get(url, { headers: { 'Accept': 'application/json' }, timeout: 45000 });
     if (response.status !== 200) throw new Error(`HTTP错误! 状态: ${response.status}`);
     const data = JSON.parse(response.data);
     if (data.error) throw new Error(`API返回错误: ${data.error}`);
@@ -77,7 +77,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取详情和播放链接 - 【v4 最终适配版】
+ * 获取详情和播放链接 - 【v5 纯净显示版】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -108,30 +108,15 @@ async function getTracks(ext) {
         if (parts.length < 2) return;
 
         let fileName = parts[0];
-        let fullLink = parts[1];
-        let cleanUrl = fullLink;
-        let passCode = '';
-
-        // 智能解析链接和访问码
-        const passCodeMatch = fullLink.match(/^(.*?)\s*\(访问码:\s*([\w*#@.-]+)\)$/);
-        if (passCodeMatch) {
-            cleanUrl = passCodeMatch[1].trim();
-            passCode = passCodeMatch[2];
-        }
-
-        // 为文件名添加盘符标识，并附加访问码（如果存在）
-        let displayName = `${fileName} [翼]`;
-        if (passCode) {
-            displayName += ` (码: ${passCode})`;
-        }
+        let dataPacket = parts[1]; // 后端拼接好的标准“数据包”
         
         tracks.push({
-          name: displayName,
-          pan: fullLink, // 传递拼接好的完整字符串给App的转存功能
+          name: fileName, // 直接使用后端返回的文件名
+          pan: dataPacket, // 将后端拼接好的“数据包”原样传递给App
           ext: {},
         });
         
-        log(`添加网盘链接: ${displayName}, 提交给App的地址: ${fullLink}`);
+        log(`添加网盘链接: ${fileName}, 提交给App的数据包: ${dataPacket}`);
       }
     });
   }
@@ -141,7 +126,6 @@ async function getTracks(ext) {
     log('该帖子不含有效链接或所有链接解析失败');
   }
 
-  // 【v4 核心修复】确保播放源标签是“云盘”
   log(`成功处理 ${tracks.length} 个播放链接`);
   return jsonify({ list: [{ title: '云盘', tracks }] });
 }
