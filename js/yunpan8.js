@@ -1,11 +1,12 @@
 /**
- * 海绵小站前端插件 - v5 (纯净显示版)
+ * 海绵小站前端插件 - v6 (最终精准修复版)
  * 
- * 功能:
- * - 【v5 最终修复】完美适配 v46 后端，不再对显示名称做任何多余处理（如添加[翼]），将后端返回的“数据包”原样传递给App。
- * - 【v4 继承】能解析后端返回的`文件名$数据包`格式。
- * - 【v4 继承】智能交互，能正确处理纯净链接和带访问码的数据包。
- * - 【v3 继承】增强容错性，解决二次打开卡死问题，明确提示无资源情况。
+ * 更新日志:
+ * - 【v6 核心修复】修正了 getTracks 函数，使其能够正确解析后端返回的“数据包”。
+ *   现在它会将链接和访问码分离，并分别放入 App 能识别的 pan 和 ext.pwd 字段，
+ *   从根本上解决点击资源按钮后无响应的问题。
+ * - 【v6 兼容性】新的解析逻辑能够兼容后端返回的各种微小格式差异。
+ * - 【v6 健壮性】保留了所有其他函数的原始逻辑，确保只修复核心问题而不引入新错误。
  */
 
 // --- 配置区 ---
@@ -77,7 +78,9 @@ async function getCards(ext) {
 }
 
 /**
- * 获取详情和播放链接 - 【v5 纯净显示版】
+ * 获取详情和播放链接 - 【v6 最终精准修复版】
+ * 修复点：在前端正确解析后端返回的数据包，分离链接与访问码，
+ *         并将其放入App能识别的 pan 和 ext.pwd 字段。
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -108,15 +111,32 @@ async function getTracks(ext) {
         if (parts.length < 2) return;
 
         let fileName = parts[0];
-        let dataPacket = parts[1]; // 后端拼接好的标准“数据包”
+        let dataPacket = parts[1]; // 后端返回的完整数据包，例如: https://...（访问码：wh6i ）
         
+        // --- 唯一的修改点在这里 ---
+        let pureLink = '';
+        let accessCode = '';
+        
+        // 使用正则表达式从数据包中分离纯链接和访问码
+        // 这个正则能兼容后端可能输出的全角或半角符号
+        const match = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+访问码[：:]+([^）)]+)/);
+        
+        if (match && match.length === 3) {
+          pureLink = match[1].trim();   // 提取纯链接
+          accessCode = match[2].trim(); // 提取访问码
+        } else {
+          // 如果正则匹配失败（例如，后端只返回了一个纯链接），则将整个数据包作为纯链接
+          pureLink = dataPacket.trim();
+        }
+        // --- 修改结束 ---
+
         tracks.push({
-          name: fileName, // 直接使用后端返回的文件名
-          pan: dataPacket, // 将后端拼接好的“数据包”原样传递给App
-          ext: {},
+          name: fileName,
+          pan: pureLink,            // 【修复】只传递纯净的URL给pan字段
+          ext: { pwd: accessCode }, // 【修复】将访问码（可能为空）放入ext.pwd字段
         });
         
-        log(`添加网盘链接: ${fileName}, 提交给App的数据包: ${dataPacket}`);
+        log(`已分离 -> 文件名: ${fileName}, 纯链接: ${pureLink}, 访问码: ${accessCode}`);
       }
     });
   }
@@ -129,6 +149,7 @@ async function getTracks(ext) {
   log(`成功处理 ${tracks.length} 个播放链接`);
   return jsonify({ list: [{ title: '云盘', tracks }] });
 }
+
 
 async function search(ext) {
   ext = argsify(ext);
