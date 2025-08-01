@@ -12,7 +12,7 @@
  */
 
 // ==================== 配置区 ====================
-const API_BASE_URL = 'http://192.168.1.7:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
+const API_BASE_URL = 'http://192.168.10.111:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // ==================== 工具函数 ====================
