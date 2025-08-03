@@ -13,7 +13,7 @@
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.10.111:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.3:3003/api'; // 请务必替换为你的后端服务实际地址
 
 // 精简后的分类数据
 const CUSTOM_CATEGORIES = [
