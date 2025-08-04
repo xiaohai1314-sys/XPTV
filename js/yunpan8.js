@@ -1,10 +1,11 @@
 /**
- * 海绵小站前端插件 - v18.1 (回归初心最终版)
+ * 海绵小站前端插件 - v19.0 (分块解析最终版)
  * 
  * 更新日志:
- * - 【v18.1 终极修正】向用户致歉。彻底废弃v18.0中画蛇添足的“合成再拆分”逻辑，解决“error access code”问题。
- * - 【v18.1 回归v17.9】脚本核心处理流程回归v17.9的正确模式，确保无访问码的链接能被正确识别。
- * - 【v18.1 优化】重写了文件名查找逻辑，使其能更智能地识别链接上下文中的文件夹名称，解决“识别成单个资源”的问题。
+ * - 【v19.0 终极版】向用户致歉。基于用户提供的两张关键HTML截图，重构了核心解析逻辑。
+ * - 【v19.0 核心重构】引入最终的“分块解析”逻辑。脚本不再使用任何全局或上下文查找，
+ *    而是将帖子内容分割成独立的“资源块”（如<p>或<div>），在每个块内部独立查找链接、
+ *    文件名和访问码，从根本上解决了所有链接和访问码的精确配对问题。
  */
 
 // --- 配置区 ---
@@ -18,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V18.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V18.1] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V19.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V19.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -70,7 +71,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑 - V18.1 回归初心最终版) ---
+// --- getTracks (核心业务逻辑 - V19.0 分块解析最终版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -98,69 +99,77 @@ async function getTracks(ext) {
         }
 
         const mainMessage = $('.message[isfirst="1"]');
-        const fullMessageText = mainMessage.text();
         const tracks = [];
         const seenUrls = new Set();
-
-        let globalAccessCode = '';
-        const passMatch = fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
-        if (passMatch && passMatch[1]) {
-            globalAccessCode = passMatch[1].replace(/[^a-zA-Z0-9]/g, '');
-            log(`成功解析并清洗提取码: ${globalAccessCode}`);
-        }
-
-        const linkElements = mainMessage.find('a');
         const promises = [];
 
-        for (let i = 0; i < linkElements.length; i++) {
-            const linkElement = $(linkElements[i]);
-            const href = linkElement.attr('href');
+        // 步骤1: 遍历帖子内容中的每一个直接子元素（资源块）
+        mainMessage.children('p, div').each((_, block) => {
+            const $block = $(block);
+            const blockText = $block.text();
             
-            // 优化文件名查找：优先使用链接前的文本
-            let fileName = linkElement.parent().contents().filter(function() {
-                return this.nodeType === 3; // 仅获取文本节点
-            }).text().trim();
+            // 步骤2: 在当前块内查找链接
+            let link = '';
+            const linkElement = $block.find('a[href*="cloud.189.cn"], a[href^="outlink-"]');
+            if (linkElement.length > 0) {
+                link = linkElement.attr('href');
+            } else {
+                const textLinkMatch = blockText.match(/https?:\/\/cloud\.189\.cn\/t\/[\w]+/ );
+                if (textLinkMatch) {
+                    link = textLinkMatch[0];
+                }
+            }
+
+            // 如果当前块没有链接，就跳过
+            if (!link) return;
+
+            // 步骤3: 在当前块内查找访问码
+            let accessCode = '';
+            const passMatch = blockText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+            if (passMatch && passMatch[1]) {
+                accessCode = passMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+            } else {
+                // 兼容“黄飞鸿”模式：访问码在兄弟节点
+                const nextAlert = $block.nextAll('.alert').first();
+                if (nextAlert.length > 0) {
+                    accessCode = nextAlert.text().trim().replace(/[^a-zA-Z0-9]/g, '');
+                }
+            }
+
+            // 步骤4: 在当前块内查找文件名
+            let fileName = $block.clone().find('a, span, br').remove().end().text().trim();
             fileName = fileName.replace(/链接|:|：/g, '').trim();
-            if (!fileName || fileName.includes('http' )) {
-                 // 如果找不到，就用<a>标签自己的文本
+            if (!fileName) {
                 fileName = linkElement.text().trim();
             }
             if (!fileName || fileName.includes('http' )) {
-                fileName = $("h4.break-all").text().trim(); // 最后的备用标题
+                fileName = $("h4.break-all").text().trim();
             }
 
-
-            if (href && href.startsWith('outlink-')) {
+            // 步骤5: 组合并处理
+            if (link.startsWith('outlink-')) {
                 const promise = (async () => {
-                    const outlinkUrl = `${SITE_URL}/${href}`;
+                    const outlinkUrl = `${SITE_URL}/${link}`;
                     try {
                         const outlinkResponse = await fetchWithCookie(outlinkUrl);
                         const $outlink = cheerio.load(outlinkResponse.data);
                         const pureLink = $outlink('.alert.alert-info a').attr('href');
                         if (pureLink && !seenUrls.has(pureLink)) {
                             seenUrls.add(pureLink);
-                            tracks.push({ name: fileName, pan: pureLink, ext: { pwd: globalAccessCode } });
+                            tracks.push({ name: fileName, pan: pureLink, ext: { pwd: accessCode } });
                         }
                     } catch (e) { log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`); }
                 })();
                 promises.push(promise);
-            } else if (href && href.includes('cloud.189.cn')) {
-                if (!seenUrls.has(href)) {
-                    seenUrls.add(href);
-                    tracks.push({ name: fileName, pan: href, ext: { pwd: globalAccessCode } });
+            } else {
+                if (!seenUrls.has(link)) {
+                    seenUrls.add(link);
+                    tracks.push({ name: fileName, pan: link, ext: { pwd: accessCode } });
                 }
             }
-        }
+        });
         
         await Promise.all(promises);
-
-        const textLinks = fullMessageText.match(/https?:\/\/cloud\.189\.cn\/t\/[\w]+/g ) || [];
-        textLinks.forEach(pureLink => {
-            if (!seenUrls.has(pureLink)) {
-                seenUrls.add(pureLink);
-                tracks.push({ name: $("h4.break-all").text().trim(), pan: pureLink, ext: { pwd: globalAccessCode } });
-            }
-        });
 
         if (tracks.length === 0) {
             return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: '', ext: {} }] }] });
@@ -176,7 +185,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v18.1 - 回归初心最终版)");
+  log("插件初始化 (v19.0 - 分块解析最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -253,4 +262,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v18.1 - 回归初心最终版)');
+log('海绵小站插件加载完成 (v19.0 - 分块解析最终版)');
