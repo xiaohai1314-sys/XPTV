@@ -1,13 +1,10 @@
 /**
- * 海绵小站前端插件 - v18.0 (逻辑归一最终版)
+ * 海绵小站前端插件 - v18.1 (回归初心最终版)
  * 
  * 更新日志:
- * - 【v18.0 终极修正】向用户致歉。本版本深入研究了前后端脚本的内在逻辑，实现了一个完整的“合成再拆分”闭环，从根本上解决“带访问码链接无法保存”的问题。
- * - 【v18.0 核心重构】getTracks函数现在会：
- *    1. 模拟后端行为，将找到的纯链接和访问码“合成”为一个带全角括号的字符串。
- *    2. 模拟前端行为，立即用正则表达式将该字符串“拆分”回纯链接和访问码。
- *    3. 将拆分后的结果，精确地放入App能识别的 `pan` 和 `ext.pwd` 字段。
- * - 【v17.9 框架保留】保留了已恢复的、能让插件正常加载的完整框架。
+ * - 【v18.1 终极修正】向用户致歉。彻底废弃v18.0中画蛇添足的“合成再拆分”逻辑，解决“error access code”问题。
+ * - 【v18.1 回归v17.9】脚本核心处理流程回归v17.9的正确模式，确保无访问码的链接能被正确识别。
+ * - 【v18.1 优化】重写了文件名查找逻辑，使其能更智能地识别链接上下文中的文件夹名称，解决“识别成单个资源”的问题。
  */
 
 // --- 配置区 ---
@@ -21,7 +18,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V18.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V18.0] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V18.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V18.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -73,7 +70,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑 - V18.0 逻辑归一最终版) ---
+// --- getTracks (核心业务逻辑 - V18.1 回归初心最终版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -119,11 +116,19 @@ async function getTracks(ext) {
             const linkElement = $(linkElements[i]);
             const href = linkElement.attr('href');
             
-            let fileName = linkElement.closest('p').contents().first().text().trim();
+            // 优化文件名查找：优先使用链接前的文本
+            let fileName = linkElement.parent().contents().filter(function() {
+                return this.nodeType === 3; // 仅获取文本节点
+            }).text().trim();
             fileName = fileName.replace(/链接|:|：/g, '').trim();
             if (!fileName || fileName.includes('http' )) {
-                fileName = $("h4.break-all").text().trim();
+                 // 如果找不到，就用<a>标签自己的文本
+                fileName = linkElement.text().trim();
             }
+            if (!fileName || fileName.includes('http' )) {
+                fileName = $("h4.break-all").text().trim(); // 最后的备用标题
+            }
+
 
             if (href && href.startsWith('outlink-')) {
                 const promise = (async () => {
@@ -161,32 +166,7 @@ async function getTracks(ext) {
             return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: '', ext: {} }] }] });
         }
 
-        // 【最终修正】对所有找到的链接进行“合成再拆分”处理，确保格式正确
-        const finalTracks = tracks.map(track => {
-            let dataPacket = track.pan;
-            // 步骤1: 模拟后端“合成”
-            if (track.ext && track.ext.pwd) {
-                dataPacket = `${track.pan}（访问码：${track.ext.pwd}）`;
-            }
-
-            // 步骤2: 模拟前端“拆分”
-            let finalLink = dataPacket;
-            let finalAccessCode = '';
-            const match = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+访问码[：:]+([^）)]+)/);
-            if (match && match.length === 3) {
-                finalLink = match[1].trim();
-                finalAccessCode = match[2].trim();
-            }
-
-            // 步骤3: 正确输出
-            return {
-                name: track.name,
-                pan: finalLink,
-                ext: { pwd: finalAccessCode }
-            };
-        });
-
-        return jsonify({ list: [{ title: '云盘', tracks: finalTracks }] });
+        return jsonify({ list: [{ title: '云盘', tracks }] });
 
     } catch (e) {
         log(`获取详情页异常: ${e.message}`);
@@ -196,7 +176,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v18.0 - 逻辑归一最终版)");
+  log("插件初始化 (v18.1 - 回归初心最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -273,4 +253,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v18.0 - 逻辑归一最终版)');
+log('海绵小站插件加载完成 (v18.1 - 回归初心最终版)');
