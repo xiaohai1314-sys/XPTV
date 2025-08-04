@@ -1,10 +1,9 @@
 /**
- * 海绵小站前端插件 - v17.8 (红框问题精准修复版)
+ * 海绵小站前端插件 - v17.9 (框架恢复与问题修复版)
  * 
  * 更新日志:
- * - 【v17.8 核心修正】向用户致歉，并聚焦解决红框内“href为中转、文本为真链接”的核心问题。
- * - 【v17.8 逻辑简化】简化getTracks函数，不再做过多复杂判断，严格按照“先href，再文本”的原则处理<a>标签，确保逻辑清晰。
- * - 【v17.8 文件名优化】改进了文件名查找逻辑，使其能更准确地关联链接前的标题文本。
+ * - 【v17.9 紧急修复】向用户致歉，并已将v17.5版本中被错误删除的所有兼容接口函数（init, home, category等）完整恢复，解决分类列表无法加载的致命问题。
+ * - 【v17.8 逻辑保留】保留了为解决“红框问题”（href为中转、文本为真链接）而做的核心逻辑修正。
  * - 【v17.5 逻辑保留】继续沿用已验证正确的“快慢车道”、“提取码去脏”和“拆分输出”逻辑。
  */
 
@@ -19,7 +18,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V17.8] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.8] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V17.9] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.9] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -71,7 +70,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑 - V17.8 红框问题精准修复版) ---
+// --- getTracks (核心业务逻辑 - V17.9) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -116,12 +115,13 @@ async function getTracks(ext) {
         for (let i = 0; i < linkElements.length; i++) {
             const linkElement = $(linkElements[i]);
             const href = linkElement.attr('href');
-            const linkText = linkElement.text().trim();
             
-            let fileName = linkElement.parent().contents().filter(function() {
-                return this.nodeType === 3; // 仅获取文本节点
-            }).text().trim();
-            fileName = fileName.replace(/链接|:|：/g, '').trim() || $("h4.break-all").text().trim();
+            // 优先从<a>标签的父级<p>中寻找标题
+            let fileName = linkElement.closest('p').contents().first().text().trim();
+            fileName = fileName.replace(/链接|:|：/g, '').trim();
+            if (!fileName || fileName.includes('http' )) {
+                fileName = $("h4.break-all").text().trim(); // 备用标题
+            }
 
             if (href && href.startsWith('outlink-')) {
                 // 慢车道：处理中转链接
@@ -174,7 +174,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v17.8 - 红框问题精准修复版)");
+  log("插件初始化 (v17.9 - 框架恢复与问题修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -244,5 +244,11 @@ async function search(ext) {
   }
 }
 
-// --- 兼容旧版接口 ---
-async function init
+// --- 兼容旧版接口 (已从v17.5完整恢复) ---
+async function init() { return getConfig(); }
+async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
+async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
+async function detail(id) { return getTracks({ url: id }); }
+async function play(flag, id) { return jsonify({ url: id }); }
+
+log('海绵小站插件加载完成 (v17.9 - 框架恢复与问题修复版)');
