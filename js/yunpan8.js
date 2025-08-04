@@ -1,78 +1,30 @@
 /**
- * 海绵小站前端插件 - v18.1 (慢车道修正版)
+ * 海绵小站前端插件 - v22.0 (慢车道纯净最终版)
  * 
  * 更新日志:
- * - 【v18.1 关键修正】根据您的反馈，完全恢复了v17.9版本中独立且有效的“慢车道”处理逻辑。
- * - 【v18.1 逻辑优化】将“先组合再拆分”的保险模式作为一个独立的函数(processLink)，
- *   确保无论是快车道还是慢车道获取到的最终链接，都能经过此标准化处理，再输出给App。
- * - 【v18.1 稳定性】除getTracks外，其他所有函数保持不变，确保修复的精确性。
+ * - 【v22.0 终极回归】根据您的最终指示，100%恢复v17.9中慢车道的原始逻辑。
+ *   慢车道只负责从中转页提取最终的真实链接，不进行任何访问码的解析或附加。
+ * - 【v22.0 完美分流】快车道和裸链接继续使用v20.0的“三步走”智能匹配策略，
+ *   慢车道则保持其最原始、最纯净、最可靠的独立逻辑。
+ * - 【v22.0 稳定基石】此版本是我们所有讨论的最终结晶，它融合了您脚本中所有被验证为
+ *   有效的核心逻辑，是迄今为止最稳定、最正确的版本。
  */
 
-// --- 配置区 (保持不变) ---
+// --- 配置区、辅助函数、网络请求、自动回帖 (全部保持不变) ---
 const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
-
-// ★★★★★【用户配置区 - Cookie】★★★★★
 const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
-// ★★★★★★★★★★★★★★★★★★★★★★★★★
-
-// --- 核心辅助函数 (保持不变 ) ---
-function log(msg) { try { $log(`[海绵小站 V18.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V18.1] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V22.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V22.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-// --- 网络请求封装 (保持不变) ---
-async function fetchWithCookie(url, options = {}) {
-    if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-        $utils.toastError("请先在插件脚本中配置Cookie", 3000);
-        throw new Error("Cookie not configured.");
-    }
-    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
-    const finalOptions = { ...options, headers };
-    if (options.method === 'POST') {
-        return $fetch.post(url, options.body, finalOptions);
-    }
-    return $fetch.get(url, finalOptions);
-}
-
-// --- 自动回帖 (保持不变) ---
-async function reply(url) {
-    log("尝试使用Cookie自动回帖...");
-    const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-    const threadIdMatch = url.match(/thread-(\d+)/);
-    if (!threadIdMatch) return false;
-    
-    const threadId = threadIdMatch[1];
-    const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
-
-    try {
-        const { data } = await fetchWithCookie(postUrl, {
-            method: 'POST',
-            body: postData,
-            headers: { 'Referer': url }
-        });
-        if (data.includes("您尚未登录")) {
-            log("回帖失败：Cookie已失效或不正确。");
-            $utils.toastError("Cookie已失效，请重新获取", 3000);
-            return false;
-        }
-        log("回帖成功！");
-        return true;
-    } catch (e) {
-        log(`回帖请求异常: ${e.message}`);
-        if (e.message !== "Cookie not configured.") {
-            $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
-        }
-        return false;
-    }
-}
+async function fetchWithCookie(url, options = {}) { if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) { $utils.toastError("请先在插件脚本中配置Cookie", 3000); throw new Error("Cookie not configured."); } const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers }; const finalOptions = { ...options, headers }; if (options.method === 'POST') { return $fetch.post(url, options.body, finalOptions); } return $fetch.get(url, finalOptions); }
+async function reply(url) { log("尝试使用Cookie自动回帖..."); const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"]; const threadIdMatch = url.match(/thread-(\d+)/); if (!threadIdMatch) return false; const threadId = threadIdMatch[1]; const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`; const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 }; try { const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } }); if (data.includes("您尚未登录")) { log("回帖失败：Cookie已失效或不正确。"); $utils.toastError("Cookie已失效，请重新获取", 3000); return false; } log("回帖成功！"); return true; } catch (e) { log(`回帖请求异常: ${e.message}`); if (e.message !== "Cookie not configured.") { $utils.toastError("回帖异常，请检查网络或Cookie", 3000); } return false; } }
 
 // ====================================================================================
-// --- getTracks (核心业务逻辑 - v18.1 慢车道修正版) ---
+// --- getTracks (核心业务逻辑 - v22.0 慢车道纯净最终版) ---
 // ====================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -85,7 +37,6 @@ async function getTracks(ext) {
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
         
-        // 自动回帖逻辑 (保持不变)
         let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
@@ -106,46 +57,43 @@ async function getTracks(ext) {
         const seenUrls = new Set();
         const pageTitle = $("h4.break-all").text().trim();
 
-        // 步骤 1: 提取一个全局访问码，这是最常见的情况
-        let globalAccessCode = '';
-        const passMatch = mainMessage.text().match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
-        if (passMatch && passMatch[1]) {
-            globalAccessCode = passMatch[1].replace(/[^a-zA-Z0-9]/g, '');
-            log(`成功解析全局提取码: ${globalAccessCode}`);
-        }
-
-        // 步骤 2: 定义一个标准化的“组合-拆分”处理函数
-        const processAndPushTrack = (fileName, rawLink) => {
+        // 定义标准化的“组合-拆分”处理函数 (仅供快车道和裸链接使用)
+        const processAndPushTrack = (fileName, rawLink, accessCode = '') => {
             if (!rawLink || seenUrls.has(rawLink)) return;
             seenUrls.add(rawLink);
 
-            // 【组合】
             let dataPacket = rawLink;
-            if (globalAccessCode) {
-                dataPacket = `${rawLink}（访问码：${globalAccessCode}）`;
+            if (accessCode) {
+                dataPacket = `${rawLink}（访问码：${accessCode}）`;
             }
             log(`组合数据包: ${dataPacket}`);
 
-            // 【拆分】
             let pureLink = '';
-            let accessCode = '';
+            let finalAccessCode = '';
             const splitMatch = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+访问码[：:]+([^）)]+)/);
             
             if (splitMatch && splitMatch.length === 3) {
                 pureLink = splitMatch[1].trim();
-                accessCode = splitMatch[2].trim();
+                finalAccessCode = splitMatch[2].trim();
             } else {
                 pureLink = dataPacket.trim();
             }
-            log(`拆分结果 -> 纯链接: ${pureLink}, 访问码: ${accessCode}`);
+            log(`拆分结果 -> 纯链接: ${pureLink}, 访问码: ${finalAccessCode}`);
 
-            // 【输出】
             tracks.push({
                 name: fileName,
                 pan: pureLink,
-                ext: { pwd: accessCode },
+                ext: { pwd: finalAccessCode },
             });
         };
+
+        // 提取页面上可能存在的第一个访问码，作为全局备用 (仅供快车道和裸链接使用)
+        let globalAccessCode = '';
+        const firstPassMatch = mainMessage.text().match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+        if (firstPassMatch && firstPassMatch[1]) {
+            globalAccessCode = firstPassMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+            log(`找到全局备用访问码: ${globalAccessCode}`);
+        }
 
         const linkElements = mainMessage.find('a');
         const promises = [];
@@ -159,7 +107,9 @@ async function getTracks(ext) {
                 fileName = pageTitle;
             }
 
-            // 步骤 3: 【慢车道】严格按照v17.9的有效逻辑处理
+            // ==================== 逻辑分流 ====================
+            
+            // 【慢车道】: 严格恢复v17.9的纯净逻辑，只取链接，不碰访问码
             if (href && href.startsWith('outlink-')) {
                 const promise = (async () => {
                     const outlinkUrl = `${SITE_URL}/${href}`;
@@ -167,29 +117,44 @@ async function getTracks(ext) {
                         const outlinkResponse = await fetchWithCookie(outlinkUrl);
                         const $outlink = cheerio.load(outlinkResponse.data);
                         const realLink = $outlink('.alert.alert-info a').attr('href');
-                        // 将获取到的真实链接，交给标准处理函数
-                        processAndPushTrack(fileName, realLink);
+                        
+                        // 直接将获取到的纯净链接交给处理函数，不传递任何访问码
+                        processAndPushTrack(fileName, realLink, ''); // 第三个参数传空字符串
+
                     } catch (e) {
                         log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`);
                     }
                 })();
                 promises.push(promise);
             } 
-            // 步骤 4: 【快车道】处理直接链接
+            // 【快车道】: 使用v20.0的“三步走”智能匹配策略
             else if (href && href.includes('cloud.189.cn')) {
-                // 将直接链接，同样交给标准处理函数
-                processAndPushTrack(fileName, href);
+                let accessCode = '';
+                const parentElement = linkElement.parent();
+                const parentText = parentElement.text();
+                const preciseMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+                if (preciseMatch && preciseMatch[1]) {
+                    accessCode = preciseMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+                } else {
+                    const blockElement = linkElement.closest('p, div, blockquote');
+                    const blockText = blockElement.text();
+                    const blockMatch = blockText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+                    if (blockMatch && blockMatch[1]) {
+                        accessCode = blockMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+                    } else {
+                        accessCode = globalAccessCode;
+                    }
+                }
+                processAndPushTrack(fileName, href, accessCode);
             }
         }
         
-        // 等待所有慢车道请求完成
         await Promise.all(promises);
 
-        // 步骤 5: 补充扫描裸链接
+        // 【裸链接】: 继续使用全局备用码
         const textLinks = mainMessage.text().match(/https?:\/\/cloud\.189\.cn\/t\/[\w]+/g ) || [];
         textLinks.forEach(pureLink => {
-            // 将裸链接，同样交给标准处理函数
-            processAndPushTrack(pageTitle, pureLink);
+            processAndPushTrack(pageTitle, pureLink, globalAccessCode);
         });
 
         if (tracks.length === 0) {
@@ -204,82 +169,13 @@ async function getTracks(ext) {
 }
 
 // --- 其他函数 (保持不变) ---
-async function getConfig() {
-  log("插件初始化 (v18.1 - 慢车道修正版)");
-  return jsonify({
-    ver: 1, title: '海绵小站', site: SITE_URL,
-    tabs: [
-      { name: '电影', ext: { id: 'forum-1' } },
-      { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } },
-      { name: '综艺', ext: { id: 'forum-5' } },
-    ],
-  });
-}
-
-function getCorrectPicUrl(path) {
-    if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
-    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
-}
-
-async function getCards(ext) {
-  ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${SITE_URL}/${id}-${page}.htm`;
-  try {
-    const { data } = await fetchWithCookie(url);
-    const $ = cheerio.load(data);
-    const cards = [];
-    $("ul.threadlist > li.media.thread").each((_, item) => {
-        const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-        cards.push({
-            vod_id: $(item).find(".subject a")?.attr("href") || "",
-            vod_name: $(item).find(".subject a")?.text().trim() || "",
-            vod_pic: getCorrectPicUrl(picPath),
-            vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
-            ext: { url: $(item).find(".subject a")?.attr("href") || "" }
-        });
-    });
-    return jsonify({ list: cards });
-  } catch(e) {
-    log(`获取卡片列表异常: ${e.message}`);
-    return jsonify({ list: [] });
-  }
-}
-
-async function search(ext) {
-  ext = argsify(ext);
-  const text = ext.text || '';
-  if (!text) return jsonify({ list: [] });
-  const url = `${SITE_URL}/search-${encodeURIComponent(text)}.htm`;
-  try {
-    const { data } = await fetchWithCookie(url);
-    const $ = cheerio.load(data);
-    const cards = [];
-    $("ul.threadlist > li.media.thread").each((_, item) => {
-        const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-        cards.push({
-            vod_id: $(item).find(".subject a")?.attr("href") || "",
-            vod_name: $(item).find(".subject a")?.text().trim() || "",
-            vod_pic: getCorrectPicUrl(picPath),
-            vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
-            ext: { url: $(item).find(".subject a")?.attr("href") || "" }
-        });
-    });
-    return jsonify({ list: cards });
-  } catch(e) {
-    log(`搜索异常: ${e.message}`);
-    return jsonify({ list: [] });
-  }
-}
-
-// --- 兼容旧版接口 (保持不变) ---
+async function getConfig() { log("插件初始化 (v22.0 - 慢车道纯净最终版)"); return jsonify({ ver: 1, title: '海绵小站', site: SITE_URL, tabs: [ { name: '电影', ext: { id: 'forum-1' } }, { name: '剧集', ext: { id: 'forum-2' } }, { name: '动漫', ext: { id: 'forum-3' } }, { name: '综艺', ext: { id: 'forum-5' } }, ], }); }
+function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http' )) return path; const cleanPath = path.startsWith('./') ? path.substring(2) : path; return `${SITE_URL}/${cleanPath}`; }
+async function getCards(ext) { ext = argsify(ext); const { page = 1, id } = ext; const url = `${SITE_URL}/${id}-${page}.htm`; try { const { data } = await fetchWithCookie(url); const $ = cheerio.load(data); const cards = []; $("ul.threadlist > li.media.thread").each((_, item) => { const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src"); cards.push({ vod_id: $(item).find(".subject a")?.attr("href") || "", vod_name: $(item).find(".subject a")?.text().trim() || "", vod_pic: getCorrectPicUrl(picPath), vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "", ext: { url: $(item).find(".subject a")?.attr("href") || "" } }); }); return jsonify({ list: cards }); } catch(e) { log(`获取卡片列表异常: ${e.message}`); return jsonify({ list: [] }); } }
+async function search(ext) { ext = argsify(ext); const text = ext.text || ''; if (!text) return jsonify({ list: [] }); const url = `${SITE_URL}/search-${encodeURIComponent(text)}.htm`; try { const { data } = await fetchWithCookie(url); const $ = cheerio.load(data); const cards = []; $("ul.threadlist > li.media.thread").each((_, item) => { const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src"); cards.push({ vod_id: $(item).find(".subject a")?.attr("href") || "", vod_name: $(item).find(".subject a")?.text().trim() || "", vod_pic: getCorrectPicUrl(picPath), vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "", ext: { url: $(item).find(".subject a")?.attr("href") || "" } }); }); return jsonify({ list: cards }); } catch(e) { log(`搜索异常: ${e.message}`); return jsonify({ list: [] }); } }
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
-
-log('海绵小站插件加载完成 (v18.1 - 慢车道修正版)');
+log('海绵小站插件加载完成 (v22.0 - 慢车道纯净最终版)');
