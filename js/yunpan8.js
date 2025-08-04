@@ -1,10 +1,11 @@
 /**
- * 海绵小站前端插件 - v12.01 (await修正方案)
+ * 海绵小站前端插件 - v12.02 (最终修正版)
  * 
  * 更新日志:
  * - 【v12.0 核心修正】根据对“云巢”脚本的逐行对比，移除了对 `$utils.openSafari` 的 `await` 调用。这被怀疑是导致跳转失败和白屏的根本原因。
  * - 【v12.0 架构确认】坚定地采用纯前端“Safari授权”方案，这是唯一正确的道路。
  * - 【v12.0 目标】此版本旨在通过最精确地模仿成功案例，解决“不跳转”的最终难题，让插件真正可用。
+ * - 【最终发现】跳转失败的根本原因在于传递给 openSafari 的 URL。必须使用网站首页地址，而非具体的登录页地址。
  */
 
 // --- 配置区 ---
@@ -18,7 +19,7 @@ function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(e
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// --- 自动回帖与登录处理 (修正版) ---
+// --- 自动回帖与登录处理 (最终修正版) ---
 async function replyAndCheckLogin(url) {
     log("尝试自动回帖...");
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
@@ -43,17 +44,16 @@ async function replyAndCheckLogin(url) {
             if (typeof $utils !== 'undefined' && typeof $utils.openSafari === 'function') {
                 $utils.toastError("需要登录，请在跳转的浏览器中完成登录/验证");
                 
-                // 【关键修正】模仿“云巢”脚本的成功逻辑。
-                // 1. 直接调用跳转，不使用 await。
-                // 2. 立即返回 false，中断当前操作，让用户手动处理登录。
-                //    这避免了脚本在后台无效地等待或重试。
-                $utils.openSafari(`${SITE_URL}/user-login.htm`, UA);
-                return false; // <-- 修改点：直接返回false，与云巢脚本行为一致。
+                // 【决定性修正】
+                // 完全模仿成功案例“云巢”脚本，只向 openSafari 传递站点首页地址。
+                // 这是解决跳转问题的关键。
+                $utils.openSafari(SITE_URL, UA);
                 
             } else {
                 $utils.toastError("插件环境异常，无法打开浏览器登录");
-                return false; 
             }
+            // 无论跳转是否成功，都返回 false 以中断当前脚本的后续操作。
+            return false; 
         }
         
         log("回帖成功或遇到其他提示，流程继续。");
@@ -68,7 +68,7 @@ async function replyAndCheckLogin(url) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-  log("插件初始化 (V12.0 - await修正方案)");
+  log("插件初始化 (V12.0 - 最终修正版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -120,13 +120,15 @@ async function getTracks(ext) {
       log("内容被隐藏，启动回帖/登录流程...");
       const canRetry = await replyAndCheckLogin(detailUrl);
       if (canRetry) {
-          log("回帖/登录流程已触发，为确保Cookie生效，延迟2秒后重试...");
-          // 增加一个短暂的延时，给App环境和Cookie同步留出时间
+          log("回帖成功，为确保Cookie生效，延迟2秒后重试...");
           await new Promise(resolve => setTimeout(resolve, 2000));
           log("重新获取详情页面...");
           const retryResponse = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA } });
           data = retryResponse.data;
           $ = cheerio.load(data);
+      } else {
+          // 如果需要登录(canRetry为false)，则直接返回提示信息，不再继续解析。
+          return jsonify({ list: [{ title: '云盘', tracks: [{ name: "需要登录，请在浏览器操作后返回重试", pan: "" }] }] });
       }
   }
 
@@ -192,4 +194,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (V12.0 - await修正方案)');
+log('海绵小站插件加载完成 (最终修正版)');
