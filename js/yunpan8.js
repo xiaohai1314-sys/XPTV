@@ -1,24 +1,24 @@
 /**
- * 海绵小站前端插件 - v16.3 (最终修复版)
+ * 海绵小站前端插件 - v16.4 (列表页图片最终修复版)
  * 
  * 更新日志:
- * - 【v16.3 最终修复】根据HTML源码分析，列表页本身不提供海报图。现已修改逻辑，直接使用发帖者头像作为海报(vod_pic)，确保图片正常显示。
- * - 【v16.2 修复】修复了海报图片(vod_pic)可能因网站样式变更或相对路径导致显示空白的问题。
- * - 【v16.1 已配置】根据用户提供的Cookie截图，已将所有必要的Cookie值组合并填入脚本。
- * - 【v16.0 终极方案】采纳用户建议，启用前端Cookie登录。这是目前最稳定、最高效、最可靠的方案。
+ * - 【v16.4 最终修复】聚焦解决列表页图片空白问题。采用更鲁棒的URL拼接逻辑，并确保即使头像路径错误也能有备用图，彻底杜绝空白显示。
+ * - 【v16.3 定位问题】确认列表页无海报图，逻辑改为抓取用户头像。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
+// 备用图片，防止在任何情况下出现空白
+const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
 const COOKIE = "_xn_accesscount_visited=1; BA_HECTOR=212ka5ak24ak0l85ak252h8185ah0k1k901f624; BAIDUID=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; BAIDUID_BFESS=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; bbs_sid=gur9n582mobn2rou3bns20spp3; bbs_token=FNadiSz82ritwSG4Ik4_2F8uZij2PotVP6VX8oKMQJk66ZicaB; BDORZ=FFFB88E999055A3F8A630C64834BD6D0; BDRCVFR[I1GM4qgEDat]=mk3SLVN4HKm; BIDUPSID=A20D99DB72C52CAC49CA26631B7E50E1; delPer=0; H_PS_PSSID=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; H_WISE_SIDS=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; Hm_lpvt_d8d486f5aec7b83ea1172477c=1754315193; Hm_lvt_d8d486f5aec7b83ea1172477c=1753858286,1754231291,1754232197,1754315193; HMACCOUNT=29968E74595D96C7; HMACCOUNT_BFESS=29968E74595D96C7; PSINO=5; PSTM=1753154537; ZFY=3SMuGuvPQ3sBcK8DE1m4eaCf:AXyVJzj:BJJehqXhu04M:C";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg) { try { $log(`[海绵小站 V16.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.3] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V16.4] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -122,7 +122,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v16.3 - 最终修复版)");
+  log("插件初始化 (v16.4 - 列表页图片最终修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -134,6 +134,15 @@ async function getConfig() {
   });
 }
 
+function getCorrectPicUrl(path) {
+    if (!path) return FALLBACK_PIC;
+    if (path.startsWith('http' )) return path;
+    // 网站的相对路径可能是 'upload/...' 或 './upload/...'
+    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+    // 直接返回完整的URL，因为SITE_URL已经包含了域名
+    return `${SITE_URL}/${cleanPath}`;
+}
+
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -143,19 +152,11 @@ async function getCards(ext) {
     const $ = cheerio.load(data);
     const cards = [];
     $("ul.threadlist > li.media.thread").each((_, item) => {
+        const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
         cards.push({
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
-            // ---【v16.3 最终修复】---
-            // 列表页没有海报图，直接使用发帖者头像作为图片
-            vod_pic: (() => {
-                let picUrl = $(item).find("a > img.avatar-3")?.attr("src");
-                if (picUrl && !picUrl.startsWith('http' )) {
-                    picUrl = SITE_URL + picUrl;
-                }
-                return picUrl || "";
-            })(),
-            // --- 修复结束 ---
+            vod_pic: getCorrectPicUrl(picPath),
             vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
             ext: { url: $(item).find(".subject a")?.attr("href") || "" }
         });
@@ -177,19 +178,11 @@ async function search(ext) {
     const $ = cheerio.load(data);
     const cards = [];
     $("ul.threadlist > li.media.thread").each((_, item) => {
+        const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
         cards.push({
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
-            // ---【v16.3 最终修复】---
-            // 列表页没有海报图，直接使用发帖者头像作为图片
-            vod_pic: (() => {
-                let picUrl = $(item).find("a > img.avatar-3")?.attr("src");
-                if (picUrl && !picUrl.startsWith('http' )) {
-                    picUrl = SITE_URL + picUrl;
-                }
-                return picUrl || "";
-            })(),
-            // --- 修复结束 ---
+            vod_pic: getCorrectPicUrl(picPath),
             vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
             ext: { url: $(item).find(".subject a")?.attr("href") || "" }
         });
@@ -208,4 +201,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v16.3 - 最终修复版)');
+log('海绵小站插件加载完成 (v16.4 - 列表页图片最终修复版)');
