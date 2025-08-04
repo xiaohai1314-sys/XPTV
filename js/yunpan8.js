@@ -1,7 +1,8 @@
 /**
- * 海绵小站前端插件 - v16.4 (列表页图片最终修复版)
+ * 海绵小站前端插件 - v16.5 (手机Cookie更新 + 列表页图片最终修复)
  * 
  * 更新日志:
+ * - 【v16.5 更新】已替换为用户提供的最新手机版Cookie，提高会话有效性。
  * - 【v16.4 最终修复】聚焦解决列表页图片空白问题。采用更鲁棒的URL拼接逻辑，并确保即使头像路径错误也能有备用图，彻底杜绝空白显示。
  * - 【v16.3 定位问题】确认列表页无海报图，逻辑改为抓取用户头像。
  */
@@ -14,11 +15,12 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
-const COOKIE = "_xn_accesscount_visited=1; BA_HECTOR=212ka5ak24ak0l85ak252h8185ah0k1k901f624; BAIDUID=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; BAIDUID_BFESS=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; bbs_sid=gur9n582mobn2rou3bns20spp3; bbs_token=FNadiSz82ritwSG4Ik4_2F8uZij2PotVP6VX8oKMQJk66ZicaB; BDORZ=FFFB88E999055A3F8A630C64834BD6D0; BDRCVFR[I1GM4qgEDat]=mk3SLVN4HKm; BIDUPSID=A20D99DB72C52CAC49CA26631B7E50E1; delPer=0; H_PS_PSSID=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; H_WISE_SIDS=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; Hm_lpvt_d8d486f5aec7b83ea1172477c=1754315193; Hm_lvt_d8d486f5aec7b83ea1172477c=1753858286,1754231291,1754232197,1754315193; HMACCOUNT=29968E74595D96C7; HMACCOUNT_BFESS=29968E74595D96C7; PSINO=5; PSTM=1753154537; ZFY=3SMuGuvPQ3sBcK8DE1m4eaCf:AXyVJzj:BJJehqXhu04M:C";
+// 已根据您提供的手机版Cookie更新
+const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V16.4] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.4] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V16.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -122,7 +124,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v16.4 - 列表页图片最终修复版)");
+  log("插件初始化 (v16.5 - 手机Cookie更新)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -139,7 +141,7 @@ function getCorrectPicUrl(path) {
     if (path.startsWith('http' )) return path;
     // 网站的相对路径可能是 'upload/...' 或 './upload/...'
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    // 直接返回完整的URL，因为SITE_URL已经包含了域名
+    // 直接返回完整的URL
     return `${SITE_URL}/${cleanPath}`;
 }
 
@@ -201,4 +203,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v16.4 - 列表页图片最终修复版)');
+log('海绵小站插件加载完成 (v16.5 - 手机Cookie更新)');
