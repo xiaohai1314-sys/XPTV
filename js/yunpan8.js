@@ -1,11 +1,11 @@
 /**
- * 海绵小站前端插件 - v17.1 (精确移植后端逻辑)
+ * 海绵小站前端插件 - v17.5 (输出逻辑精确复刻版)
  * 
  * 更新日志:
- * - 【v17.1 核心修正】严格遵循后端脚本，实现了“快车道”与“慢车道”分离的提取逻辑。
- * - 【v17.1 修正-提取码】增加了与后端完全一致的提取码“去脏”处理，移除所有非字母数字的符号。
- * - 【v17.1 修正-文件名】优化了文件名与链接的关联逻辑，使其更智能、更干净。
- * - 【v17.0 重构】移植了后端的“两步提取”和“全局提取码”核心思想。
+ * - 【v17.5 最终修正】向用户致歉，并严格遵循用户提供的v6脚本逻辑，明确脚本的核心任务是“拆分”而非“合成”。
+ * - 【v17.5 核心重构】getTracks函数现在将抓取到的纯链接和纯访问码，分别放入App播放器能直接识别的 `pan` 和 `ext: { pwd: ... }` 字段。
+ *    这100%复刻了v6脚本的输出格式，是从根本上解决问题的正确方案。
+ * - 【v17.4 逻辑保留】继续沿用已验证正确的“快慢车道”、“提取码去脏”等高级抓取逻辑。
  */
 
 // --- 配置区 ---
@@ -19,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V17.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.1] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V17.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -71,7 +71,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑 - V17.1 精确移植版) ---
+// --- getTracks (核心业务逻辑 - V17.5 输出逻辑精确复刻版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -83,7 +83,6 @@ async function getTracks(ext) {
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
         
-        // 步骤〇：自动回复模块
         let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
@@ -95,7 +94,7 @@ async function getTracks(ext) {
                 data = retryResponse.data;
                 $ = cheerio.load(data);
             } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: "" }] }] });
+                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
             }
         }
 
@@ -104,7 +103,6 @@ async function getTracks(ext) {
         const tracks = [];
         const seenUrls = new Set();
 
-        // 全局提取码解析 (带去脏逻辑)
         let globalAccessCode = '';
         const passMatch = fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
         if (passMatch && passMatch[1]) {
@@ -112,23 +110,21 @@ async function getTracks(ext) {
             log(`成功解析并清洗提取码: ${globalAccessCode}`);
         }
 
-        // ==================== 步骤一：快车道 - 尝试直接提取 ====================
-        log("进入快车道：尝试单页直接提取...");
+        // 快车道
         mainMessage.find('a').each((_, linkElement) => {
-            const link = $(linkElement).attr('href');
-            if (link && link.includes('cloud.189.cn') && !seenUrls.has(link)) {
-                seenUrls.add(link);
-                let finalUrl = link;
-                if (globalAccessCode) finalUrl = `${link}（访问码：${globalAccessCode}）`;
-                
+            const pureLink = $(linkElement).attr('href');
+            if (pureLink && pureLink.includes('cloud.189.cn') && !seenUrls.has(pureLink)) {
+                seenUrls.add(pureLink);
                 let fileName = $(linkElement).text().trim();
-                if (!fileName || fileName === link || fileName.includes('http' )) {
-                    const parentText = $(linkElement).closest('p, div').text() || fullMessageText;
-                    fileName = parentText.split('\n')[0].trim();
-                    fileName = fileName.replace(link, "").replace(passMatch ? passMatch[0] : "", "").replace(/链接|访问码|提取码|密码|:|：/gi, "").trim();
+                if (!fileName || fileName === pureLink || fileName.includes('http' )) {
+                   fileName = $("h4.break-all").text().trim() || "网盘链接";
                 }
-                fileName = fileName || "网盘链接" + (tracks.length + 1);
-                tracks.push({ name: fileName, pan: finalUrl });
+                
+                tracks.push({
+                    name: fileName,
+                    pan: pureLink,
+                    ext: { pwd: globalAccessCode }
+                });
             }
         });
 
@@ -137,19 +133,17 @@ async function getTracks(ext) {
             return jsonify({ list: [{ title: '云盘', tracks }] });
         }
 
-        // ==================== 步骤二：慢车道 - 快车道失败，尝试两步跳转 ====================
-        log("快车道失败，切换至慢车道：尝试两步跳转提取...");
+        // 慢车道
         const linksToVisit = [];
         mainMessage.find('a').each((_, linkElement) => {
             const href = $(linkElement).attr('href');
             if (href && href.startsWith('outlink-')) {
-                linksToVisit.push({ url: href, fileName: $(linkElement).text().trim() || "网盘链接" });
+                linksToVisit.push({ url: href, fileName: $(linkElement).text().trim() || $("h4.break-all").text().trim() });
             }
         });
 
         if (linksToVisit.length === 0) {
-            log("慢车道也未找到任何 outlink- 链接。提取失败。");
-            return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: "" }] }] });
+            return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: '', ext: {} }] }] });
         }
 
         for (const linkInfo of linksToVisit) {
@@ -157,35 +151,35 @@ async function getTracks(ext) {
             try {
                 const outlinkResponse = await fetchWithCookie(outlinkUrl);
                 const $outlink = cheerio.load(outlinkResponse.data);
-                const realLink = $outlink('.alert.alert-info a').attr('href');
+                const pureLink = $outlink('.alert.alert-info a').attr('href');
 
-                if (realLink && !seenUrls.has(realLink)) {
-                    seenUrls.add(realLink);
-                    let urlWithPass = realLink;
-                    if (globalAccessCode) urlWithPass = `${realLink}（访问码：${globalAccessCode}）`;
-                    tracks.push({ name: linkInfo.fileName, pan: urlWithPass });
-                    log(`慢车道成功提取链接: ${realLink}`);
+                if (pureLink && !seenUrls.has(pureLink)) {
+                    seenUrls.add(pureLink);
+                    tracks.push({
+                        name: linkInfo.fileName,
+                        pan: pureLink,
+                        ext: { pwd: globalAccessCode }
+                    });
                 }
             } catch (e) {
                 log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`);
             }
         }
-
-        log(`慢车道处理完毕，共提取到 ${tracks.length} 个链接。`);
+        
         if (tracks.length === 0) {
-            tracks.push({ name: "未找到有效资源", pan: "" });
+            tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
         return jsonify({ list: [{ title: '云盘', tracks }] });
 
     } catch (e) {
         log(`获取详情页异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: "" }] }] });
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
     }
 }
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v17.1 - 精确移植版)");
+  log("插件初始化 (v17.5 - 输出逻辑精确复刻版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -262,4 +256,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v17.1 - 精确移植版)');
+log('海绵小站插件加载完成 (v17.5 - 输出逻辑精确复刻版)');
