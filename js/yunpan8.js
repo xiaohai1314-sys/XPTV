@@ -1,11 +1,11 @@
 /**
- * 海绵小站前端插件 - v17.5 (输出逻辑精确复刻版)
+ * 海绵小站前端插件 - v17.8 (红框问题精准修复版)
  * 
  * 更新日志:
- * - 【v17.5 最终修正】向用户致歉，并严格遵循用户提供的v6脚本逻辑，明确脚本的核心任务是“拆分”而非“合成”。
- * - 【v17.5 核心重构】getTracks函数现在将抓取到的纯链接和纯访问码，分别放入App播放器能直接识别的 `pan` 和 `ext: { pwd: ... }` 字段。
- *    这100%复刻了v6脚本的输出格式，是从根本上解决问题的正确方案。
- * - 【v17.4 逻辑保留】继续沿用已验证正确的“快慢车道”、“提取码去脏”等高级抓取逻辑。
+ * - 【v17.8 核心修正】向用户致歉，并聚焦解决红框内“href为中转、文本为真链接”的核心问题。
+ * - 【v17.8 逻辑简化】简化getTracks函数，不再做过多复杂判断，严格按照“先href，再文本”的原则处理<a>标签，确保逻辑清晰。
+ * - 【v17.8 文件名优化】改进了文件名查找逻辑，使其能更准确地关联链接前的标题文本。
+ * - 【v17.5 逻辑保留】继续沿用已验证正确的“快慢车道”、“提取码去脏”和“拆分输出”逻辑。
  */
 
 // --- 配置区 ---
@@ -19,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V17.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.5] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V17.8] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.8] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -71,7 +71,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑 - V17.5 输出逻辑精确复刻版) ---
+// --- getTracks (核心业务逻辑 - V17.8 红框问题精准修复版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -110,62 +110,57 @@ async function getTracks(ext) {
             log(`成功解析并清洗提取码: ${globalAccessCode}`);
         }
 
-        // 快车道
-        mainMessage.find('a').each((_, linkElement) => {
-            const pureLink = $(linkElement).attr('href');
-            if (pureLink && pureLink.includes('cloud.189.cn') && !seenUrls.has(pureLink)) {
-                seenUrls.add(pureLink);
-                let fileName = $(linkElement).text().trim();
-                if (!fileName || fileName === pureLink || fileName.includes('http' )) {
-                   fileName = $("h4.break-all").text().trim() || "网盘链接";
-                }
-                
-                tracks.push({
-                    name: fileName,
-                    pan: pureLink,
-                    ext: { pwd: globalAccessCode }
-                });
-            }
-        });
+        const linkElements = mainMessage.find('a');
+        const promises = [];
 
-        if (tracks.length > 0) {
-            log(`快车道成功，提取到 ${tracks.length} 个链接。`);
-            return jsonify({ list: [{ title: '云盘', tracks }] });
-        }
+        for (let i = 0; i < linkElements.length; i++) {
+            const linkElement = $(linkElements[i]);
+            const href = linkElement.attr('href');
+            const linkText = linkElement.text().trim();
+            
+            let fileName = linkElement.parent().contents().filter(function() {
+                return this.nodeType === 3; // 仅获取文本节点
+            }).text().trim();
+            fileName = fileName.replace(/链接|:|：/g, '').trim() || $("h4.break-all").text().trim();
 
-        // 慢车道
-        const linksToVisit = [];
-        mainMessage.find('a').each((_, linkElement) => {
-            const href = $(linkElement).attr('href');
             if (href && href.startsWith('outlink-')) {
-                linksToVisit.push({ url: href, fileName: $(linkElement).text().trim() || $("h4.break-all").text().trim() });
-            }
-        });
-
-        if (linksToVisit.length === 0) {
-            return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: '', ext: {} }] }] });
-        }
-
-        for (const linkInfo of linksToVisit) {
-            const outlinkUrl = `${SITE_URL}/${linkInfo.url}`;
-            try {
-                const outlinkResponse = await fetchWithCookie(outlinkUrl);
-                const $outlink = cheerio.load(outlinkResponse.data);
-                const pureLink = $outlink('.alert.alert-info a').attr('href');
-
-                if (pureLink && !seenUrls.has(pureLink)) {
-                    seenUrls.add(pureLink);
-                    tracks.push({
-                        name: linkInfo.fileName,
-                        pan: pureLink,
-                        ext: { pwd: globalAccessCode }
-                    });
+                // 慢车道：处理中转链接
+                const promise = (async () => {
+                    const outlinkUrl = `${SITE_URL}/${href}`;
+                    try {
+                        const outlinkResponse = await fetchWithCookie(outlinkUrl);
+                        const $outlink = cheerio.load(outlinkResponse.data);
+                        const pureLink = $outlink('.alert.alert-info a').attr('href');
+                        if (pureLink && !seenUrls.has(pureLink)) {
+                            seenUrls.add(pureLink);
+                            tracks.push({ name: fileName, pan: pureLink, ext: { pwd: globalAccessCode } });
+                        }
+                    } catch (e) {
+                        log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`);
+                    }
+                })();
+                promises.push(promise);
+            } else if (href && href.includes('cloud.189.cn')) {
+                // 快车道：处理直接链接
+                if (!seenUrls.has(href)) {
+                    seenUrls.add(href);
+                    tracks.push({ name: fileName, pan: href, ext: { pwd: globalAccessCode } });
                 }
-            } catch (e) {
-                log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`);
             }
         }
         
+        // 等待所有慢车道请求完成
+        await Promise.all(promises);
+
+        // 补充：扫描裸链接
+        const textLinks = fullMessageText.match(/https?:\/\/cloud\.189\.cn\/t\/[\w]+/g ) || [];
+        textLinks.forEach(pureLink => {
+            if (!seenUrls.has(pureLink)) {
+                seenUrls.add(pureLink);
+                tracks.push({ name: $("h4.break-all").text().trim(), pan: pureLink, ext: { pwd: globalAccessCode } });
+            }
+        });
+
         if (tracks.length === 0) {
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
@@ -179,7 +174,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v17.5 - 输出逻辑精确复刻版)");
+  log("插件初始化 (v17.8 - 红框问题精准修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -250,10 +245,4 @@ async function search(ext) {
 }
 
 // --- 兼容旧版接口 ---
-async function init() { return getConfig(); }
-async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
-async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
-async function detail(id) { return getTracks({ url: id }); }
-async function play(flag, id) { return jsonify({ url: id }); }
-
-log('海绵小站插件加载完成 (v17.5 - 输出逻辑精确复刻版)');
+async function init
