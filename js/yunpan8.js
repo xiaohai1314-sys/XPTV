@@ -1,12 +1,11 @@
 /**
- * 海绵小站前端插件 - v16.2 (Cookie登录方案 - 已配置和修复)
+ * 海绵小站前端插件 - v16.3 (最终修复版)
  * 
  * 更新日志:
+ * - 【v16.3 最终修复】根据HTML源码分析，列表页本身不提供海报图。现已修改逻辑，直接使用发帖者头像作为海报(vod_pic)，确保图片正常显示。
  * - 【v16.2 修复】修复了海报图片(vod_pic)可能因网站样式变更或相对路径导致显示空白的问题。
  * - 【v16.1 已配置】根据用户提供的Cookie截图，已将所有必要的Cookie值组合并填入脚本。
  * - 【v16.0 终极方案】采纳用户建议，启用前端Cookie登录。这是目前最稳定、最高效、最可靠的方案。
- * - 【v16.0 用户配置】在脚本顶部增加COOKIE配置区，用户只需配置一次，即可长期享受登录状态。
- * - 【v16.0 全局授权】所有需要权限的网络请求($fetch)都将自动携带配置的Cookie，实现无缝登录。
  */
 
 // --- 配置区 ---
@@ -15,12 +14,11 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKi
 const cheerio = createCheerio();
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
-// 已根据您提供的最新截图，将Cookie值填写完毕。
 const COOKIE = "_xn_accesscount_visited=1; BA_HECTOR=212ka5ak24ak0l85ak252h8185ah0k1k901f624; BAIDUID=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; BAIDUID_BFESS=B1F0F8D52DB33E10C32A1AD0B9862FE0:FG=1; bbs_sid=gur9n582mobn2rou3bns20spp3; bbs_token=FNadiSz82ritwSG4Ik4_2F8uZij2PotVP6VX8oKMQJk66ZicaB; BDORZ=FFFB88E999055A3F8A630C64834BD6D0; BDRCVFR[I1GM4qgEDat]=mk3SLVN4HKm; BIDUPSID=A20D99DB72C52CAC49CA26631B7E50E1; delPer=0; H_PS_PSSID=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; H_WISE_SIDS=62325_63142_63326_63881_63948_64009_64048_64141_64146_64156_64174_64183_64211_64218_64234_64247_64246_64254_64259_64260_64273_64309_64317_64359; Hm_lpvt_d8d486f5aec7b83ea1172477c=1754315193; Hm_lvt_d8d486f5aec7b83ea1172477c=1753858286,1754231291,1754232197,1754315193; HMACCOUNT=29968E74595D96C7; HMACCOUNT_BFESS=29968E74595D96C7; PSINO=5; PSTM=1753154537; ZFY=3SMuGuvPQ3sBcK8DE1m4eaCf:AXyVJzj:BJJehqXhu04M:C";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg) { try { $log(`[海绵小站 V16.2] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.2] ${msg}`); } }
+function log(msg) { try { $log(`[海绵小站 V16.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -31,21 +29,13 @@ async function fetchWithCookie(url, options = {}) {
         $utils.toastError("请先在插件脚本中配置Cookie", 3000);
         throw new Error("Cookie not configured.");
     }
-
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': COOKIE,
-        ...options.headers,
-    };
-
+    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
     const finalOptions = { ...options, headers };
-
     if (options.method === 'POST') {
         return $fetch.post(url, options.body, finalOptions);
     }
     return $fetch.get(url, finalOptions);
 }
-
 
 // --- 自动回帖 (使用带Cookie的请求) ---
 async function reply(url) {
@@ -64,13 +54,11 @@ async function reply(url) {
             body: postData,
             headers: { 'Referer': url }
         });
-
         if (data.includes("您尚未登录")) {
             log("回帖失败：Cookie已失效或不正确。");
             $utils.toastError("Cookie已失效，请重新获取", 3000);
             return false;
         }
-        
         log("回帖成功！");
         return true;
     } catch (e) {
@@ -132,10 +120,9 @@ async function getTracks(ext) {
     }
 }
 
-
-// 其他函数 (getConfig, getCards, search等)
+// --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v16.2 - Cookie已配置和修复)");
+  log("插件初始化 (v16.3 - 最终修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -159,9 +146,10 @@ async function getCards(ext) {
         cards.push({
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
-            // ---【修复】海报图片提取逻辑 ---
+            // ---【v16.3 最终修复】---
+            // 列表页没有海报图，直接使用发帖者头像作为图片
             vod_pic: (() => {
-                let picUrl = $(item).find("a > img")?.attr("src");
+                let picUrl = $(item).find("a > img.avatar-3")?.attr("src");
                 if (picUrl && !picUrl.startsWith('http' )) {
                     picUrl = SITE_URL + picUrl;
                 }
@@ -192,9 +180,10 @@ async function search(ext) {
         cards.push({
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
-            // ---【修复】海报图片提取逻辑 ---
+            // ---【v16.3 最终修复】---
+            // 列表页没有海报图，直接使用发帖者头像作为图片
             vod_pic: (() => {
-                let picUrl = $(item).find("a > img")?.attr("src");
+                let picUrl = $(item).find("a > img.avatar-3")?.attr("src");
                 if (picUrl && !picUrl.startsWith('http' )) {
                     picUrl = SITE_URL + picUrl;
                 }
@@ -219,4 +208,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v16.2 - Cookie已配置和修复)');
+log('海绵小站插件加载完成 (v16.3 - 最终修复版)');
