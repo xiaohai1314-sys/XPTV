@@ -1,26 +1,25 @@
 /**
- * 海绵小站前端插件 - v16.5 (手机Cookie更新 + 列表页图片最终修复)
+ * 海绵小站前端插件 - v17.1 (精确移植后端逻辑)
  * 
  * 更新日志:
- * - 【v16.5 更新】已替换为用户提供的最新手机版Cookie，提高会话有效性。
- * - 【v16.4 最终修复】聚焦解决列表页图片空白问题。采用更鲁棒的URL拼接逻辑，并确保即使头像路径错误也能有备用图，彻底杜绝空白显示。
- * - 【v16.3 定位问题】确认列表页无海报图，逻辑改为抓取用户头像。
+ * - 【v17.1 核心修正】严格遵循后端脚本，实现了“快车道”与“慢车道”分离的提取逻辑。
+ * - 【v17.1 修正-提取码】增加了与后端完全一致的提取码“去脏”处理，移除所有非字母数字的符号。
+ * - 【v17.1 修正-文件名】优化了文件名与链接的关联逻辑，使其更智能、更干净。
+ * - 【v17.0 重构】移植了后端的“两步提取”和“全局提取码”核心思想。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
-// 备用图片，防止在任何情况下出现空白
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
-// 已根据您提供的手机版Cookie更新
 const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V16.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V16.5] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V17.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V17.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -72,7 +71,7 @@ async function reply(url) {
     }
 }
 
-// --- getTracks (核心业务逻辑) ---
+// --- getTracks (核心业务逻辑 - V17.1 精确移植版) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -84,12 +83,11 @@ async function getTracks(ext) {
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
         
+        // 步骤〇：自动回复模块
         let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
-
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
             const replied = await reply(detailUrl);
-            
             if (replied) {
                 log("回帖成功，重新获取页面内容...");
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -101,18 +99,81 @@ async function getTracks(ext) {
             }
         }
 
-        const tracks = [];
         const mainMessage = $('.message[isfirst="1"]');
+        const fullMessageText = mainMessage.text();
+        const tracks = [];
+        const seenUrls = new Set();
+
+        // 全局提取码解析 (带去脏逻辑)
+        let globalAccessCode = '';
+        const passMatch = fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+        if (passMatch && passMatch[1]) {
+            globalAccessCode = passMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+            log(`成功解析并清洗提取码: ${globalAccessCode}`);
+        }
+
+        // ==================== 步骤一：快车道 - 尝试直接提取 ====================
+        log("进入快车道：尝试单页直接提取...");
         mainMessage.find('a').each((_, linkElement) => {
-            let link = $(linkElement).attr('href');
-            if (link && (link.includes('cloud.189.cn') || link.includes('pan.quark.cn') || link.includes('www.alipan.com'))) {
-                let fileName = $(linkElement).text().trim() || '未知文件名';
-                tracks.push({ name: fileName, pan: link });
+            const link = $(linkElement).attr('href');
+            if (link && link.includes('cloud.189.cn') && !seenUrls.has(link)) {
+                seenUrls.add(link);
+                let finalUrl = link;
+                if (globalAccessCode) finalUrl = `${link}（访问码：${globalAccessCode}）`;
+                
+                let fileName = $(linkElement).text().trim();
+                if (!fileName || fileName === link || fileName.includes('http' )) {
+                    const parentText = $(linkElement).closest('p, div').text() || fullMessageText;
+                    fileName = parentText.split('\n')[0].trim();
+                    fileName = fileName.replace(link, "").replace(passMatch ? passMatch[0] : "", "").replace(/链接|访问码|提取码|密码|:|：/gi, "").trim();
+                }
+                fileName = fileName || "网盘链接" + (tracks.length + 1);
+                tracks.push({ name: fileName, pan: finalUrl });
             }
         });
 
+        if (tracks.length > 0) {
+            log(`快车道成功，提取到 ${tracks.length} 个链接。`);
+            return jsonify({ list: [{ title: '云盘', tracks }] });
+        }
+
+        // ==================== 步骤二：慢车道 - 快车道失败，尝试两步跳转 ====================
+        log("快车道失败，切换至慢车道：尝试两步跳转提取...");
+        const linksToVisit = [];
+        mainMessage.find('a').each((_, linkElement) => {
+            const href = $(linkElement).attr('href');
+            if (href && href.startsWith('outlink-')) {
+                linksToVisit.push({ url: href, fileName: $(linkElement).text().trim() || "网盘链接" });
+            }
+        });
+
+        if (linksToVisit.length === 0) {
+            log("慢车道也未找到任何 outlink- 链接。提取失败。");
+            return jsonify({ list: [{ title: '云盘', tracks: [{ name: "未找到有效资源", pan: "" }] }] });
+        }
+
+        for (const linkInfo of linksToVisit) {
+            const outlinkUrl = `${SITE_URL}/${linkInfo.url}`;
+            try {
+                const outlinkResponse = await fetchWithCookie(outlinkUrl);
+                const $outlink = cheerio.load(outlinkResponse.data);
+                const realLink = $outlink('.alert.alert-info a').attr('href');
+
+                if (realLink && !seenUrls.has(realLink)) {
+                    seenUrls.add(realLink);
+                    let urlWithPass = realLink;
+                    if (globalAccessCode) urlWithPass = `${realLink}（访问码：${globalAccessCode}）`;
+                    tracks.push({ name: linkInfo.fileName, pan: urlWithPass });
+                    log(`慢车道成功提取链接: ${realLink}`);
+                }
+            } catch (e) {
+                log(`请求中转链接 ${outlinkUrl} 失败: ${e.message}`);
+            }
+        }
+
+        log(`慢车道处理完毕，共提取到 ${tracks.length} 个链接。`);
         if (tracks.length === 0) {
-            tracks.push({ name: "未找到有效资源，或需要回复", pan: "" });
+            tracks.push({ name: "未找到有效资源", pan: "" });
         }
         return jsonify({ list: [{ title: '云盘', tracks }] });
 
@@ -124,7 +185,7 @@ async function getTracks(ext) {
 
 // --- 其他函数 (getConfig, getCards, search等) ---
 async function getConfig() {
-  log("插件初始化 (v16.5 - 手机Cookie更新)");
+  log("插件初始化 (v17.1 - 精确移植版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -139,9 +200,7 @@ async function getConfig() {
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
-    // 网站的相对路径可能是 'upload/...' 或 './upload/...'
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    // 直接返回完整的URL
     return `${SITE_URL}/${cleanPath}`;
 }
 
@@ -203,4 +262,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v16.5 - 手机Cookie更新)');
+log('海绵小站插件加载完成 (v17.1 - 精确移植版)');
