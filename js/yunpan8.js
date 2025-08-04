@@ -1,10 +1,10 @@
 /**
- * 海绵小站前端插件 - v8.1 (终极完整校对版)
+ * 海绵小站前端插件 - v8.2 (人机协作修正版)
  * 
  * 更新日志:
- * - 【v8.1 完整性】根据用户要求，已将所有原始函数 (getConfig, getTracks, search, init, home 等) 完整恢复，确保功能无删减。
- * - 【v8.1 精确改造】仅对核心的 request 函数进行改造，并新增 login/verify 函数，以支持新的登录验证流程。
- * - 【v8.1 最终版】此版本为新登录逻辑与原始前端功能的最终、完整合并版，确保了最大的兼容性和功能的完整性。
+ * - 【v8.2 核心修正】修复了“双重验证”和“前端静默失败”的问题。
+ * - 【v8.2 交互优化】当后端需要手动验证时，不再使用固定的8秒等待，而是弹出一个对话框，等待用户在浏览器中完成操作后，点击“我已完成验证”按钮，真正实现了人机协作。
+ * - 【v8.2 兼容性】保留了所有原始函数 (getConfig, getTracks, search, init, home 等) 的完整性，确保功能无删减。
  */
 
 // --- 配置区 ---
@@ -13,7 +13,7 @@ let userCredentials = { username: '', password: '' }; // 用于存储用户凭�
 let currentSessionId = null; // 用于存储待验证的会话ID
 // --- 配置区 ---
 
-// --- 核心辅助函数 (来自您的原始脚本 ，未作更改) ---
+// --- 核心辅助函数 (来自您的原始脚本  ，未作更改) ---
 function log(msg) {
   try { $log(`[海绵小站插件] ${msg}`); } catch (_) { console.log(`[海绵小站插件] ${msg}`); }
 }
@@ -33,14 +33,42 @@ function jsonify(data) {
     return JSON.stringify(data);
 }
 
-// --- 【改造】核心请求函数，增加登录和验证处理 ---
+// --- 【新增】人机协作处理函数 ---
+async function handleVerification(verificationData) {
+    log(`⚠️ 需要人机协作: ${verificationData.message}`);
+    currentSessionId = verificationData.sessionId;
+
+    // 弹出一个模态对话框，等待用户确认
+    // 这是实现真正人机协作的关键！
+    const modalPayload = {
+        title: "需要手动验证",
+        content: `请在运行后端服务的电脑上，打开浏览器窗口，手动完成【${verificationData.verificationType === 'slide_puzzle' ? '滑动拼图' : '旋转图片'}】验证，然后点击下方的“我已完成”按钮。`,
+        buttons: [{ text: "我已完成验证", action: "continue" }]
+    };
+
+    try {
+        // 使用 xptv.showModal 来显示对话框并等待用户操作
+        // 这会暂停代码执行，直到用户点击按钮
+        await xptv.showModal(jsonify(modalPayload));
+        log("✅ 用户已确认完成操作，将通知后端进行检查...");
+        
+        // 用户点击后，我们才调用 verify 函数
+        const verifySuccess = await verify(currentSessionId);
+        return verifySuccess;
+
+    } catch (e) {
+        log(`模态框显示或用户操作被取消: ${e.message}`);
+        return false;
+    }
+}
+
+
+// --- 【改造】核心请求函数，集成新的人机协作流程 ---
 async function request(url, options = {}, isRetry = false) {
   log(`发起请求: ${url}`);
   try {
-    // 使用 $fetch.get 发起请求
     const response = await $fetch.get(url, { headers: { 'Accept': 'application/json' }, timeout: 45000 });
     
-    // 检查HTTP状态码
     if (response.status === 401 && !isRetry) {
         log("会话失效或未登录，将尝试自动登录。");
         if (!userCredentials.username || !userCredentials.password) {
@@ -50,7 +78,7 @@ async function request(url, options = {}, isRetry = false) {
         const loginSuccess = await login(userCredentials.username, userCredentials.password);
         if (loginSuccess) {
             log("重新登录成功，重试原始请求...");
-            return await request(url, options, true); // 登录成功后重试
+            return await request(url, options, true);
         } else {
             log("重新登录失败。");
             throw new Error("登录失败，无法完成请求。");
@@ -58,19 +86,13 @@ async function request(url, options = {}, isRetry = false) {
     }
     
     if (response.status === 409) {
-        log("⚠️ 请求被拦截，需要进行人机验证。");
         const data = JSON.parse(response.data);
-        log(`验证类型: ${data.verificationType || '未知'}, 消息: ${data.message}`);
-        log("请在后端服务器的浏览器窗口中手动完成验证，然后在App中点击“我已完成”之类的按钮来继续。");
-        currentSessionId = data.sessionId;
-        // 实际应用中，这里应弹出一个对话框，让用户确认操作完成后再继续
-        // 此处用延时模拟用户操作
-        await new Promise(resolve => setTimeout(resolve, 8000)); // 给予用户8秒操作时间
-        const verifySuccess = await verify(currentSessionId);
-        if(verifySuccess) {
-            return await request(url, options, true); // 验证成功后重试
+        const verificationSuccess = await handleVerification(data);
+        if(verificationSuccess) {
+            log("验证流程成功，重试原始请求...");
+            return await request(url, options, true);
         } else {
-            throw new Error("验证失败，无法完成请求。");
+            throw new Error("验证失败或被用户取消，无法完成请求。");
         }
     }
 
@@ -85,7 +107,7 @@ async function request(url, options = {}, isRetry = false) {
   }
 }
 
-// --- 【新增】登录与验证函数 ---
+// --- 【改造】登录函数，集成新的人机协作流程 ---
 async function login(username, password) {
     log(`尝试登录: ${username}`);
     try {
@@ -95,28 +117,24 @@ async function login(username, password) {
         if (data.success) {
             log("登录成功！");
             return true;
-        } else if (data.needsVerification) {
-            log(`登录需要验证: ${data.message}`);
-            log("请在后端服务器的浏览器窗口中手动完成验证，然后继续。");
-            currentSessionId = data.sessionId;
-            await new Promise(resolve => setTimeout(resolve, 8000));
-            return await verify(currentSessionId);
-        } else {
-            log(`登录失败: ${data.message}`);
-            return false;
-        }
+        } 
+        // 注意：理论上，成功的登录流程也会被验证拦截，所以主要处理catch块
+        return false;
+
     } catch (error) {
         log(`登录请求异常: ${error.message}`);
         try {
-            const errorData = JSON.parse(error.response.data);
-            if (errorData.needsVerification) {
-                log(`登录需要验证: ${errorData.message}`);
-                log("请在后端服务器的浏览器窗口中手动完成验证，然后继续。");
-                currentSessionId = errorData.sessionId;
-                await new Promise(resolve => setTimeout(resolve, 8000));
-                return await verify(currentSessionId);
+            // 检查是否是需要验证的特定错误 (409 Conflict)
+            if (error.response && error.response.status === 409) {
+                const errorData = JSON.parse(error.response.data);
+                if (errorData.needsVerification) {
+                    // 调用统一的验证处理函数
+                    return await handleVerification(errorData);
+                }
             }
-        } catch (e) {}
+        } catch (e) {
+            log(`解析登录错误响应失败: ${e.message}`);
+        }
         return false;
     }
 }
@@ -131,6 +149,8 @@ async function verify(sessionId) {
             return true;
         } else {
             log(`后端确认验证失败: ${data.message}`);
+            // 如果验证失败，也可以弹窗提示用户
+            await xptv.showToast("验证失败: " + data.message);
             return false;
         }
     } catch (error) {
@@ -292,4 +312,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (V8.1 - 终极完整版)');
+log('海绵小站插件加载完成 (V8.2 - 人机协作修正版)');
