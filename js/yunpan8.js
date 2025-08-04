@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
 // 已根据您提供的截图，将Cookie值填写完毕。
-const COOKIE = "_xn_accesscount_visited=1; BAIDUID_BFESS=82BB2F2D056FEA224952A3CCB69C40BA:FG=1; bbs_sid=3v5fdrevvvrrbpnuvbmtuv9nci; bbs_token=n_2FnvY5D4BrjB5UnJMoCsNF4MqzeOqI46EbISj_2FirjryKnVtp; guard=DcF2FicbtLwkC6o/wp0nFQ==; guardret=56; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754300299; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753863470,1753865018; HMACCOUNT=8ECC86F14D9CE668; HMACCOUNT_BFESS=8ECC86F14D9CE668";
+const COOKIE = "bbs_sid=3v5fdrevvvrrbpnuvbmtuv9nci; bbs_token=n_2FnvY5D4BrjB5UnJMoCsNF4MqzeOqI46EbISj_2FirjryKnVtp;";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
