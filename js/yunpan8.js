@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 
 // ★★★★★【用户配置区 - Cookie】★★★★★
 // 已根据您提供的截图，将Cookie值填写完毕。
-const COOKIE = "bbs_sid=3v5fdrevvvrrbpnuvbmtuv9nci; bbs_token=n_2FnvY5D4BrjB5UnJMoCsNF4MqzeOqI46EbISj_2FirjryKnVtp;";
+const COOKIE = "bbs_sid=3v5fdrevvvrrbpnuvbmtuv9nci; bbs_token=n_2FnvY5D4BrjB5UnJMoCsNF4MqzeOqI46EbISj_2FirjryKnVtp";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
