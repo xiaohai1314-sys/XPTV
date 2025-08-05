@@ -13,7 +13,7 @@
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -22,7 +22,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V30.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 V30.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -91,7 +91,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
+    if (path.startsWith('http'  )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -121,6 +121,9 @@ async function getCards(ext) {
   }
 }
 
+// =================================================================================
+// =================== 【唯一修改区域】升级后的 getTracks 函数 ===================
+// =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -149,29 +152,32 @@ async function getTracks(ext) {
 
         const mainMessage = $('.message[isfirst="1"]');
         const tracks = [];
-        const seenUrls = new Set();
+        const seenUrls = new Set(); // 用于防止重复添加同一个链接
         const pageTitle = $("h4.break-all").text().trim();
 
+        // 内部辅助函数，用于添加资源，并进行最终的格式清洗
         const processAndPushTrack = (fileName, rawLink, accessCode = '') => {
-            if (!rawLink || seenUrls.has(rawLink)) return;
-            seenUrls.add(rawLink);
-
             let dataPacket = rawLink;
-            if (accessCode) {
+            if (accessCode && !rawLink.includes('访问码')) {
                 dataPacket = `${rawLink}（访问码：${accessCode}）`;
             }
             log(`组合数据包: ${dataPacket}`);
 
             let pureLink = '';
             let finalAccessCode = '';
-            const splitMatch = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+访问码[：:]+([^）)]+)/);
+            const splitMatch = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+(?:访问码|提取码|密码)[：:]+([^）)]+)/);
             
             if (splitMatch && splitMatch.length === 3) {
                 pureLink = splitMatch[1].trim();
                 finalAccessCode = splitMatch[2].trim();
             } else {
-                pureLink = dataPacket.trim();
+                const linkMatch = dataPacket.match(/https?:\/\/[^\s（(]+/ );
+                pureLink = linkMatch ? linkMatch[0] : '';
             }
+            
+            if (!pureLink || seenUrls.has(pureLink)) return;
+            
+            seenUrls.add(pureLink);
             log(`拆分结果 -> 纯链接: ${pureLink}, 访问码: ${finalAccessCode}`);
 
             tracks.push({
@@ -181,62 +187,64 @@ async function getTracks(ext) {
             });
         };
 
-        // 步骤 1: 提取页面上所有的潜在链接和访问码 (与v30完全一致)
-        const fullMessageText = mainMessage.text();
-        // 【v30.3 唯一修正点】: 替换为更通用的正则表达式
-        const allLinksInText = (fullMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g ) || []);
-        const allCodesInText = (fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/gi) || []);
-        
-        // 保留v30的去脏逻辑
-        const cleanedCodes = allCodesInText.map(code => code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '').replace(/[^a-zA-Z0-9]/g, ''));
-
-        // 步骤 2: 处理<a>标签 (与v30完全一致)
+        // 步骤 1: 优先处理 <a> 标签 (保留原版逻辑，最稳定)
         mainMessage.find('a').each((_, element) => {
             const linkElement = $(element);
             const href = linkElement.attr('href') || '';
-            const text = linkElement.text().trim();
             
-            let fileName = text;
-            if (!fileName || fileName.startsWith('http' )) {
-                fileName = pageTitle;
-            }
-
-            let targetLink = '';
             if (href.includes('cloud.189.cn')) {
-                targetLink = href;
-            } else if (text.includes('cloud.189.cn')) {
-                targetLink = text;
-            }
-
-            if (targetLink) {
+                const text = linkElement.text().trim();
+                let fileName = text || pageTitle;
                 let accessCode = '';
                 const parentText = linkElement.parent().text();
                 const preciseMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
-                
                 if (preciseMatch && preciseMatch[1]) {
                     accessCode = preciseMatch[1].replace(/[^a-zA-Z0-9]/g, '');
-                    log(`[A标签模式] 链接 ${targetLink} 找到了归属访问码: ${accessCode}`);
+                    log(`[A标签模式] 链接 ${href} 找到了归属访问码: ${accessCode}`);
                 }
-                processAndPushTrack(fileName, targetLink, accessCode);
+                processAndPushTrack(fileName, href, accessCode);
             }
         });
 
-        // 步骤 3: 处理纯文本链接 (与v30完全一致)
-        const linksInTags = new Set(tracks.map(t => t.pan.split('（')[0].trim()));
-        const remainingTextLinks = allLinksInText.filter(link => !linksInTags.has(link));
+        // 步骤 2: 使用“邻里查找法”处理所有纯文本内容
+        const messageHtml = mainMessage.html();
+        const lines = messageHtml.split(/<br\s*\/?>/i).map(line => cheerio.load(`<div>${line}</div>`).text().trim());
+        
+        const codeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i;
+        const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<]+/;
 
-        if (remainingTextLinks.length > 0) {
-            if (remainingTextLinks.length === cleanedCodes.length) {
-                log('[分离式模式] 发现纯文本链接和访问码一一对应');
-                for (let i = 0; i < remainingTextLinks.length; i++) {
-                    processAndPushTrack(pageTitle, remainingTextLinks[i], cleanedCodes[i]);
+        for (let i = 0; i < lines.length; i++ ) {
+            const currentLine = lines[i];
+            const linkMatch = currentLine.match(linkRegex);
+
+            if (linkMatch) {
+                const link = linkMatch[0];
+                if (seenUrls.has(link)) continue;
+
+                let accessCode = '';
+
+                const inlineCodeMatch = currentLine.match(codeRegex);
+                if (inlineCodeMatch) {
+                    accessCode = inlineCodeMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+                    log(`[内联模式] 在第 ${i} 行找到链接 ${link} 和访问码 ${accessCode}`);
+                    processAndPushTrack(pageTitle, link, accessCode);
+                    continue;
                 }
-            } 
-            else {
-                remainingTextLinks.forEach(link => {
-                    log('[裸链接模式] 处理无对应访问码的纯文本链接');
-                    processAndPushTrack(pageTitle, link, '');
-                });
+
+                if (i + 1 < lines.length) {
+                    const nextLine = lines[i + 1];
+                    const nextLineCodeMatch = nextLine.match(codeRegex);
+                    if (nextLineCodeMatch) {
+                        accessCode = nextLineCodeMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+                        log(`[分离-下邻模式] 在第 ${i+1} 行找到链接 ${link} 的访问码 ${accessCode}`);
+                        processAndPushTrack(pageTitle, link, accessCode);
+                        i++; 
+                        continue;
+                    }
+                }
+
+                log(`[裸链接模式] 链接 ${link} 未找到关联访问码`);
+                processAndPushTrack(pageTitle, link, '');
             }
         }
 
@@ -250,6 +258,9 @@ async function getTracks(ext) {
         return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
     }
 }
+// =================================================================================
+// ========================= 【唯一修改区域结束】 ==========================
+// =================================================================================
 
 async function search(ext) {
   ext = argsify(ext);
