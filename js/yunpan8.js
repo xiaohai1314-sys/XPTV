@@ -1,16 +1,22 @@
 /**
- * 海绵小站前端插件 - v50.0 (正则净化最终版)
+ * 海绵小站前端插件 - v50.0-debug (本地代理调试版)
  * 
  * 更新日志:
- * - 【v50.0 正则净化最终版】在通过代理后端获取到真实HTML后，此版本为针对真相的最终解决方案。
- *   1. (放弃节点操作): 彻底放弃Cheerio的节点查找，因为真实HTML已被JS动态修改，节点关系不可靠。
- *   2. (正则主导): 所有链接和访问码的提取，全部改为在最原始的HTML字符串上，通过正则表达式完成。
- *   3. (最终匹配逻辑): 如果只找到一个链接和一个访问码，则强行配对（解决分离问题）；否则，按顺序匹配（兼容常规问题）。
- *   此方案是建立在真实数据分析之上，逻辑最可靠的最终版本。
+ * - 【v50.0-debug】此版本为针对真实HTML分析后得出的最终解决方案的【本地调试版】。
+ *   1. (指向代理): SITE_URL已设置为指向本地代理服务器 (192.168.1.7:3000)。
+ *   2. (正则主导): 所有解析逻辑基于从代理后端获取到的真实HTML，使用正则表达式完成。
+ *   3. (最终匹配逻辑): 内置了针对“一对一分离”和“多对多”情况的匹配逻辑。
+ *   此版本用于在本地环境中，最终验证新解析方案的正确性。
  */
 
 // --- 配置区 ---
-const SITE_URL = "https://www.haimianxz.com"; // <-- 请确保这里是真实的网站地址
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★  核心修改：将请求指向我们本地运行的代理服务器 ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+const SITE_URL = "http://192.168.1.7:3000"; 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
@@ -20,7 +26,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V50.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V50.0] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V50.0-debug] ${msg}`); } catch (_) { console.log(`[海绵小站 V50.0-debug] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -75,7 +81,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v50.0 - 正则净化最终版)");
+  log("插件初始化 (v50.0-debug - 正则净化最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -91,10 +97,12 @@ function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
+    // 注意：图片地址需要用真实的URL，而不是代理地址
+    const REAL_SITE_URL = "https://www.haimianxz.com";
+    return `${REAL_SITE_URL}/${cleanPath}`;
 }
 
-async function getCards(ext) {
+async function getCards(ext ) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
   const url = `${SITE_URL}/${id}-${page}.htm`;
@@ -130,33 +138,16 @@ async function getTracks(ext) {
     const detailUrl = `${SITE_URL}/${url}`;
     
     try {
+        // 注意：这里的data是从我们的代理服务器获取的，是经过Puppeteer渲染后的真实HTML
         let { data } = await fetchWithCookie(detailUrl);
-        let $ = cheerio.load(data);
         
-        let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
-        if (isContentHidden) {
-            log("内容被隐藏，启动回帖流程...");
-            const replied = await reply(detailUrl);
-            if (replied) {
-                log("回帖成功，重新获取页面内容...");
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const retryResponse = await fetchWithCookie(detailUrl);
-                data = retryResponse.data;
-                $ = cheerio.load(data);
-            } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
-            }
-        }
-
-        const mainMessage = $('.message[isfirst="1"]');
-        const pageTitle = $("h4.break-all").text().trim();
+        // 由于data已经是最终HTML，我们不再需要回帖逻辑，但保留cheerio用于获取标题
+        let $ = cheerio.load(data);
+        const pageTitle = $("h4.break-all").text().trim() || "资源分享";
         const tracks = [];
 
-        // 关键：直接在原始HTML字符串上操作
-        let mainMessageHtml = mainMessage.html();
-        if (!mainMessageHtml) {
-            throw new Error("无法获取主楼HTML内容。");
-        }
+        // 关键：直接在返回的HTML字符串上操作
+        let mainMessageHtml = data; // 直接使用完整的返回数据
         
         // 提取器：使用正则表达式从纯HTML字符串中提取
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
@@ -256,4 +247,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v50.0 - 正则净化最终版)');
+log('海绵小站插件加载完成 (v50.0-debug - 本地代理调试版)');
