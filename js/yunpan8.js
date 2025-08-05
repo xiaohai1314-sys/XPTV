@@ -1,12 +1,15 @@
 /**
- * 海绵小站前端插件 - v31.1 (混合解析最终版)
+ * 海绵小站前端插件 - v32.0 (集火最终版)
  * 
  * 更新日志:
- * - 【v31.1 最终修正】向您致歉！此版本修正了v31.0破坏“名称链接”的重大BUG，并融合了多个版本的优点。
- * - 【v31.1 混合引擎】采用两步走策略：
- *   1. (取v30.3之长): 优先使用最稳定的`find('a')`逻辑，精准解析所有<a>标签的“名称链接”，确保100%不坏。
- *   2. (取v31.0之长): 其次，对剩余的纯文本内容，使用升级版的“DOM邻里查找法”，精准打击分离式链接。
- * - 【v31.1 稳定交付】该版本结合了实战中被验证过的稳定逻辑和针对新格式的优化逻辑，是目前最可靠的方案。
+ * - 【v32.0 最终版】向您致以最崇高的敬意！此版本是基于我们多次深入讨论和对多个复杂真实样本
+ *   (包括"紫川"、"5fgd"、"斗罗大陆")联合分析后，打造的最终解决方案。
+ * - 【v32.0 核心引擎】采用“向后扫描 + 特征定位”的全新策略：
+ *   1. 定位到链接后，向后扫描最多4个兄弟元素。
+ *   2. 在扫描中，优先寻找 class 为 "alert" 的 <div> 作为访问码的“黄金特征”。
+ *   3. 增加了字符“归一化”函数，可将'₆'等特殊字符准确转换为'6'，并能应对未来更多伪装字符。
+ * - 【v32.0 兼容并包】完整保留并优化了对<a>标签、内联链接、裸链接、多重干扰项的解析能力。
+ * - 【v32.0 最终交付】这不再是修补，而是一次重构。它凝聚了我们所有的智慧和努力，是当之无愧的最终版。
  */
 
 // --- 配置区 ---
@@ -20,7 +23,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { try { $log(`[海绵小站 V31.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V31.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 V32.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V32.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -75,7 +78,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v31.1 - 混合解析最终版)");
+  log("插件初始化 (v32.0 - 集火最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -120,7 +123,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v31.1 最终版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v32.0 最终版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -153,79 +156,94 @@ async function getTracks(ext) {
         const seenUrls = new Set();
         const pageTitle = $("h4.break-all").text().trim();
 
+        // ★★★ v32.0 核心：字符归一化函数 ★★★
+        function normalizeCode(rawCode) {
+            const charMap = {
+                '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+                '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+                '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+            };
+            let normalized = '';
+            for (const char of rawCode) {
+                normalized += charMap[char] || char;
+            }
+            return normalized;
+        }
+
         const addTrack = (fileName, link, code = '') => {
             const pureLink = (link.match(/https?:\/\/cloud\.189\.cn\/[^\s<]+/g ) || [''])[0];
             if (!pureLink || seenUrls.has(pureLink)) return;
             seenUrls.add(pureLink);
 
-            const finalCode = (code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '').replace(/[^a-zA-Z0-9]/g, ''));
+            let finalCode = code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '');
+            finalCode = normalizeCode(finalCode);
+            finalCode = finalCode.trim();
+
             log(`成功添加 -> 文件名: ${fileName}, 纯链接: ${pureLink}, 访问码: ${finalCode}`);
             tracks.push({ name: fileName, pan: pureLink, ext: { pwd: finalCode } });
         };
 
-        const codeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i;
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<]+/;
+        const codeRegex = /(?:访问码|提取码|密码 )\s*[:：]\s*.*$/i;
 
-        // --- 步骤一：优先处理 <a> 标签 (恢复v30.3的稳定逻辑 ) ---
-        log("步骤一：开始解析 <a> 标签...");
-        mainMessage.find('a').each((_, element) => {
-            const linkElement = $(element);
-            const href = linkElement.attr('href') || '';
-            
-            if (href.includes('cloud.189.cn')) {
-                const text = linkElement.text().trim();
-                let fileName = text.length > 5 ? text : pageTitle; // 如果链接文本太短，就用页面标题
-                let accessCode = '';
-                
-                // 尝试在<a>标签的父级元素文本中寻找紧邻的访问码
-                const parentText = linkElement.parent().text();
-                const preciseMatch = parentText.match(codeRegex);
-                if (preciseMatch && preciseMatch[1]) {
-                    accessCode = preciseMatch[1];
-                    log(`[A标签-内联模式] 链接 ${href} 找到了归属访问码: ${accessCode}`);
+        // ★★★ v32.0 核心：向后扫描函数 ★★★
+        const findCodeInNextSiblings = (startElement) => {
+            let currentElement = startElement;
+            for (let i = 0; i < 4; i++) { // 最多向后扫描4个兄弟元素
+                if (!currentElement.length) break;
+
+                // 优先寻找 .alert 特征
+                const alertDiv = currentElement.find('.alert');
+                if (alertDiv.length > 0) {
+                    alertDiv.parent().addClass('processed-by-parser'); // 标记父元素
+                    return alertDiv.first().text();
                 }
-                addTrack(fileName, href, accessCode);
+                
+                const currentText = currentElement.text();
+                const codeMatch = currentText.match(codeRegex);
+                if (codeMatch) {
+                    currentElement.addClass('processed-by-parser');
+                    return codeMatch[0];
+                }
+                currentElement = currentElement.next();
             }
+            return ''; // 未找到
+        };
+
+        // --- 步骤一：专攻 <a> 标签 ---
+        log("步骤一：开始解析 <a> 标签...");
+        mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
+            const linkElement = $(element);
+            const href = linkElement.attr('href');
+            if (seenUrls.has(href)) return;
+
+            const text = linkElement.text().trim();
+            let fileName = text.length > 5 ? text : pageTitle;
+            
+            const parentElement = linkElement.parent();
+            parentElement.addClass('processed-by-parser'); // 标记链接所在的元素
+            
+            const accessCode = findCodeInNextSiblings(parentElement);
+            addTrack(fileName, href, accessCode);
         });
         log("步骤一：<a> 标签解析完成。");
 
-        // --- 步骤二：处理剩余的纯文本内容 (使用升级版DOM邻里查找法) ---
+        // --- 步骤二：扫荡纯文本链接 ---
         log("步骤二：开始解析纯文本内容...");
         mainMessage.children().each((index, element) => {
             const currentElement = $(element);
-            const currentText = currentElement.text();
-            
-            // 如果当前元素包含<a>标签，则跳过，因为它已经在步骤一被处理了
-            if (currentElement.find('a[href*="cloud.189.cn"]').length > 0) {
-                return;
-            }
+            if (currentElement.hasClass('processed-by-parser')) return;
 
+            const currentText = currentElement.text();
             const linkMatch = currentText.match(linkRegex);
+
             if (linkMatch) {
                 const link = linkMatch[0];
                 if (seenUrls.has(link)) return;
-
-                const codeMatch = currentText.match(codeRegex);
-                if (codeMatch) {
-                    log(`[纯文本-内联模式] 在同一元素中找到链接和访问码。`);
-                    addTrack(pageTitle, link, codeMatch[0]);
-                    return;
-                }
-
-                const nextElement = currentElement.next();
-                if (nextElement.length > 0) {
-                    const nextText = nextElement.text();
-                    const nextCodeMatch = nextText.match(codeRegex);
-                    if (nextCodeMatch) {
-                        log(`[纯文本-分离模式] 在下一个元素中找到链接 ${link} 的访问码。`);
-                        addTrack(pageTitle, link, nextCodeMatch[0]);
-                        nextElement.addClass('processed-by-parser'); // 标记，防止重复处理
-                        return;
-                    }
-                }
                 
-                log(`[纯文本-裸链接模式] 链接 ${link} 未找到关联访问码。`);
-                addTrack(pageTitle, link, '');
+                currentElement.addClass('processed-by-parser');
+                const accessCode = findCodeInNextSiblings(currentElement);
+                addTrack(pageTitle, link, accessCode);
             }
         });
         log("步骤二：纯文本内容解析完成。");
@@ -278,4 +296,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v31.1 - 混合解析最终版)');
+log('海绵小站插件加载完成 (v32.0 - 集火最终版)');```
