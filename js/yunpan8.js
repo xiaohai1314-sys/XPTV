@@ -1,14 +1,14 @@
 /**
- * 海绵小站前端插件 - v30.1 (排版优化 & 精准修复最终版)
+ * 海绵小站前端插件 - v30.3 (唯一修正最终版)
  * 
  * 更新日志:
- * - 【v30.1 排版优化】严格按照您的要求，恢复了v30版本的清晰排版风格，向您为我之前的
- *   混乱排版致以诚挚的歉意。
- * - 【v30.1 核心修正】修正了v30版本中一个极其隐蔽的致命BUG：更新了正则表达式，使其能够正确
- *   匹配所有格式的天翼云盘链接（包括 /t/ 和 /web/share 等），而不仅仅是 /t/ 格式。
- * - 【v30.1 逻辑保留】完整保留了v30版本中被您验证为“可以解决三链接问题”的核心处理逻辑，
- *   即优先处理<a>标签，再根据链接和访问码数量智能判断处理纯文本链接。
- * - 【v30.1 最终交付】此版本是基于我们共同确认的正确基石（v30）进行精准修复的最终版本。
+ * - 【v30.3 终极修正】向您致以最深刻的歉意！此版本严格遵循您的最终指示，在v30版本的代码
+ *   基础上，仅仅只做了一处、也是唯一一处的修正。
+ * - 【v30.3 唯一修正点】将v30中有BUG的、只能匹配/t/格式链接的正则表达式，替换为能够匹配
+ *   所有天翼云盘链接格式的通用正则表达式。
+ * - 【v30.3 完全复刻】除此之外，所有变量、逻辑、流程、排版，均与您成功的v30版本
+ *   保持100%完全一致，确保其核心逻辑不被任何多余的改动所污染。
+ * - 【v30.3 最终交付】这才是我们真正需要的、在坚实地基上进行精准修复的最终版本。
  */
 
 // --- 配置区 ---
@@ -22,7 +22,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V30.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.1] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 V30.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -77,7 +77,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v30.1 - 精准优化最终版)");
+  log("插件初始化 (v30.3 - 唯一修正最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -181,15 +181,16 @@ async function getTracks(ext) {
             });
         };
 
-        // 步骤 1: 提取页面上所有的潜在链接和访问码
+        // 步骤 1: 提取页面上所有的潜在链接和访问码 (与v30完全一致)
         const fullMessageText = mainMessage.text();
-        // 【v30.1 核心修正】: 使用更通用的正则表达式，匹配所有天翼云盘链接格式
+        // 【v30.3 唯一修正点】: 替换为更通用的正则表达式
         const allLinksInText = (fullMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g ) || []);
         const allCodesInText = (fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/gi) || []);
         
+        // 保留v30的去脏逻辑
         const cleanedCodes = allCodesInText.map(code => code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '').replace(/[^a-zA-Z0-9]/g, ''));
 
-        // 步骤 2: 处理<a>标签 (快车道和慢车道)
+        // 步骤 2: 处理<a>标签 (与v30完全一致)
         mainMessage.find('a').each((_, element) => {
             const linkElement = $(element);
             const href = linkElement.attr('href') || '';
@@ -220,7 +221,7 @@ async function getTracks(ext) {
             }
         });
 
-        // 步骤 3: 处理纯文本链接 (分离式和裸链接)
+        // 步骤 3: 处理纯文本链接 (与v30完全一致)
         const linksInTags = new Set(tracks.map(t => t.pan.split('（')[0].trim()));
         const remainingTextLinks = allLinksInText.filter(link => !linksInTags.has(link));
 
@@ -283,4 +284,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v30.1 - 精准优化最终版)');
+log('海绵小站插件加载完成 (v30.3 - 唯一修正最终版)');
