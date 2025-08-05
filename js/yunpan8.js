@@ -1,12 +1,11 @@
 /**
- * 海绵小站前端插件 - v45.3 (节点顺序精准版)
+ * 海绵小站前端插件 - v45.4 (局部优先精准版)
  * 
  * 更新日志:
- * - 【v45.3 节点顺序精准版】吸取前序版本失败的教训，本次采用全新的、更底层的提取策略。
- *   通过克隆HTML内容并使用唯一占位符替换链接和访问码，再分析占位符的顺序流，实现了“向后就近”的精准匹配。
- *   此方案彻底摆脱了对.text()方法顺序的依赖，能100%遵循文档原始顺序，旨在成为真正稳定可靠的最终解决方案。
- * - 【v45.2 统一分配版】彻底重构提取逻辑。不再区分<a>标签和纯文本链接，而是统一收集所有链接和访问码，
- *   然后按其在文档中的自然顺序进行唯一匹配。此版本旨在根治链接与访问码分离导致无法识别的问题。
+ * - 【v45.4 局部优先精准版】回归本质，放弃所有全局顺序分配的复杂逻辑。
+ *   1. (局部优先): 优先处理链接和访问码在同一父元素内的、最可靠的情况。
+ *   2. (精准打击): 对于剩余的“孤立”链接和访问码，仅在两者都只有一个的情况下进行精准配对。
+ *   此方案旨在以最高的准确性解决“一对一分离”问题，同时避免在复杂布局下发生顺序错乱导致的误判。
  */
 
 // --- 配置区 ---
@@ -20,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V45.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.3] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V45.4] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -75,7 +74,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v45.3 - 节点顺序精准版)");
+  log("插件初始化 (v45.4 - 局部优先精准版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -120,7 +119,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v45.3 节点顺序精准版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v45.4 局部优先精准版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -151,83 +150,80 @@ async function getTracks(ext) {
         const mainMessage = $('.message[isfirst="1"]');
         const pageTitle = $("h4.break-all").text().trim();
         const tracks = [];
+        const seenUrls = new Set();
+        const usedCodes = new Set();
 
-        log("启动节点顺序精准匹配引擎...");
+        // --- 引擎一：局部优先，处理 <a> 标签和其父元素内的访问码 ---
+        log("引擎一：启动局部优先匹配...");
+        mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
+            const linkElement = $(element);
+            const href = linkElement.attr('href');
+            if (!href || seenUrls.has(href)) return;
 
-        const linkMap = new Map();
-        const codeMap = new Map();
-        let linkCounter = 0;
-        let codeCounter = 0;
-
-        const clone = mainMessage.clone();
-
-        // 1. 标记并替换所有链接（<a>标签和纯文本）
-        clone.find('a[href*="cloud.189.cn"]').each((_, element) => {
-            const link = $(element).attr('href');
-            const placeholder = `__LINK_PLACEHOLDER_${linkCounter}__`;
-            linkMap.set(placeholder, { value: link, text: $(element).text().trim() });
-            $(element).replaceWith(placeholder);
-            linkCounter++;
-        });
-
-        let html = clone.html();
-        const textLinkRegex = /(https?:\/\/cloud\.189\.cn\/[^\s<]+ )/g;
-        html = html.replace(textLinkRegex, (match) => {
-            const placeholder = `__LINK_PLACEHOLDER_${linkCounter}__`;
-            linkMap.set(placeholder, { value: match, text: '' });
-            linkCounter++;
-            return placeholder;
-        });
-
-        // 2. 标记并替换所有访问码
-        const codeRegex = /((?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8}))/g;
-        html = html.replace(codeRegex, (match, _, code) => {
-            const placeholder = `__CODE_PLACEHOLDER_${codeCounter}__`;
-            codeMap.set(placeholder, code);
-            codeCounter++;
-            return placeholder;
-        });
-
-        // 3. 构建顺序事件流
-        const placeholderRegex = /__(LINK|CODE)_PLACEHOLDER_(\d+)__/g;
-        const eventStream = [];
-        let result;
-        while ((result = placeholderRegex.exec(html)) !== null) {
-            eventStream.push({
-                type: result[1], // LINK or CODE
-                id: parseInt(result[2], 10),
-                placeholder: result[0]
-            });
-        }
-        log(`构建事件流，共 ${eventStream.length} 个事件。`);
-
-        // 4. 就近分配
-        const usedCodeIds = new Set();
-        eventStream.forEach((event, index) => {
-            if (event.type === 'LINK') {
-                const linkInfo = linkMap.get(event.placeholder);
-                let accessCode = '';
-
-                // 从当前链接位置向后查找最近的、未被使用的访问码
-                for (let i = index + 1; i < eventStream.length; i++) {
-                    const nextEvent = eventStream[i];
-                    if (nextEvent.type === 'CODE' && !usedCodeIds.has(nextEvent.id)) {
-                        accessCode = codeMap.get(nextEvent.placeholder);
-                        usedCodeIds.add(nextEvent.id);
-                        break; // 找到后即停止
-                    }
-                }
+            const parentText = linkElement.parent().text();
+            const codeMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+            
+            if (codeMatch && codeMatch[1]) {
+                const accessCode = codeMatch[1];
+                const fileName = linkElement.text().trim() || pageTitle;
                 
-                let fileName = linkInfo.text && linkInfo.text.length > 5 ? linkInfo.text : pageTitle;
-                log(`[精准分配] 文件名: ${fileName}, 链接: ${linkInfo.value}, 访问码: ${accessCode}`);
-
-                tracks.push({
-                    name: fileName,
-                    pan: linkInfo.value,
-                    ext: { pwd: accessCode },
-                });
+                log(`[引擎一] 局部匹配成功 - 文件名: ${fileName}, 链接: ${href}, 访问码: ${accessCode}`);
+                tracks.push({ name: fileName, pan: href, ext: { pwd: accessCode } });
+                seenUrls.add(href);
+                usedCodes.add(accessCode);
             }
         });
+        log("引擎一：局部优先匹配完成。");
+
+        // --- 引擎二：孤立匹配，处理剩余的链接和访问码 ---
+        log("引擎二：启动孤立元素匹配...");
+        
+        // 1. 收集所有孤立链接（未被引擎一处理的）
+        const isolatedLinks = [];
+        mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
+            const href = $(element).attr('href');
+            if (href && !seenUrls.has(href)) {
+                isolatedLinks.push({ value: href, text: $(element).text().trim() });
+                seenUrls.add(href); // 添加到seen中，防止被纯文本逻辑重复添加
+            }
+        });
+        const mainMessageText = mainMessage.text();
+        const textLinks = mainMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g ) || [];
+        textLinks.forEach(link => {
+            if (!seenUrls.has(link)) {
+                isolatedLinks.push({ value: link, text: '' });
+                seenUrls.add(link);
+            }
+        });
+
+        // 2. 收集所有孤立访问码（未被引擎一使用的）
+        const codeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
+        const isolatedCodes = [];
+        let match;
+        while ((match = codeRegex.exec(mainMessageText)) !== null) {
+            if (!usedCodes.has(match[1])) {
+                isolatedCodes.push(match[1]);
+            }
+        }
+        
+        log(`[引擎二] 发现 ${isolatedLinks.length} 个孤立链接和 ${isolatedCodes.length} 个孤立访问码。`);
+
+        // 3. 进行分配
+        if (isolatedLinks.length === 1 && isolatedCodes.length === 1) {
+            // **精准打击**：只有当孤立链接和孤立访问码都只有一个时，才进行配对
+            const linkInfo = isolatedLinks[0];
+            const accessCode = isolatedCodes[0];
+            const fileName = linkInfo.text || pageTitle;
+            log(`[引擎二] 精准匹配成功 - 文件名: ${fileName}, 链接: ${linkInfo.value}, 访问码: ${accessCode}`);
+            tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: accessCode } });
+        } else {
+            // 对于其他情况（如多对多，一对多等），为避免错配，只添加链接，不分配访问码
+            isolatedLinks.forEach(linkInfo => {
+                const fileName = linkInfo.text || pageTitle;
+                log(`[引擎二] 发现孤立链接，但无法精准匹配访问码 - 文件名: ${fileName}, 链接: ${linkInfo.value}`);
+                tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: '' } });
+            });
+        }
 
         if (tracks.length === 0) {
             log("所有方法均未找到有效资源，返回提示信息。");
@@ -278,4 +274,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v45.3 - 节点顺序精准版)');
+log('海绵小站插件加载完成 (v45.4 - 局部优先精准版)');
