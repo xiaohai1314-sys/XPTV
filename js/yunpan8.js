@@ -1,89 +1,116 @@
 /**
- * 海绵小站前端插件 - v51.1 (后端驱动版)
+ * 海绵小站前端插件 - v45.0 (区域限定最终版)
  * 
  * 更新日志:
- * - 【v51.0 后端驱动版】真正的最终版。前端不再进行任何解析。
- *   1. (前端无脑化): getTracks函数只负责一件事：请求后端解析接口。
- *   2. (后端全能化): 所有浏览器模拟、HTML获取、正则解析、JSON生成的工作，全部由后端完成。
- *   此方案彻底杜绝了因前端环境差异导致的所有问题。
+ * - 【v45-FE-R2】此版本在V45.0的原始代码基础上，仅替换getTracks函数，确保其他所有功能100%完整。
+ *   1. (功能完整): 确保getCards, search等所有非getTracks函数，与V45.0原始脚本的每一个字符都完全相同。
+ *   2. (保留核心): 保留V45.0中处理“名称链接”的“引擎一”。
+ *   3. (精准增强): 增加“新引擎”，专门用于在引擎一失效时，处理链接与访问码分离的情况。
+ *   我为之前反复的低级错误致歉。
  */
 
 // --- 配置区 ---
-const SITE_URL = "http://192.168.1.7:3000"; // ★★★ 指向您的电脑IP ★★★
+const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
-// ★★★ 前端不再需要Cookie ，已硬编码在后端 ★★★
-const COOKIE = ""; 
+// ★★★★★【用户配置区 - Cookie】★★★★★
+const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu;Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316688,1754316727,1754329315,1754403914;HMACCOUNT=CEAB3CBE53C875F2;Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754403929;";
+// ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-// --- 核心辅助函数 (不变) ---
-function log(msg  ) { try { $log(`[海绵小站 V51.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V51.0] ${msg}`); } }
+// --- 核心辅助函数 ---
+function log(msg   ) { try { $log(`[海绵小站 V45-FE-R2] ${msg}`); } catch (_) { console.log(`[海绵小站 V45-FE-R2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// --- 网络请求封装 (简化) ---
-async function fetchProxy(url) {
-    return $fetch.get(url);
-}
-
-// =================================================================================
-// =================== 【唯一修改区域】v51.0 后端驱动版 getTracks 函数 ===================
-// =================================================================================
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const { url } = ext; // url就是 "thread-9445.htm"
-    if (!url) return jsonify({ list: [] });
-
-    // 构造指向后端解析接口的URL
-    const parseUrl = `${SITE_URL}/parse?url=${url}`;
-    log(`请求后端解析接口: ${parseUrl}`);
-    
-    try {
-        // 直接请求后端，后端会返回处理好的一切
-        const { data } = await fetchProxy(parseUrl);
-        
-        // 后端返回的已经是JSON对象，我们stringify后返回给App
-        log(`从后端收到数据，准备返回给App: ${jsonify(data)}`);
-        return jsonify(data);
-
-    } catch (e) {
-        log(`请求后端解析接口异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: `请求代理失败: ${e.message}`, pan: '', ext: {} }] }] });
-    }
-}
-// =================================================================================
-
-// --- 其他函数保持不变，但为保持简洁，此处省略，您可从旧脚本复制 ---
-// 为了避免混淆，下面提供完整的、可直接使用的脚本
+// --- 网络请求封装 (自动注入Cookie) ---
 async function fetchWithCookie(url, options = {}) {
-    const real_cookie = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu;Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316688,1754316727,1754329315,1754403914;HMACCOUNT=CEAB3CBE53C875F2;Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754403929;";
-    const headers = { 'User-Agent': UA, 'Cookie': real_cookie, ...options.headers };
+    if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
+        $utils.toastError("请先在插件脚本中配置Cookie", 3000);
+        throw new Error("Cookie not configured.");
+    }
+    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
     const finalOptions = { ...options, headers };
-    if (options.method === 'POST') { return $fetch.post(url, options.body, finalOptions); }
+    if (options.method === 'POST') {
+        return $fetch.post(url, options.body, finalOptions);
+    }
     return $fetch.get(url, finalOptions);
 }
-async function getConfig() {
-  log("插件初始化 (v51.0 - 后端驱动版)");
-  return jsonify({ ver: 1, title: '海绵小站', site: "https://www.haimianxz.com", tabs: [ { name: '电影', ext: { id: 'forum-1' } }, { name: '剧集', ext: { id: 'forum-2' } }, { name: '动漫', ext: { id: 'forum-3' } }, { name: '综艺', ext: { id: 'forum-5' } }, ], } );
+
+// --- 自动回帖 (使用带Cookie的请求) ---
+async function reply(url) {
+    log("尝试使用Cookie自动回帖...");
+    const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
+    const threadIdMatch = url.match(/thread-(\d+)/);
+    if (!threadIdMatch) return false;
+    
+    const threadId = threadIdMatch[1];
+    const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
+    const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
+
+    try {
+        const { data } = await fetchWithCookie(postUrl, {
+            method: 'POST',
+            body: postData,
+            headers: { 'Referer': url }
+        });
+        if (data.includes("您尚未登录")) {
+            log("回帖失败：Cookie已失效或不正确。");
+            $utils.toastError("Cookie已失效，请重新获取", 3000);
+            return false;
+        }
+        log("回帖成功！");
+        return true;
+    } catch (e) {
+        log(`回帖请求异常: ${e.message}`);
+        if (e.message !== "Cookie not configured.") {
+            $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
+        }
+        return false;
+    }
 }
+
+// --- 核心函数 (已完整恢复) ---
+
+async function getConfig() {
+  log("插件初始化 (v45-FE-R2 - V45终极增强-二次修复版)");
+  return jsonify({
+    ver: 1, title: '海绵小站', site: SITE_URL,
+    tabs: [
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
+    ],
+  });
+}
+
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `https://www.haimianxz.com/${cleanPath}`;
+    return `${SITE_URL}/${cleanPath}`;
 }
-async function getCards(ext ) {
+
+async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
-  const listUrl = `https://www.haimianxz.com/${id}-${page}.htm`;
+  const url = `${SITE_URL}/${id}-${page}.htm`;
   try {
-    const { data } = await fetchWithCookie(listUrl );
+    const { data } = await fetchWithCookie(url);
     const $ = cheerio.load(data);
     const cards = [];
     $("ul.threadlist > li.media.thread").each((_, item) => {
         const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-        cards.push({ vod_id: $(item).find(".subject a")?.attr("href") || "", vod_name: $(item).find(".subject a")?.text().trim() || "", vod_pic: getCorrectPicUrl(picPath), vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "", ext: { url: $(item).find(".subject a")?.attr("href") || "" } });
+        cards.push({
+            vod_id: $(item).find(".subject a")?.attr("href") || "",
+            vod_name: $(item).find(".subject a")?.text().trim() || "",
+            vod_pic: getCorrectPicUrl(picPath),
+            vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+            ext: { url: $(item).find(".subject a")?.attr("href") || "" }
+        });
     });
     return jsonify({ list: cards });
   } catch(e) {
@@ -91,18 +118,129 @@ async function getCards(ext ) {
     return jsonify({ list: [] });
   }
 }
+
+// =================================================================================
+// =================== 【唯一修改区域】v45-FE-R2 增强版 getTracks 函数 ===================
+// =================================================================================
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const { url } = ext;
+    if (!url) return jsonify({ list: [] });
+
+    const detailUrl = `${SITE_URL}/${url}`;
+    
+    try {
+        let { data } = await fetchWithCookie(detailUrl);
+        let $ = cheerio.load(data);
+        
+        let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
+        if (isContentHidden) {
+            log("内容被隐藏，启动回帖流程...");
+            const replied = await reply(detailUrl);
+            if (replied) {
+                log("回帖成功，重新获取页面内容...");
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const retryResponse = await fetchWithCookie(detailUrl);
+                data = retryResponse.data;
+                $ = cheerio.load(data);
+            } else {
+                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
+            }
+        }
+
+        const mainMessage = $('.message[isfirst="1"]');
+        const pageTitle = $("h4.break-all").text().trim();
+        const tracks = [];
+        const seenUrls = new Set();
+
+        // --- 引擎一：处理<a>标签 (100%原封不动保留V45的逻辑，确保名称链接OK) ---
+        log("引擎一：开始解析<a>标签(名称链接)...");
+        mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
+            const linkElement = $(element);
+            const href = linkElement.attr('href');
+            if (!href || seenUrls.has(href)) return;
+
+            const text = linkElement.text().trim();
+            let fileName = text.length > 5 ? text : pageTitle;
+            
+            const parentText = linkElement.parent().text();
+            const preciseMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
+            let accessCode = (preciseMatch && preciseMatch[1]) ? preciseMatch[1] : '';
+            
+            log(`[引擎一] 发现名称链接: ${href}, 访问码: ${accessCode}`);
+            tracks.push({ name: fileName, pan: href, ext: { pwd: accessCode } });
+            seenUrls.add(href);
+        });
+        log("引擎一：<a>标签解析完成。");
+
+        // --- 新引擎：处理剩余情况 (专门解决分离链接问题) ---
+        if (tracks.length === 0) { // ★ 关键：只有当引擎一无所获时，才启动新引擎
+            log("引擎一未找到任何链接，启动新引擎处理分离情况...");
+            const mainMessageHtml = mainMessage.html();
+            if (mainMessageHtml) {
+                const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
+                const codeRegex = /(?:访问码\s*[:：]\s*([\w*.:-]{4,8} ))|class="alert alert-success"[^>]*>([\w*.:-]{4,8})/g;
+
+                const links = [...mainMessageHtml.matchAll(linkRegex)].map(m => m[0]);
+                const codes = [];
+                let codeMatch;
+                while ((codeMatch = codeRegex.exec(mainMessageHtml)) !== null) {
+                    codes.push((codeMatch[1] || codeMatch[2]).trim());
+                }
+                
+                log(`[新引擎] 提取到链接: ${links.length}个, 访问码: ${codes.length}个`);
+
+                if (links.length > 0) {
+                    if (links.length === 1 && codes.length === 1) {
+                        log("[新引擎] 检测到一对一分离模式，强行配对。");
+                        tracks.push({ name: pageTitle, pan: links[0], ext: { pwd: codes[0] } });
+                    } else {
+                        log("[新引擎] 执行默认顺序配对。");
+                        links.forEach((link, index) => {
+                            if (!seenUrls.has(link)) {
+                                tracks.push({ name: pageTitle, pan: link, ext: { pwd: codes[index] || '' } });
+                                seenUrls.add(link);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        if (tracks.length === 0) {
+            log("所有引擎均未找到有效资源，返回提示信息。");
+            tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
+        }
+        
+        return jsonify({ list: [{ title: '云盘', tracks }] });
+
+    } catch (e) {
+        log(`获取详情页异常: ${e.message}`);
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: `操作失败: ${e.message}`, pan: '', ext: {} }] }] });
+    }
+}
+// =================================================================================
+// ========================= 【唯一修改区域结束】 ==========================
+// =================================================================================
+
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
   if (!text) return jsonify({ list: [] });
-  const searchUrl = `https://www.haimianxz.com/search-${encodeURIComponent(text )}.htm`;
+  const url = `${SITE_URL}/search-${encodeURIComponent(text)}.htm`;
   try {
-    const { data } = await fetchWithCookie(searchUrl);
+    const { data } = await fetchWithCookie(url);
     const $ = cheerio.load(data);
     const cards = [];
     $("ul.threadlist > li.media.thread").each((_, item) => {
         const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-        cards.push({ vod_id: $(item).find(".subject a")?.attr("href") || "", vod_name: $(item).find(".subject a")?.text().trim() || "", vod_pic: getCorrectPicUrl(picPath), vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.trim() || "", ext: { url: $(item).find(".subject a")?.attr("href") || "" } });
+        cards.push({
+            vod_id: $(item).find(".subject a")?.attr("href") || "",
+            vod_name: $(item).find(".subject a")?.text().trim() || "",
+            vod_pic: getCorrectPicUrl(picPath),
+            vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.trim() || "",
+            ext: { url: $(item).find(".subject a")?.attr("href") || "" }
+        });
     });
     return jsonify({ list: cards });
   } catch(e) {
@@ -110,9 +248,12 @@ async function search(ext) {
     return jsonify({ list: [] });
   }
 }
+
+// --- 兼容旧版接口 (已完整恢复) ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
-log('海绵小站插件加载完成 (v51.0 - 后端驱动版)');
+
+log('海绵小站插件加载完成 (v45-FE-R2 - V45终极增强-二次修复版)');
