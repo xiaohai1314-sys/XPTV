@@ -10,9 +10,11 @@
  *   保持100%完全一致，确保其核心逻辑不被任何多余的改动所污染。
  * - 【v30.3 最终交付】这才是我们真正需要的、在坚实地基上进行精准修复的最终版本。
  *
- * --- v30.3.1 (健壮性修正) ---
- * - 在v30.3基础上，对步骤3的匹配逻辑进行微调，使其在处理分离式资源时更健壮，能抵抗页面干扰信息。
- * - 此版本为最终交付版，解决了所有已知问题。
+ * --- v30.3.2 (终极修正) ---
+ * - 基于深入讨论，确认v30.3的核心缺陷在于步骤3的判断基准错误。
+ * - 此版本仅修正该判断基准，将全局访问码列表(cleanedCodes)替换为排除了已用访问码的
+ *   剩余访问码列表(remainingCodes)，确保逻辑的正确性。
+ * - 无任何其他多余改动，是目前最稳定、最符合原始意图的最终版本。
  */
 
 // --- 配置区 ---
@@ -26,7 +28,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { try { $log(`[海绵小站 V30.3.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 V30.3.2] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -81,7 +83,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v30.3.1 - 健壮性修正版)");
+  log("插件初始化 (v30.3.2 - 终极修正版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -226,27 +228,22 @@ async function getTracks(ext) {
         });
 
         // ====================【唯一的修改区域开始】====================
-        // 步骤 3: 处理纯文本链接 (【健壮性修正】)
+        // 步骤 3: 处理纯文本链接 (【终极修正】)
         const linksInTags = new Set(tracks.map(t => t.pan.split('（')[0].trim()));
         const remainingTextLinks = allLinksInText.filter(link => !linksInTags.has(link));
 
-        // 【修正点】计算剩余访问码时，必须排除掉在步骤2中已经成功配对的访问码
-        const usedCodes = new Set(tracks.map(t => t.ext.pwd).filter(Boolean)); // 获取所有已使用的访问码
-        const remainingCodes = cleanedCodes.filter(code => !usedCodes.has(code)); // 得到真正未被使用的访问码
+        // 【核心修正】计算出真正“剩下”的、未被步骤2使用过的访问码
+        const usedCodes = new Set(tracks.map(t => t.ext.pwd).filter(Boolean));
+        const remainingCodes = cleanedCodes.filter(code => !usedCodes.has(code));
 
         if (remainingTextLinks.length > 0) {
-            // 【保留并优化】现在，这里的判断逻辑就变得可靠了
-            if (remainingTextLinks.length > 0 && remainingTextLinks.length === remainingCodes.length) {
+            // 【核心修正】使用正确的“剩余访问码”数量(remainingCodes)来与剩余链接数量进行判断
+            if (remainingTextLinks.length === remainingCodes.length) {
                 log('[分离式模式] 发现纯文本链接和访问码一一对应');
                 for (let i = 0; i < remainingTextLinks.length; i++) {
                     processAndPushTrack(pageTitle, remainingTextLinks[i], remainingCodes[i]);
                 }
-            }
-            // 【新增逻辑】增加对“一对一”情况的容错处理，作为补充
-            else if (remainingTextLinks.length === 1 && remainingCodes.length === 1) {
-                log('[一对一容错模式] 发现唯一剩余链接和访问码，强制配对');
-                processAndPushTrack(pageTitle, remainingTextLinks[0], remainingCodes[0]);
-            }
+            } 
             else {
                 log('[裸链接模式] 处理无对应访问码的纯文本链接');
                 remainingTextLinks.forEach(link => {
@@ -300,4 +297,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v30.3.1 - 健壮性修正版)');
+log('海绵小站插件加载完成 (v30.3.2 - 终极修正版)');
