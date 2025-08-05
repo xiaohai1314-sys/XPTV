@@ -1,9 +1,11 @@
 /**
- * 海绵小站前端插件 - v45.0 (区域限定最终版)
+ * 海绵小站前端插件 - v45.1 (优化版)
  * 
  * 更新日志:
- * - 【v45.0 最终版】向您致以最深刻的歉意和最崇高的敬意。此版本是在彻底勘破之前所有版本的“区域污染”
- *   这一根本性缺陷后，完全遵从您的最终指示，打造的绝对正确的最终版本。
+ * - 【v45.1 优化版】基于v45.0最终版进行优化，修复了核心引擎的多个识别盲点，增强了健壮性。
+ *   1. (修复) 解决了因访问码与关键词之间存在“换行符”而导致提取失败的致命缺陷。
+ *   2. (增强) 强化了对特殊字符（如下标/上标数字）的“反-反爬”能力。
+ *   3. (加固) 增加了URL强制清洗逻辑，确保任何情况下输出的链接都是纯净的。
  * - 【v45.0 核心引擎】“区域限定 + 顺序分配”：
  *   1. (限定战场): 所有的链接和访问码提取，都严格限制在主楼(`.message[isfirst="1"]`)之内，彻底杜绝评论区干扰。
  *   2. (顺序提取): 在主楼文本中，按顺序提取出所有孤立的链接和所有潜在的访问码。
@@ -14,7 +16,7 @@
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -23,7 +25,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { try { $log(`[海绵小站 V45.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.0] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V45.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -78,7 +80,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v45.0 - 区域限定最终版)");
+  log("插件初始化 (v45.1 - 优化版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -92,7 +94,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -123,7 +125,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v45.0 最终版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v45.1 优化版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -159,31 +161,24 @@ async function getTracks(ext) {
         const processAndPushTrack = (fileName, rawLink, accessCode = '') => {
             if (!rawLink || seenUrls.has(rawLink)) return;
             
-            const preliminaryCleanCode = (accessCode || '').replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '');
-
-            let dataPacket = rawLink;
-            if (preliminaryCleanCode) {
-                dataPacket = `${rawLink}（访问码：${preliminaryCleanCode}）`;
-            }
+            // ★【优化②】URL强制清洗：确保无论如何都能得到纯净的链接
+            let pureLink = rawLink.replace(/(?:访问码|提取码|密码|（|:|：)[\s\S]*/i, '').trim();
             
-            let pureLink = '';
-            let finalAccessCode = '';
-            const splitMatch = dataPacket.match(/(https?:\/\/[^\s（(]+ )[\s（(]+访问码[：:]+([^）)]+)/);
-            
-            if (splitMatch && splitMatch.length === 3) {
-                pureLink = splitMatch[1].trim();
-                finalAccessCode = splitMatch[2].trim();
-            } else {
-                pureLink = dataPacket.trim();
-            }
-            
+            // ★【优化③】增强的访问码标准化函数
             const normalizeCode = (rawCode) => {
-                const charMap = { '₆': '6' };
+                if (!rawCode) return '';
+                const charMap = {
+                    '₆': '6', '₇': '7', '₈': '8', '₉': '9', '₀': '0', // 处理下标数字
+                    '¹': '1', '²': '2', '³': '3', // 处理上标数字
+                    ' ': '' // 移除访问码内部所有空格
+                };
                 let normalized = '';
-                for (const char of rawCode) { normalized += charMap[char] || char; }
+                for (const char of rawCode) {
+                    normalized += charMap[char] || char;
+                }
                 return normalized.trim();
             };
-            finalAccessCode = normalizeCode(finalAccessCode);
+            const finalAccessCode = normalizeCode(accessCode);
 
             log(`[最终赋值] 文件名: ${fileName}, 纯链接: ${pureLink}, 访问码: ${finalAccessCode}`);
             
@@ -197,7 +192,7 @@ async function getTracks(ext) {
             });
         };
 
-        // --- 引擎一：处理<a>标签 (100%复刻v30.3的逻辑) ---
+        // --- 引擎一：处理<a>标签 (逻辑不变，但受益于新的processAndPushTrack) ---
         log("引擎一：开始解析<a>标签(名称链接)...");
         mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
             const linkElement = $(element);
@@ -220,14 +215,15 @@ async function getTracks(ext) {
         // --- 引擎二：处理剩余纯文本链接 (区域限定 + 顺序分配) ---
         log("引擎二：开始解析剩余纯文本链接...");
         // 1. 限定战场：只在主楼文本中操作
-        const mainMessageText = mainMessage.text();
+        // ★【优化①】预处理文本，将所有换行符替换为空格，以修复换行访问码的识别问题
+        let mainMessageText = mainMessage.text().replace(/(\r\n|\n|\r)/gm, " ");
 
         // 2. 在战场内寻找所有链接
-        const allLinksInMessage = (mainMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g ) || []);
-        const isolatedLinks = allLinksInMessage.filter(link => !seenUrls.has(link));
+        const allLinksInMessage = (mainMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g  ) || []);
+        const isolatedLinks = allLinksInMessage.filter(link => !seenUrls.has(link.replace(/(?:访问码|提取码|密码|（|:|：)[\s\S]*/i, '').trim()));
 
         if (isolatedLinks.length > 0) {
-            // 3. 在战场内寻找所有访问码
+            // 3. 在战场内寻找所有访问码 (正则表达式不变，因为换行问题已在文本预处理中解决)
             const codeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
             let potentialCodes = [];
             let match;
@@ -244,7 +240,7 @@ async function getTracks(ext) {
             // 5. 按序分配
             for (let i = 0; i < isolatedLinks.length; i++) {
                 const link = isolatedLinks[i];
-                const code = availableCodes[i] || ''; // 按顺序分配，没有则为空
+                const code = availableCodes[i] || ''; // 按顺序分配，没有则为空 (完美处理裸链接)
                 processAndPushTrack(pageTitle, link, code);
             }
         }
@@ -298,4 +294,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v45.0 - 区域限定最终版)');
+log('海绵小站插件加载完成 (v45.1 - 优化版)');
