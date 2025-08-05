@@ -1,10 +1,5 @@
 /**
  * 海绵小站前端插件 - v45.0 增强修正版（2025-08-05）
- *
- * 特性:
- * - 保留原有结构 + 原有识别逻辑
- * - 增强分离式访问码识别
- * - 增强字符混淆还原（₆ → 6，ａ → a 等）
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -12,74 +7,119 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
-const COOKIE = "_xn_accesscount_visited=1; bbs_sid=xxx; bbs_token=xxx;";
+// ✅ 你的原始 Cookie 已放入此处
+const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
 
-// 日志
-function log(msg) {
-    try { $log(`[海绵小站 V45.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.0] ${msg}`); }
-}
+function log(msg) { try { $log(`[海绵小站 V45.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
 async function fetchWithCookie(url, options = {}) {
-    if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-        $utils.toastError("请先在插件脚本中配置Cookie", 3000);
-        throw new Error("Cookie not configured.");
-    }
+    if (!COOKIE) throw new Error("Cookie 未配置");
     const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
     const finalOptions = { ...options, headers };
-    if (options.method === 'POST') {
-        return $fetch.post(url, options.body, finalOptions);
-    }
-    return $fetch.get(url, finalOptions);
+    return options.method === 'POST'
+        ? $fetch.post(url, options.body, finalOptions)
+        : $fetch.get(url, finalOptions);
 }
 
 async function reply(url) {
-    log("尝试使用Cookie自动回帖...");
-    const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-    const threadIdMatch = url.match(/thread-(\d+)/);
-    if (!threadIdMatch) return false;
-
-    const threadId = threadIdMatch[1];
+    const threadId = url.match(/thread-(\d+)/)?.[1];
+    if (!threadId) return false;
     const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = { doctype: 1, return_html: 1, message: replies[Math.floor(Math.random() * replies.length)], quotepid: 0, quick_reply_message: 0 };
-
+    const msgList = ["资源很好,感谢分享!", "感谢楼主!", "找了很久终于找到了!", "赞一个!"];
     try {
         const { data } = await fetchWithCookie(postUrl, {
             method: 'POST',
-            body: postData,
+            body: {
+                doctype: 1,
+                return_html: 1,
+                message: msgList[Math.floor(Math.random() * msgList.length)],
+                quotepid: 0,
+                quick_reply_message: 0
+            },
             headers: { 'Referer': url }
         });
-        if (data.includes("您尚未登录")) {
-            log("回帖失败：Cookie已失效或不正确。");
-            $utils.toastError("Cookie已失效，请重新获取", 3000);
-            return false;
-        }
-        log("回帖成功！");
-        return true;
-    } catch (e) {
-        log(`回帖请求异常: ${e.message}`);
-        return false;
-    }
+        return !data.includes("您尚未登录");
+    } catch { return false; }
 }
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http')) return path;
-    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
+    return `${SITE_URL}/${path.replace(/^\.?\//, '')}`;
 }
 
-async function getConfig() {
-    return jsonify({
-        ver: 1, title: '海绵小站', site: SITE_URL,
-        tabs: [
-            { name: '电影', ext: { id: 'forum-1' } },
-            { name: '剧集', ext: { id: 'forum-2' } },
-            { name: '动漫', ext: { id: 'forum-3' } },
-            { name: '综艺', ext: { id: 'forum-5' } }
-        ],
+const normalizeCode = (rawCode) => {
+    const map = {
+        '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+        '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+        'ａ': 'a', 'ｂ': 'b', 'ｃ': 'c', 'ｄ': 'd', 'ｅ': 'e', 'ｆ': 'f', 'ｇ': 'g', 'ｈ': 'h', 'ｉ': 'i',
+        'ｊ': 'j', 'ｋ': 'k', 'ｌ': 'l', 'ｍ': 'm', 'ｎ': 'n', 'ｏ': 'o', 'ｐ': 'p', 'ｑ': 'q', 'ｒ': 'r',
+        'ｓ': 's', 'ｔ': 't', 'ｕ': 'u', 'ｖ': 'v', 'ｗ': 'w', 'ｘ': 'x', 'ｙ': 'y', 'ｚ': 'z'
+    };
+    return [...rawCode].map(c => map[c] || c).join('').trim();
+};
+
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const { url } = ext;
+    if (!url) return jsonify({ list: [] });
+
+    const detailUrl = `${SITE_URL}/${url}`;
+    const { data } = await fetchWithCookie(detailUrl);
+    let $ = cheerio.load(data);
+
+    if ($("div.alert.alert-warning").text().includes("回复后")) {
+        const ok = await reply(detailUrl);
+        if (!ok) return jsonify({ list: [{ title: '提示', tracks: [{ name: 'Cookie失效或无效', pan: '', ext: {} }] }] });
+        await new Promise(r => setTimeout(r, 1000));
+        const retry = await fetchWithCookie(detailUrl);
+        $ = cheerio.load(retry.data);
+    }
+
+    const tracks = [];
+    const seen = new Set();
+    const title = $("h4.break-all").text().trim();
+    const msg = $('.message[isfirst="1"]');
+    const push = (name, link, pwd = '') => {
+        if (!link || seen.has(link)) return;
+        seen.add(link);
+        tracks.push({ name, pan: link, ext: { pwd: normalizeCode(pwd) } });
+    };
+
+    // 引擎一：<a>
+    msg.find('a[href*="cloud.189.cn"]').each((_, el) => {
+        const href = $(el).attr('href');
+        const text = $(el).text().trim();
+        const parent = $(el).parent().text();
+        const pwd = parent.match(/(?:访问码|提取码|密码)\s*[:：]?\s*([\w*.:-]{4,8})/)?.[1] || '';
+        push(text.length > 5 ? text : title, href, pwd);
     });
+
+    // 引擎二：分行智能识别
+    const lines = msg.text().split(/\n+/).map(l => l.trim()).filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+        const cur = lines[i], next = lines[i + 1] || '', next2 = lines[i + 2] || '', prev = lines[i - 1] || '';
+        const link = cur.match(/https?:\/\/cloud\.189\.cn\/\S+/)?.[0];
+        if (link && /访问码.*[:：]?\s*([\w*.:-]{4,8})/.test(next)) return jsonify({ list: [{ title: '云盘', tracks: [ { name: title, pan: link, ext: { pwd: normalizeCode(next.match(/访问码.*[:：]?\s*([\w*.:-]{4,8})/)[1]) } } ] }] });
+        if (/访问码/.test(cur) && /^[\w*.:-]{4,8}$/.test(next)) {
+            const link2 = lines[i + 2]?.match(/https?:\/\/cloud\.189\.cn\/\S+/)?.[0]
+                       || lines[i - 1]?.match(/https?:\/\/cloud\.189\.cn\/\S+/)?.[0] || '';
+            if (link2) push(title, link2, next);
+        }
+    }
+
+    // 引擎三：纯文本顺序分配
+    const raw = msg.text();
+    const allLinks = (raw.match(/https?:\/\/cloud\.189\.cn\/[^\s）)）]+/g) || []).filter(l => !seen.has(l));
+    const allCodes = [...raw.matchAll(/(?:访问码|提取码|密码)\s*[:：]?\s*([\w*.:-]{4,8})/g)].map(m => m[1]);
+    for (let i = 0; i < allLinks.length; i++) {
+        push(title, allLinks[i], allCodes[i] || '');
+    }
+
+    if (tracks.length === 0) tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
+    return jsonify({ list: [{ title: '云盘', tracks }] });
 }
 
 async function getCards(ext) {
@@ -91,171 +131,53 @@ async function getCards(ext) {
         const $ = cheerio.load(data);
         const cards = [];
         $("ul.threadlist > li.media.thread").each((_, item) => {
-            const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
+            const pic = $(item).find("a:first-child > img.avatar-3")?.attr("src");
             cards.push({
                 vod_id: $(item).find(".subject a")?.attr("href") || "",
                 vod_name: $(item).find(".subject a")?.text().trim() || "",
-                vod_pic: getCorrectPicUrl(picPath),
-                vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+                vod_pic: getCorrectPicUrl(pic),
+                vod_remarks: $(item).find(".text-grey:last-child")?.text().trim() || "",
                 ext: { url: $(item).find(".subject a")?.attr("href") || "" }
             });
         });
         return jsonify({ list: cards });
     } catch (e) {
-        log(`获取卡片列表异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const { url } = ext;
-    if (!url) return jsonify({ list: [] });
-
-    const detailUrl = `${SITE_URL}/${url}`;
-
-    try {
-        let { data } = await fetchWithCookie(detailUrl);
-        let $ = cheerio.load(data);
-
-        const isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
-        if (isContentHidden) {
-            const replied = await reply(detailUrl);
-            if (replied) {
-                await new Promise(r => setTimeout(r, 1000));
-                const retry = await fetchWithCookie(detailUrl);
-                data = retry.data;
-                $ = cheerio.load(data);
-            } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
-            }
-        }
-
-        const normalizeCode = (rawCode) => {
-            const charMap = {
-                '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
-                '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
-                '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
-                '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-                'ａ': 'a', 'ｂ': 'b', 'ｃ': 'c', 'ｄ': 'd', 'ｅ': 'e',
-                'ｆ': 'f', 'ｇ': 'g', 'ｈ': 'h', 'ｉ': 'i', 'ｊ': 'j',
-                'ｋ': 'k', 'ｌ': 'l', 'ｍ': 'm', 'ｎ': 'n', 'ｏ': 'o',
-                'ｐ': 'p', 'ｑ': 'q', 'ｒ': 'r', 'ｓ': 's', 'ｔ': 't',
-                'ｕ': 'u', 'ｖ': 'v', 'ｗ': 'w', 'ｘ': 'x', 'ｙ': 'y',
-                'ｚ': 'z'
-            };
-            let normalized = '';
-            for (const char of rawCode) {
-                normalized += charMap[char] || char;
-            }
-            return normalized.trim();
-        };
-
-        const mainMessage = $('.message[isfirst="1"]');
-        const pageTitle = $("h4.break-all").text().trim();
-        const tracks = [];
-        const seenUrls = new Set();
-
-        const processAndPushTrack = (fileName, link, accessCode = '') => {
-            if (!link || seenUrls.has(link)) return;
-            seenUrls.add(link);
-            const cleanCode = normalizeCode(accessCode);
-            tracks.push({ name: fileName, pan: link, ext: { pwd: cleanCode } });
-        };
-
-        // 引擎一：<a> 标签识别
-        mainMessage.find('a[href*="cloud.189.cn"]').each((_, a) => {
-            const href = $(a).attr('href');
-            if (seenUrls.has(href)) return;
-            const text = $(a).text().trim();
-            const fileName = text.length > 5 ? text : pageTitle;
-            const parentText = $(a).parent().text();
-            const match = parentText.match(/(?:访问码|提取码|密码)\s*[:：]?\s*([\w*.:-]+)/i);
-            const code = match ? match[1] : '';
-            processAndPushTrack(fileName, href, code);
-        });
-
-        // 引擎二增强：段落匹配
-        const lines = mainMessage.text().split(/\n+/).map(l => l.trim()).filter(Boolean);
-        for (let i = 0; i < lines.length; i++) {
-            const cur = lines[i];
-            const next = lines[i + 1] || '';
-            const next2 = lines[i + 2] || '';
-            const prev = lines[i - 1] || '';
-
-            if ((/访问码|提取码|密码/.test(cur)) && /^[\w*.:-]{4,8}$/.test(next)) {
-                const code = next;
-                const link = lines[i + 2]?.match(/https?:\/\/cloud\.189\.cn\/[^\s）)）]+/)?.[0]
-                          || lines[i - 1]?.match(/https?:\/\/cloud\.189\.cn\/[^\s）)）]+/)?.[0] || '';
-                if (link) processAndPushTrack(pageTitle, link, code);
-                break;
-            }
-
-            const linkMatch = cur.match(/https?:\/\/cloud\.189\.cn\/[^\s）)）]+/);
-            if (linkMatch) {
-                const link = linkMatch[0];
-                if (/访问码\s*[:：]?\s*([\w*.:-]{4,8})/.test(next)) {
-                    const code = next.match(/访问码\s*[:：]?\s*([\w*.:-]{4,8})/)[1];
-                    processAndPushTrack(pageTitle, link, code);
-                    break;
-                }
-                if (/访问码|提取码|密码/.test(next) && /^[\w*.:-]{4,8}$/.test(next2)) {
-                    processAndPushTrack(pageTitle, link, next2);
-                    break;
-                }
-            }
-        }
-
-        // 引擎二原始：纯文本正则匹配 + 顺序分配
-        const mainText = mainMessage.text();
-        const allLinks = (mainText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g) || []).filter(link => !seenUrls.has(link));
-        if (allLinks.length > 0) {
-            const codes = [];
-            const codeRegex = /(?:访问码|提取码|密码)\s*[:：]?\s*([\w*.:-]{4,8})/g;
-            let m;
-            while ((m = codeRegex.exec(mainText)) !== null) {
-                codes.push(m[1]);
-            }
-            const used = new Set(tracks.map(t => t.ext.pwd).filter(Boolean));
-            const avail = codes.filter(c => !used.has(c));
-            for (let i = 0; i < allLinks.length; i++) {
-                processAndPushTrack(pageTitle, allLinks[i], avail[i] || '');
-            }
-        }
-
-        if (tracks.length === 0) {
-            tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
-        }
-
-        return jsonify({ list: [{ title: '云盘', tracks }] });
-
-    } catch (e) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
-    }
+async function getConfig() {
+    return jsonify({
+        ver: 1, title: '海绵小站', site: SITE_URL,
+        tabs: [
+            { name: '电影', ext: { id: 'forum-1' } },
+            { name: '剧集', ext: { id: 'forum-2' } },
+            { name: '动漫', ext: { id: 'forum-3' } },
+            { name: '综艺', ext: { id: 'forum-5' } },
+        ],
+    });
 }
 
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
-    if (!text) return jsonify({ list: [] });
     const url = `${SITE_URL}/search-${encodeURIComponent(text)}.htm`;
     try {
         const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
         const cards = [];
         $("ul.threadlist > li.media.thread").each((_, item) => {
-            const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
+            const pic = $(item).find("a:first-child > img.avatar-3")?.attr("src");
             cards.push({
                 vod_id: $(item).find(".subject a")?.attr("href") || "",
                 vod_name: $(item).find(".subject a")?.text().trim() || "",
-                vod_pic: getCorrectPicUrl(picPath),
-                vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+                vod_pic: getCorrectPicUrl(pic),
+                vod_remarks: $(item).find(".text-grey:last-child")?.text().trim() || "",
                 ext: { url: $(item).find(".subject a")?.attr("href") || "" }
             });
         });
         return jsonify({ list: cards });
     } catch (e) {
-        log(`搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
@@ -266,4 +188,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (V45.0 增强修正版 2025-08-05)');
+log('海绵小站插件加载完成 (v45.0 最终增强修正版)');
