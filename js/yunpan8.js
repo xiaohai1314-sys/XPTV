@@ -1,11 +1,10 @@
 /**
- * 海绵小站前端插件 - v45.4 (局部优先精准版)
+ * 海绵小站前端插件 - v45.5 (净化最终版)
  * 
  * 更新日志:
- * - 【v45.4 局部优先精准版】回归本质，放弃所有全局顺序分配的复杂逻辑。
- *   1. (局部优先): 优先处理链接和访问码在同一父元素内的、最可靠的情况。
- *   2. (精准打击): 对于剩余的“孤立”链接和访问码，仅在两者都只有一个的情况下进行精准配对。
- *   此方案旨在以最高的准确性解决“一对一分离”问题，同时避免在复杂布局下发生顺序错乱导致的误判。
+ * - 【v45.5 净化最终版】在V45.4的基础上，增加最关键的一步：对所有提取到的访问码进行.trim()净化处理。
+ *   此前所有版本均忽略了源码中访问码可能包含尾随空格的问题，导致App获取到带空格的错误访问码而无法操作。
+ *   此版本旨在通过净化数据，根治这一隐藏极深的根本性问题。
  */
 
 // --- 配置区 ---
@@ -19,7 +18,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V45.4] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.4] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V45.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -74,7 +73,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v45.4 - 局部优先精准版)");
+  log("插件初始化 (v45.5 - 净化最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -119,7 +118,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v45.4 局部优先精准版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v45.5 净化最终版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -164,7 +163,7 @@ async function getTracks(ext) {
             const codeMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
             
             if (codeMatch && codeMatch[1]) {
-                const accessCode = codeMatch[1];
+                const accessCode = codeMatch[1].trim(); // ★★★ 净化 ★★★
                 const fileName = linkElement.text().trim() || pageTitle;
                 
                 log(`[引擎一] 局部匹配成功 - 文件名: ${fileName}, 链接: ${href}, 访问码: ${accessCode}`);
@@ -184,7 +183,7 @@ async function getTracks(ext) {
             const href = $(element).attr('href');
             if (href && !seenUrls.has(href)) {
                 isolatedLinks.push({ value: href, text: $(element).text().trim() });
-                seenUrls.add(href); // 添加到seen中，防止被纯文本逻辑重复添加
+                seenUrls.add(href);
             }
         });
         const mainMessageText = mainMessage.text();
@@ -201,8 +200,9 @@ async function getTracks(ext) {
         const isolatedCodes = [];
         let match;
         while ((match = codeRegex.exec(mainMessageText)) !== null) {
-            if (!usedCodes.has(match[1])) {
-                isolatedCodes.push(match[1]);
+            const potentialCode = match[1].trim(); // ★★★ 净化 ★★★
+            if (!usedCodes.has(potentialCode)) {
+                isolatedCodes.push(potentialCode);
             }
         }
         
@@ -210,14 +210,12 @@ async function getTracks(ext) {
 
         // 3. 进行分配
         if (isolatedLinks.length === 1 && isolatedCodes.length === 1) {
-            // **精准打击**：只有当孤立链接和孤立访问码都只有一个时，才进行配对
             const linkInfo = isolatedLinks[0];
-            const accessCode = isolatedCodes[0];
+            const accessCode = isolatedCodes[0]; // 已经是净化过的
             const fileName = linkInfo.text || pageTitle;
             log(`[引擎二] 精准匹配成功 - 文件名: ${fileName}, 链接: ${linkInfo.value}, 访问码: ${accessCode}`);
             tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: accessCode } });
         } else {
-            // 对于其他情况（如多对多，一对多等），为避免错配，只添加链接，不分配访问码
             isolatedLinks.forEach(linkInfo => {
                 const fileName = linkInfo.text || pageTitle;
                 log(`[引擎二] 发现孤立链接，但无法精准匹配访问码 - 文件名: ${fileName}, 链接: ${linkInfo.value}`);
@@ -274,4 +272,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v45.4 - 局部优先精准版)');
+log('海绵小站插件加载完成 (v45.5 - 净化最终版)');
