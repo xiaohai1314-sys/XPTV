@@ -22,7 +22,7 @@ function log(msg  ) { try { $log(`[海绵小站 V51.0] ${msg}`); } catch (_) { c
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 网络请求封装 (简化，不再需要Cookie) ---
+// --- 网络请求封装 (简化) ---
 async function fetchProxy(url) {
     return $fetch.get(url);
 }
@@ -43,9 +43,9 @@ async function getTracks(ext) {
         // 直接请求后端，后端会返回处理好的一切
         const { data } = await fetchProxy(parseUrl);
         
-        // 后端返回的已经是JSON字符串，我们直接返回即可
-        // 如果后端返回的是对象，则需要jsonify
-        return typeof data === 'string' ? data : jsonify(data);
+        // 后端返回的已经是JSON对象，我们stringify后返回给App
+        log(`从后端收到数据，准备返回给App: ${jsonify(data)}`);
+        return jsonify(data);
 
     } catch (e) {
         log(`请求后端解析接口异常: ${e.message}`);
@@ -55,11 +55,7 @@ async function getTracks(ext) {
 // =================================================================================
 
 // --- 其他函数保持不变，但为保持简洁，此处省略，您可从旧脚本复制 ---
-// ... getConfig, getCorrectPicUrl, getCards, search, init, home, category, detail, play ...
-// 注意：getCards等函数仍需使用旧的fetchWithCookie逻辑，因为它们不经过我们的/parse接口
 // 为了避免混淆，下面提供完整的、可直接使用的脚本
-
-// --- 完整版脚本所需的所有函数 ---
 async function fetchWithCookie(url, options = {}) {
     const real_cookie = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu;Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316688,1754316727,1754329315,1754403914;HMACCOUNT=CEAB3CBE53C875F2;Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754403929;";
     const headers = { 'User-Agent': UA, 'Cookie': real_cookie, ...options.headers };
