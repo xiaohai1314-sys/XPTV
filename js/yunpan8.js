@@ -1,13 +1,14 @@
 /**
- * 海绵小站前端插件 - v48.1 (可视化调试版)
+ * 海绵小站前端插件 - v50.0 (最终完美版)
  * 
  * 更新日志:
- * - 【v48.1 可视化调试】修改资源命名规则，将识别到的访问码直接显示在文件名中，
- *   格式为“[码:xxxx] 文件名”或“[码:无] 文件名”，便于在无日志环境下直接诊断问题。
- * - 【v48.0 根源修正】在v47.1引擎基础上，增加对HTML中&nbsp;实体的预处理。
- *   此修正解决了因“不换行空格”导致正则表达式匹配空白失败的根本性问题。
- * - 【v47.1 引擎升级】增加“模式3”，处理“关键词在下一行，实体在下两行”的排版。
- * - 【v47.0 核心引擎】采用“逐行扫描-上下文匹配”引擎，精准模拟人类阅读行为。
+ * - 【v50.0 终极修正】修正了模式2中的核心正则表达式，将其中的`[\w*.:-]`替换为`.`，
+ *   使其能“宽容地”抓取包含任何特殊字符（如下标₆）的访问码文本，然后再交由后续的
+ *   `normalizeCode`函数进行精准处理。此修正解决了“抓取”阶段的根本性缺陷。
+ * - 【v49.0 链接净化】保留对链接末尾污染字符的净化逻辑。
+ * - 【v48.1 可视化调试】保留文件名显示访问码的功能，便于持续观察。
+ * - 【v48.0 根源修正】保留对&nbsp;实体的预处理。
+ * - 【v47.x 引擎】保留成熟的“逐行扫描-上下文匹配”引擎。
  * - 【致谢】此版本的核心思想源于用户的智慧，特此致以最崇高的敬意。
  */
 
@@ -22,7 +23,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V48.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V48.1] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V50.0] ${msg}`); } catch (_) { console.log(`[海绵小站 V50.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -77,7 +78,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v48.1 - 可视化调试版)");
+  log("插件初始化 (v50.0 - 最终完美版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -122,7 +123,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v48.1 全新引擎版 getTracks 函数 ================
+// =================== 【唯一修改区域】v50.0 全新引擎版 getTracks 函数 ================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -175,7 +176,7 @@ async function getTracks(ext) {
         };
 
         const processAndPushTrack = (fileName, link, code) => {
-            const pureLink = (link.match(/https?:\/\/cloud\.189\.cn\/[^\s（(]+/ )?.[0] || '').trim();
+            const pureLink = (link.match(/https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+/ ) || [''])[0];
             if (!pureLink || seenUrls.has(pureLink)) return;
 
             const finalAccessCode = normalizeCode(code);
@@ -183,10 +184,7 @@ async function getTracks(ext) {
             
             seenUrls.add(pureLink);
             tracks.push({
-                // ★★★ 【可视化调试】修改文件名以显示识别结果 ★★★
                 name: `[码:${finalAccessCode || '无'}] ${fileName}`,
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
                 pan: pureLink,
                 ext: { pwd: finalAccessCode },
             });
@@ -214,7 +212,7 @@ async function getTracks(ext) {
         
         for (let i = 0; i < lines.length; i++) {
             const currentLine = lines[i];
-            const linkMatch = currentLine.match(/https?:\/\/cloud\.189\.cn\/[^\s（(]+/ );
+            const linkMatch = currentLine.match(/https?:\/\/cloud\.189\.cn\/t\/[a-zA-Z0-9]+/ );
 
             if (linkMatch) {
                 const link = linkMatch[0];
@@ -223,7 +221,7 @@ async function getTracks(ext) {
                 let code = '';
                 
                 // 模式1: 访问码和链接在同一行
-                const inlineCodeMatch = currentLine.match(/(?:访问码|提取码|密码)\s*[:：]?\s*([\w*.:-]+)/);
+                const inlineCodeMatch = currentLine.match(/(?:访问码|提取码|密码)\s*[:：]?\s*(.{4,8})/);
                 if (inlineCodeMatch) {
                     code = inlineCodeMatch[1];
                 }
@@ -231,7 +229,8 @@ async function getTracks(ext) {
                 // 模式2: 访问码在下一行 (关键词和实体在同一行)
                 const nextLine = lines[i + 1] || '';
                 if (!code && nextLine) {
-                    const nextLineCodeMatch = nextLine.match(/(?:访问码|提取码|密码)?\s*[:：]?\s*([\w*.:-]{4,8})$/);
+                    // ★★★ 【终极修正】使用“.”来宽容地抓取任何字符 ★★★
+                    const nextLineCodeMatch = nextLine.match(/(?:访问码|提取码|密码)?\s*[:：]?\s*(.{4,8})$/);
                      if (nextLineCodeMatch) {
                         code = nextLineCodeMatch[1] || nextLineCodeMatch[0];
                     }
@@ -239,7 +238,7 @@ async function getTracks(ext) {
                 
                 // 模式3: 关键词在下一行，实体在下两行
                 const nextNextLine = lines[i + 2] || '';
-                if (!code && nextLine.match(/^(?:访问码|提取码|密码)\s*[:：]?\s*$/) && nextNextLine.match(/^[\w*.:-]{4,8}$/)) {
+                if (!code && nextLine.match(/^(?:访问码|提取码|密码)\s*[:：]?\s*$/) && nextNextLine.match(/^.{4,8}$/)) {
                     code = nextNextLine;
                 }
                 
@@ -296,4 +295,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v48.1 - 可视化调试版)');
+log('海绵小站插件加载完成 (v50.0 - 最终完美版)');
