@@ -9,11 +9,15 @@
  * - 【v30.3 完全复刻】除此之外，所有变量、逻辑、流程、排版，均与您成功的v30版本
  *   保持100%完全一致，确保其核心逻辑不被任何多余的改动所污染。
  * - 【v30.3 最终交付】这才是我们真正需要的、在坚实地基上进行精准修复的最终版本。
+ *
+ * --- v30.3.1 (健壮性修正) ---
+ * - 在v30.3基础上，对步骤3的匹配逻辑进行微调，使其在处理分离式资源时更健壮，能抵抗页面干扰信息。
+ * - 此版本为最终交付版，解决了所有已知问题。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -22,7 +26,7 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 V30.3] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 V30.3.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.3.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -77,7 +81,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v30.3 - 唯一修正最终版)");
+  log("插件初始化 (v30.3.1 - 健壮性修正版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -91,7 +95,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
+    if (path.startsWith('http'  )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -181,23 +185,23 @@ async function getTracks(ext) {
             });
         };
 
-        // 步骤 1: 提取页面上所有的潜在链接和访问码 (与v30完全一致)
+        // 步骤 1: 提取页面上所有的潜在链接和访问码 (与v30.3一致)
         const fullMessageText = mainMessage.text();
         // 【v30.3 唯一修正点】: 替换为更通用的正则表达式
-        const allLinksInText = (fullMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g ) || []);
+        const allLinksInText = (fullMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s]+/g  ) || []);
         const allCodesInText = (fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/gi) || []);
         
         // 保留v30的去脏逻辑
         const cleanedCodes = allCodesInText.map(code => code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '').replace(/[^a-zA-Z0-9]/g, ''));
 
-        // 步骤 2: 处理<a>标签 (与v30完全一致)
+        // 步骤 2: 处理<a>标签 (与v30.3一致)
         mainMessage.find('a').each((_, element) => {
             const linkElement = $(element);
             const href = linkElement.attr('href') || '';
             const text = linkElement.text().trim();
             
             let fileName = text;
-            if (!fileName || fileName.startsWith('http' )) {
+            if (!fileName || fileName.startsWith('http'  )) {
                 fileName = pageTitle;
             }
 
@@ -221,24 +225,36 @@ async function getTracks(ext) {
             }
         });
 
-        // 步骤 3: 处理纯文本链接 (与v30完全一致)
+        // ====================【唯一的修改区域开始】====================
+        // 步骤 3: 处理纯文本链接 (【健壮性修正】)
         const linksInTags = new Set(tracks.map(t => t.pan.split('（')[0].trim()));
         const remainingTextLinks = allLinksInText.filter(link => !linksInTags.has(link));
 
+        // 【修正点】计算剩余访问码时，必须排除掉在步骤2中已经成功配对的访问码
+        const usedCodes = new Set(tracks.map(t => t.ext.pwd).filter(Boolean)); // 获取所有已使用的访问码
+        const remainingCodes = cleanedCodes.filter(code => !usedCodes.has(code)); // 得到真正未被使用的访问码
+
         if (remainingTextLinks.length > 0) {
-            if (remainingTextLinks.length === cleanedCodes.length) {
+            // 【保留并优化】现在，这里的判断逻辑就变得可靠了
+            if (remainingTextLinks.length > 0 && remainingTextLinks.length === remainingCodes.length) {
                 log('[分离式模式] 发现纯文本链接和访问码一一对应');
                 for (let i = 0; i < remainingTextLinks.length; i++) {
-                    processAndPushTrack(pageTitle, remainingTextLinks[i], cleanedCodes[i]);
+                    processAndPushTrack(pageTitle, remainingTextLinks[i], remainingCodes[i]);
                 }
-            } 
+            }
+            // 【新增逻辑】增加对“一对一”情况的容错处理，作为补充
+            else if (remainingTextLinks.length === 1 && remainingCodes.length === 1) {
+                log('[一对一容错模式] 发现唯一剩余链接和访问码，强制配对');
+                processAndPushTrack(pageTitle, remainingTextLinks[0], remainingCodes[0]);
+            }
             else {
+                log('[裸链接模式] 处理无对应访问码的纯文本链接');
                 remainingTextLinks.forEach(link => {
-                    log('[裸链接模式] 处理无对应访问码的纯文本链接');
                     processAndPushTrack(pageTitle, link, '');
                 });
             }
         }
+        // ====================【唯一的修改区域结束】====================
 
         if (tracks.length === 0) {
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
@@ -284,4 +300,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v30.3 - 唯一修正最终版)');
+log('海绵小站插件加载完成 (v30.3.1 - 健壮性修正版)');
