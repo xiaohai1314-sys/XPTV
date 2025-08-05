@@ -1,18 +1,15 @@
 /**
- * 海绵小站前端插件 - v30.11 (最终策略执行版)
+ * 海绵小站前端插件 - v30.12 (终极外科手术修复版)
  * 
  * 更新日志:
- * - 【v30.11 最终执行】本版本严格遵循我们共同制定的、精简后的“四步走”最终策略，并在V30.3的原始代码基础上进行最小化“微创手术”式修改。
- * - 【v30.11 策略落地】完美实现了“初始化->处理名称链接->处理剩余链接->兜底保险”的四步逻辑。
- * - 【v30.11 严格遵循】
- *    1. 优先处理并“挖掉”不带访问码的“名称链接”。
- *    2. 对剩余部分，用强大正则和全局关联规则，处理所有混合格式链接。
- *    3. 在完全失败时，启动信息保全的“兜底”机制。
- *    4. 输出格式永远是纯净的pan和pwd。
- * - 【v30.11 忠于原作】除实现新策略所必需的改动外，其余部分100%忠于V30.3。这应是解决所有问题的最终代码。
+ * - 【v30.12 终极修复】本版本在V30.3的原始代码基础上，仅针对`getTracks`函数进行了核心逻辑的“外科手术”式替换。
+ * - 【v30.12 唯一蓝图】新的提取与关联逻辑，完全以v73+v6这对成功的前后端范例为模板，旨在复刻其强大的解析能力。
+ * - 【v30.12 输出标准】严格遵循v6的输出标准，pan字段为纯净链接，ext.pwd字段为经过净化(去除非字母数字字符)的纯净访问码。
+ * - 【v30.12 逻辑再造】引入了更健壮的“多阶段关联”和“挖掉”机制，以应对各种复杂的链接与访问码组合，解决了V30.3的根本性缺陷。
+ * - 【v30.12 忠于原作】除getTracks的核心逻辑外，所有其他部分均与V30.3保持100%一致。
  */
 
-// --- 配置区 (与v30.3完全一致) ---
+// --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
@@ -22,13 +19,13 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-// --- 核心辅助函数 (与v30.3完全一致 ) ---
-function log(msg ) { try { $log(`[海绵小站 V30.11] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.11] ${msg}`); } }
+// --- 核心辅助函数 ---
+function log(msg  ) { try { $log(`[海绵小站 V30.12] ${msg}`); } catch (_) { console.log(`[海绵小站 V30.12] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// --- 网络请求封装 (与v30.3完全一致) ---
+// --- 网络请求封装 (自动注入Cookie) ---
 async function fetchWithCookie(url, options = {}) {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
         $utils.toastError("请先在插件脚本中配置Cookie", 3000);
@@ -42,7 +39,7 @@ async function fetchWithCookie(url, options = {}) {
     return $fetch.get(url, finalOptions);
 }
 
-// --- 自动回帖 (与v30.3完全一致) ---
+// --- 自动回帖 (使用带Cookie的请求) ---
 async function reply(url) {
     log("尝试使用Cookie自动回帖...");
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
@@ -75,10 +72,10 @@ async function reply(url) {
     }
 }
 
-// --- 核心函数 (除getTracks外，均与v30.3完全一致) ---
+// --- 核心函数 ---
 
 async function getConfig() {
-  log("插件初始化 (v30.11 - 最终策略执行版)");
+  log("插件初始化 (v30.12 - 终极外科手术修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -123,7 +120,7 @@ async function getCards(ext) {
 }
 
 // =======================================================================
-// ==================== 【V30.11 - 唯一修改的核心函数】 ===================
+// ==================== 【V30.12 - 唯一修改的核心函数】 ===================
 // =======================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -156,65 +153,110 @@ async function getTracks(ext) {
         const seenUrls = new Set();
         const pageTitle = $("h4.break-all").text().trim();
 
-        // 【策略第一步：初始化与预处理】
+        // 【第一步：初始化与预处理】
         const $processedHTML = mainMessage.clone(); // 创建一个可修改的副本用于“挖掉”操作
         const fullMessageText = mainMessage.text();
-        const allCodes = (fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/gi) || [])
+        
+        // 提取并净化所有访问码，作为“全局弹药库”
+        const allCleanedCodes = (fullMessageText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/gi) || [])
             .map(code => code.replace(/(?:访问码|提取码|密码)\s*[:：]\s*/i, '').replace(/[^a-zA-Z0-9]/g, ''));
-        log(`[预处理] 发现 ${allCodes.length} 个潜在访问码: ${allCodes.join(', ')}`);
+        log(`[预处理] 发现 ${allCleanedCodes.length} 个净化后的潜在访问码: ${allCleanedCodes.join(', ')}`);
 
-        // 【策略第二步：处理“名称链接” (情况 #4)】
+        // 用于存储已明确配对的链接和密码
+        const pairedLinks = new Map();
+
+        // 【第二步：处理带紧邻访问码的链接 (最高优先级)】
+        // 这个正则能捕获链接和它后面紧跟着的访问码
+        const adjacentRegex = /(https?:\/\/cloud\.189\.cn\/[^\s<（(]+ )[\s\S]*?(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/g;
+        let tempHTML = $processedHTML.html().replace(/<br\s*\/?>/gi, '\n'); // 将  
+替换为换行符以简化正则
+        let adjacentMatch;
+
+        while ((adjacentMatch = adjacentRegex.exec(tempHTML)) !== null) {
+            const pureLink = adjacentMatch[1].trim();
+            const cleanedCode = adjacentMatch[2].replace(/[^a-zA-Z0-9]/g, '');
+            
+            if (seenUrls.has(pureLink)) continue;
+            
+            log(`[紧邻模式] 发现明确配对: ${pureLink} -> ${cleanedCode}`);
+            pairedLinks.set(pureLink, cleanedCode);
+            seenUrls.add(pureLink);
+
+            // 从HTML中“挖掉”这个已被处理的块，避免干扰
+            tempHTML = tempHTML.replace(adjacentMatch[0], '');
+        }
+        // 更新Cheerio对象
+        $processedHTML.html(tempHTML);
+
+
+        // 【第三步：处理所有<a>标签 (包括名称链接和链接型文本)】
+        const allLinksData = [];
         $processedHTML.find('a').each((_, element) => {
             const linkElement = $(element);
             const href = linkElement.attr('href') || '';
             const text = linkElement.text().trim();
 
-            // 规则：必须是天翼云盘链接，且显示文本不能是链接
-            if (href.includes('cloud.189.cn') && !text.startsWith('http' )) {
+            if (href.includes('cloud.189.cn')) {
                 if (seenUrls.has(href)) return;
-                seenUrls.add(href);
-
-                log(`[名称链接模式] 提取: ${text} -> ${href}`);
-                tracks.push({ name: text, pan: href, ext: { pwd: '' } });
                 
-                // “挖掉”已处理的元素，避免干扰后续步骤
-                linkElement.remove();
+                let fileName = text.startsWith('http' ) ? pageTitle : text;
+                allLinksData.push({ name: fileName, pan: href });
+                seenUrls.add(href);
             }
         });
-
-        // 【策略第三步：处理所有剩余链接 (情况 #1, #2, #3)】
+        
+        // 【第四步：处理剩余纯文本中的裸链接】
         const remainingText = $processedHTML.text();
-        // 强大的正则，能同时捕获链接和可选的、紧邻的访问码
-        const linkRegex = /(https?:\/\/cloud\.189\.cn\/[^\s（(]+ )[\s（(]*访问码[：:]?\s*([\w*.:-]+)?/g;
-        let match;
-        while ((match = linkRegex.exec(remainingText)) !== null) {
-            const pureLink = match[1].trim();
+        const nakedLinkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<（(]+/g;
+        let nakedMatch;
+        while ((nakedMatch = nakedLinkRegex.exec(remainingText )) !== null) {
+            const pureLink = nakedMatch[0].trim();
             if (seenUrls.has(pureLink)) continue;
+            
+            allLinksData.push({ name: pageTitle, pan: pureLink });
             seenUrls.add(pureLink);
-
-            let accessCode = '';
-            // 优先使用正则直接捕获到的紧邻访问码
-            if (match[2]) {
-                accessCode = match[2].replace(/[^a-zA-Z0-9]/g, '');
-                log(`[紧邻模式] 链接 ${pureLink} 找到了紧邻访问码: ${accessCode}`);
-            } 
-            // 否则，应用“全局唯一”规则
-            else if (allCodes.length === 1) {
-                accessCode = allCodes[0];
-                log(`[上下文模式] 链接 ${pureLink} 关联到全局唯一访问码: ${accessCode}`);
-            }
-
-            tracks.push({ name: pageTitle, pan: pureLink, ext: { pwd: accessCode } });
         }
 
-        // 【策略第四步：您的“兜底”保险】
+        // 【第五步：终极关联与分配】
+        // 1. 先将已明确配对的链接推入结果
+        for (const [link, code] of pairedLinks.entries()) {
+            tracks.push({ name: pageTitle, pan: link, ext: { pwd: code } });
+        }
+
+        // 2. 处理剩余的、未配对的链接
+        const unpairedLinks = allLinksData.filter(data => !pairedLinks.has(data.pan));
+        const availableCodes = allCleanedCodes.filter(code => ![...pairedLinks.values()].includes(code));
+
+        if (unpairedLinks.length > 0 && availableCodes.length > 0) {
+            // 规则A: 如果可用的码和未配对的链接数量相等，则一一对应
+            if (unpairedLinks.length === availableCodes.length) {
+                log('[一对一模式] 链接与访问码数量匹配，按序分配');
+                for (let i = 0; i < unpairedLinks.length; i++) {
+                    unpairedLinks[i].pwd = availableCodes[i];
+                }
+            }
+            // 规则B: 如果只有一个可用的码，则分配给所有未配对的链接
+            else if (availableCodes.length === 1) {
+                log('[一对多模式] 发现唯一可用访问码，分配给所有剩余链接');
+                for (let i = 0; i < unpairedLinks.length; i++) {
+                    unpairedLinks[i].pwd = availableCodes[0];
+                }
+            }
+        }
+        
+        // 3. 将分配好（或未分配到）密码的链接推入结果
+        unpairedLinks.forEach(data => {
+            tracks.push({ name: data.name, pan: data.pan, ext: { pwd: data.pwd || '' } });
+        });
+
+
+        // 【第六步：兜底保险】
         if (tracks.length === 0 && fullMessageText.includes('cloud.189.cn')) {
             log('[兜底保险模式] 精确匹配失败，启动信息保全机制...');
             const allPossibleLinks = fullMessageText.match(/https?:\/\/cloud\.189\.cn\/[^\s\n\r]+/g ) || [];
             allPossibleLinks.forEach(link => {
                 if (seenUrls.has(link)) return;
                 seenUrls.add(link);
-                // 原封不动地交付，让上层决定如何处理
                 tracks.push({ name: link, pan: link, ext: { pwd: '' } });
             });
         }
@@ -222,6 +264,10 @@ async function getTracks(ext) {
         if (tracks.length === 0) {
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
+        
+        // 按链接在原文中出现的顺序排序，保证结果稳定
+        tracks.sort((a, b) => fullMessageText.indexOf(a.pan) - fullMessageText.indexOf(b.pan));
+        
         return jsonify({ list: [{ title: '云盘', tracks }] });
 
     } catch (e) {
@@ -259,11 +305,11 @@ async function search(ext) {
   }
 }
 
-// --- 兼容旧版接口 (与v30.3完全一致) ---
+// --- 兼容旧版接口 ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v30.11 - 最终策略执行版)');
+log('海绵小站插件加载完成 (v30.12 - 终极外科手术修复版)');
