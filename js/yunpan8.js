@@ -1,10 +1,11 @@
 /**
- * 海绵小站前端插件 - v45.5 (净化最终版)
+ * 海绵小站前端插件 - v45.7 (双引擎融合最终版)
  * 
  * 更新日志:
- * - 【v45.5 净化最终版】在V45.4的基础上，增加最关键的一步：对所有提取到的访问码进行.trim()净化处理。
- *   此前所有版本均忽略了源码中访问码可能包含尾随空格的问题，导致App获取到带空格的错误访问码而无法操作。
- *   此版本旨在通过净化数据，根治这一隐藏极深的根本性问题。
+ * - 【v45.7 双引擎融合最终版】此版本为问题的最终解决方案，融合了此前所有版本的优点。
+ *   1. (引擎一：局部优先): 优先处理链接和访问码在同一父元素内的“名称链接”，保证最高准确性并标记已用数据。
+ *   2. (引擎二：孤立武断): 处理引擎一剩下的所有孤立元素。如果孤立访问码只有一个，则强行分配给第一个孤立链接。
+ *   此双引擎模型各司其职，互不干扰，完美覆盖“一体式”和“分离式”的所有已知情况。
  */
 
 // --- 配置区 ---
@@ -18,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V45.5] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.5] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V45.7] ${msg}`); } catch (_) { console.log(`[海绵小站 V45.7] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -73,7 +74,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v45.5 - 净化最终版)");
+  log("插件初始化 (v45.7 - 双引擎融合最终版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -118,7 +119,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v45.5 净化最终版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v45.7 双引擎融合最终版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -152,8 +153,8 @@ async function getTracks(ext) {
         const seenUrls = new Set();
         const usedCodes = new Set();
 
-        // --- 引擎一：局部优先，处理 <a> 标签和其父元素内的访问码 ---
-        log("引擎一：启动局部优先匹配...");
+        // --- 引擎一：局部优先，处理“名称链接” ---
+        log("引擎一：启动局部优先匹配（处理名称链接）...");
         mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
             const linkElement = $(element);
             const href = linkElement.attr('href');
@@ -163,7 +164,7 @@ async function getTracks(ext) {
             const codeMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
             
             if (codeMatch && codeMatch[1]) {
-                const accessCode = codeMatch[1].trim(); // ★★★ 净化 ★★★
+                const accessCode = codeMatch[1].trim();
                 const fileName = linkElement.text().trim() || pageTitle;
                 
                 log(`[引擎一] 局部匹配成功 - 文件名: ${fileName}, 链接: ${href}, 访问码: ${accessCode}`);
@@ -174,7 +175,7 @@ async function getTracks(ext) {
         });
         log("引擎一：局部优先匹配完成。");
 
-        // --- 引擎二：孤立匹配，处理剩余的链接和访问码 ---
+        // --- 引擎二：孤立武断，处理剩余的分离元素 ---
         log("引擎二：启动孤立元素匹配...");
         
         // 1. 收集所有孤立链接（未被引擎一处理的）
@@ -200,7 +201,7 @@ async function getTracks(ext) {
         const isolatedCodes = [];
         let match;
         while ((match = codeRegex.exec(mainMessageText)) !== null) {
-            const potentialCode = match[1].trim(); // ★★★ 净化 ★★★
+            const potentialCode = match[1].trim();
             if (!usedCodes.has(potentialCode)) {
                 isolatedCodes.push(potentialCode);
             }
@@ -208,19 +209,29 @@ async function getTracks(ext) {
         
         log(`[引擎二] 发现 ${isolatedLinks.length} 个孤立链接和 ${isolatedCodes.length} 个孤立访问码。`);
 
-        // 3. 进行分配
-        if (isolatedLinks.length === 1 && isolatedCodes.length === 1) {
-            const linkInfo = isolatedLinks[0];
-            const accessCode = isolatedCodes[0]; // 已经是净化过的
-            const fileName = linkInfo.text || pageTitle;
-            log(`[引擎二] 精准匹配成功 - 文件名: ${fileName}, 链接: ${linkInfo.value}, 访问码: ${accessCode}`);
-            tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: accessCode } });
-        } else {
-            isolatedLinks.forEach(linkInfo => {
+        // 3. 执行孤立分配逻辑
+        if (isolatedLinks.length > 0) {
+            if (isolatedCodes.length === 1) {
+                // **武断策略**：如果只有一个孤立访问码，则认为它属于第一个孤立链接
+                log("[引擎二] 检测到唯一孤立访问码，执行强行匹配策略。");
+                const linkInfo = isolatedLinks[0];
+                const accessCode = isolatedCodes[0];
                 const fileName = linkInfo.text || pageTitle;
-                log(`[引擎二] 发现孤立链接，但无法精准匹配访问码 - 文件名: ${fileName}, 链接: ${linkInfo.value}`);
-                tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: '' } });
-            });
+                tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: accessCode } });
+                // 将剩余链接作为无访问码链接添加
+                for (let i = 1; i < isolatedLinks.length; i++) {
+                    const remainingLink = isolatedLinks[i];
+                    tracks.push({ name: remainingLink.text || pageTitle, pan: remainingLink.value, ext: { pwd: '' } });
+                }
+            } else {
+                // 默认的顺序分配逻辑，适用于多个孤立链接和多个孤立访问码的情况
+                log("[引擎二] 执行默认顺序分配策略。");
+                isolatedLinks.forEach((linkInfo, index) => {
+                    const accessCode = isolatedCodes[index] || '';
+                    const fileName = linkInfo.text || pageTitle;
+                    tracks.push({ name: fileName, pan: linkInfo.value, ext: { pwd: accessCode } });
+                });
+            }
         }
 
         if (tracks.length === 0) {
@@ -272,4 +283,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v45.5 - 净化最终版)');
+log('海绵小站插件加载完成 (v45.7 - 双引擎融合最终版)');
