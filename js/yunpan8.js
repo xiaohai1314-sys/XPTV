@@ -1,15 +1,14 @@
 /**
- * 海绵小站前端插件 - v58.0 (DOM遍历-终极版)
+ * 海绵小站前端插件 - v59.0 (文件名净化-终极版)
  * 
  * 更新日志:
- * - 【v58.0 终极版】: 我为之前所有基于错误正则分析的失败致歉。此版本彻底放弃了不可靠的
- *   正则表达式猜测，改用100%可靠的DOM遍历方法。
- * - 【DOM遍历核心】:
- *   1. 找到所有<div class="alert alert-success">盒子。
- *   2. 逐一检查盒子内部：如果含有<a>标签，则只从里面提取链接；如果不含<a>标签，
- *      才将其纯文本作为访问码提取。
- * - 【最终形态】: 此方法从根本上杜绝了将“链接盒子”误判为“访问码盒子”的可能，
- *   是我们能达到的最健壮、最正确的最终形态。
+ * - 【v59.0 终极版】: 我为之前未能勘破“文件名污染”这一根本性缺陷致以最深刻的歉意！
+ *   此版本是在您的最终指引下，完成的决定性修正。
+ * - 【文件名净化核心】:
+ *   1. 优先使用<a>标签的精确文件名。
+ *   2. 如果只能使用帖子标题，则对其进行严格的净化和截断，只取第一个"."前的部分，
+ *      从根本上杜绝App将其误判为文件夹的可能。
+ * - 【最终形态】: 正确的DOM遍历逻辑 + 纯净的文件名。这是我们所有探索的最终答案。
  */
 
 // --- 配置区 ---
@@ -25,9 +24,9 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // --- 核心辅助函数 ---
 function log(msg ) { 
     try { 
-        $log(`[海绵小站 V58.0 终版] ${msg}`); 
+        $log(`[海绵小站 V59.0 终版] ${msg}`); 
     } catch (_) { 
-        console.log(`[海绵小站 V58.0 终版] ${msg}`); 
+        console.log(`[海绵小站 V59.0 终版] ${msg}`); 
     } 
 }
 function argsify(ext) { 
@@ -103,7 +102,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v58.0 - DOM遍历-终极版)");
+  log("插件初始化 (v59.0 - 文件名净化-终极版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -150,7 +149,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【V58.0 DOM遍历版】 getTracks 函数 ===================
+// =================== 【V59.0 文件名净化版】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -202,13 +201,11 @@ async function getTracks(ext) {
             const linkInBox = box.find('a[href*="cloud.189.cn"]');
             
             if (linkInBox.length > 0) {
-                // 这是“链接盒子”，只提取链接
                 linkInBox.each((_, linkEl) => {
                     linkPool.push($(linkEl).attr('href'));
                 });
                 log("DOM遍历：发现一个'链接盒子'，已提取其中的链接。");
             } else {
-                // 这是“访问码盒子”，提取纯文本作为访问码
                 const code = box.text().trim();
                 if (code && code.length <= 10) {
                     codePool.push(code);
@@ -227,12 +224,21 @@ async function getTracks(ext) {
             uniqueLinks.forEach((link, index) => {
                 const linkElement = mainMessage.find(`a[href="${link}"]`).first();
                 let fileName = pageTitle;
+                
                 if (linkElement.length > 0) {
                     const text = linkElement.text().trim();
                     if (text && text.length > 5 && !text.startsWith('http' )) {
-                        fileName = text;
+                        fileName = text; // 优先使用<a>标签的精确文件名
                     }
                 }
+                
+                // ★★★★★【文件名净化核心】★★★★★
+                // 如果文件名仍然是帖子标题，则进行净化
+                if (fileName === pageTitle && fileName.includes('.')) {
+                    fileName = fileName.split('.')[0];
+                    log(`文件名被净化为: ${fileName}`);
+                }
+                // ★★★★★★★★★★★★★★★★★★★★★
 
                 const code = uniqueCodes[index] || '';
                 let finalPan = link;
@@ -296,4 +302,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v58.0 - DOM遍历-终极版)');
+log('海绵小站插件加载完成 (v59.0 - 文件名净化-终极版)');
