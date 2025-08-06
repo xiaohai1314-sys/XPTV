@@ -11,7 +11,7 @@
 
 // ★★★★★【调试配置区】★★★★★
 const DEBUG_MODE = true; // 总开关，设为false可关闭后端日志功能
-const DEBUG_ENDPOINT = "http://192.168.1.100:3000/log"; // 【请修改为您后端的IP地址和端口】
+const DEBUG_ENDPOINT = "http://192.168.10.111:3000/log"; // 【请修改为您后端的IP地址和端口】
 // ★★★★★★★★★★★★★★★★★★★
 
 // --- 配置区 ---
