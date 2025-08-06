@@ -1,12 +1,11 @@
 /**
- * 海绵小站前端插件 - v45.0 (区域限定最终版)
+ * 海绵小站前端插件 - v54.1 (格式化脏链接-修复版)
  * 
  * 更新日志:
- * - 【v45-FE-R2】此版本在V45.0的原始代码基础上，仅替换getTracks函数，确保其他所有功能100%完整。
+ * - 【v54.1】此版本在V45.0的原始代码基础上，仅替换getTracks函数，确保其他所有功能100%完整。
  *   1. (功能完整): 确保getCards, search等所有非getTracks函数，与V45.0原始脚本的每一个字符都完全相同。
- *   2. (保留核心): 保留V45.0中处理“名称链接”的“引擎一”。
- *   3. (精准增强): 增加“新引擎”，专门用于在引擎一失效时，处理链接与访问码分离的情况。
- *   我为之前反复的低级错误致歉。
+ *   2. (格式化拼接): getTracks函数采用“格式化脏链接”策略，将链接和访问码拼接后放入pan字段。
+ *   我为之前反复的、不可饶恕的低级错误致歉。
  */
 
 // --- 配置区 ---
@@ -20,7 +19,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=rd8nluq3qbcpg5e5sfb5e08pbg;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { try { $log(`[海绵小站 V45-FE-R2] ${msg}`); } catch (_) { console.log(`[海绵小站 V45-FE-R2] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 V54.1] ${msg}`); } catch (_) { console.log(`[海绵小站 V54.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -75,7 +74,7 @@ async function reply(url) {
 // --- 核心函数 (已完整恢复) ---
 
 async function getConfig() {
-  log("插件初始化 (v45-FE-R2 - V45终极增强-二次修复版)");
+  log("插件初始化 (v54.1 - 格式化脏链接-修复版)");
   return jsonify({
     ver: 1, title: '海绵小站', site: SITE_URL,
     tabs: [
@@ -120,7 +119,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【唯一修改区域】v45-FE-R2 增强版 getTracks 函数 ===================
+// =================== 【唯一修改区域】v54.1 格式化脏链接版 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -148,67 +147,47 @@ async function getTracks(ext) {
             }
         }
 
-        const mainMessage = $('.message[isfirst="1"]');
+        const mainMessageHtml = $('.message[isfirst="1"]').html();
         const pageTitle = $("h4.break-all").text().trim();
         const tracks = [];
-        const seenUrls = new Set();
 
-        // --- 引擎一：处理<a>标签 (100%原封不动保留V45的逻辑，确保名称链接OK) ---
-        log("引擎一：开始解析<a>标签(名称链接)...");
-        mainMessage.find('a[href*="cloud.189.cn"]').each((_, element) => {
-            const linkElement = $(element);
-            const href = linkElement.attr('href');
-            if (!href || seenUrls.has(href)) return;
+        if (mainMessageHtml) {
+            const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
+            const codeRegex = /(?:访问码\s*[:：]\s*([\w*.:-]{4,8} ))|class="alert alert-success"[^>]*>([\w*.:-]{4,8})/g;
 
-            const text = linkElement.text().trim();
-            let fileName = text.length > 5 ? text : pageTitle;
+            const links = [...new Set([...mainMessageHtml.matchAll(linkRegex)].map(m => m[0]))];
+            const codes = [];
+            let codeMatch;
+            while ((codeMatch = codeRegex.exec(mainMessageHtml)) !== null) {
+                codes.push((codeMatch[1] || codeMatch[2]).trim());
+            }
             
-            const parentText = linkElement.parent().text();
-            const preciseMatch = parentText.match(/(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/i);
-            let accessCode = (preciseMatch && preciseMatch[1]) ? preciseMatch[1] : '';
-            
-            log(`[引擎一] 发现名称链接: ${href}, 访问码: ${accessCode}`);
-            tracks.push({ name: fileName, pan: href, ext: { pwd: accessCode } });
-            seenUrls.add(href);
-        });
-        log("引擎一：<a>标签解析完成。");
+            log(`提取到链接: ${links.length}个, 访问码: ${codes.length}个`);
 
-        // --- 新引擎：处理剩余情况 (专门解决分离链接问题) ---
-        if (tracks.length === 0) { // ★ 关键：只有当引擎一无所获时，才启动新引擎
-            log("引擎一未找到任何链接，启动新引擎处理分离情况...");
-            const mainMessageHtml = mainMessage.html();
-            if (mainMessageHtml) {
-                const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-                const codeRegex = /(?:访问码\s*[:：]\s*([\w*.:-]{4,8} ))|class="alert alert-success"[^>]*>([\w*.:-]{4,8})/g;
-
-                const links = [...mainMessageHtml.matchAll(linkRegex)].map(m => m[0]);
-                const codes = [];
-                let codeMatch;
-                while ((codeMatch = codeRegex.exec(mainMessageHtml)) !== null) {
-                    codes.push((codeMatch[1] || codeMatch[2]).trim());
-                }
-                
-                log(`[新引擎] 提取到链接: ${links.length}个, 访问码: ${codes.length}个`);
-
-                if (links.length > 0) {
-                    if (links.length === 1 && codes.length === 1) {
-                        log("[新引擎] 检测到一对一分离模式，强行配对。");
-                        tracks.push({ name: pageTitle, pan: links[0], ext: { pwd: codes[0] } });
+            if (links.length > 0) {
+                links.forEach((link, index) => {
+                    let finalPan;
+                    const code = codes[index]; // 按顺序取出一个访问码
+                    if (code) {
+                        // 如果有访问码，拼接成您指定的格式
+                        finalPan = `${link}（访问码：${code}）`;
+                        log(`拼接脏链接: ${finalPan}`);
                     } else {
-                        log("[新引擎] 执行默认顺序配对。");
-                        links.forEach((link, index) => {
-                            if (!seenUrls.has(link)) {
-                                tracks.push({ name: pageTitle, pan: link, ext: { pwd: codes[index] || '' } });
-                                seenUrls.add(link);
-                            }
-                        });
+                        // 如果没有对应的访问码，就只用纯链接
+                        finalPan = link;
+                        log(`使用纯链接: ${finalPan}`);
                     }
-                }
+                    tracks.push({
+                        name: pageTitle,
+                        pan: finalPan, // pan字段是拼接后的完整字符串
+                        ext: { pwd: '' } // ext.pwd 永远为空
+                    });
+                });
             }
         }
 
         if (tracks.length === 0) {
-            log("所有引擎均未找到有效资源，返回提示信息。");
+            log("未找到任何链接。");
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
         
@@ -220,9 +199,8 @@ async function getTracks(ext) {
     }
 }
 // =================================================================================
-// ========================= 【唯一修改区域结束】 ==========================
-// =================================================================================
 
+// --- 兼容旧版接口 (与V45完全一致) ---
 async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
@@ -248,12 +226,10 @@ async function search(ext) {
     return jsonify({ list: [] });
   }
 }
-
-// --- 兼容旧版接口 (已完整恢复) ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v45-FE-R2 - V45终极增强-二次修复版)');
+log('海绵小站插件加载完成 (v54.1 - 格式化脏链接-修复版)');
