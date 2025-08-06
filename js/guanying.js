@@ -1,20 +1,27 @@
 /**
- * 观影网脚本 - v4.0 (尊重原版-Cookie增强版)
+ * 观影网脚本 - v5.0 (用户名/密码登录版)
  * 
  * 更新日志:
- * - 【v4.0】拨乱反正，回归正确的改造思路。我为之前所有基于错误前提的修改致歉。
- * - 【尊重原版】100%恢复原版脚本中从JS变量提取数据的核心逻辑，因为事实证明它是唯一有效的方式。
- * - 【Cookie驱动】为所有网络请求增加了Cookie支持，以实现免登录和跨平台潜力。
- * - 【移除冗余】删除了在Cookie模式下不再需要的Safari验证逻辑。
+ * - 【v5.0】重大更新：由Cookie模式改为用户名/密码自动登录模式。
+ * - 【自动登录】实现了performLogin函数，可在脚本启动时自动登录并获取会话Cookie。
+ * - 【会话保持】改造了网络请求核心，支持Cookie失效后自动重新登录。
+ * - 【配置分离】将用户名和密码配置提取到USER_CONFIG区域，方便用户修改。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
+// ★★★★★【请在这里填写你的观影网账号信息】★★★★★
+const USER_CONFIG = {
+    username: '1083328569@qq.com', // 替换为你的观影网登录邮箱或用户名
+    password: 'xiaohai1314'       // 替换为你的观影网登录密码
+};
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
 const appConfig = {
-    ver: 4.0,
-    title: '观影网',
+    ver: 5.0,
+    title: '观影网 (登录版)',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -23,33 +30,112 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【用户Cookie已内置】★★★★★
-const COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;PHPSESSID=i63pfrc51f5osto68bi40a3dq2;';
-// ★★★★★★★★★★★★★★★★★★★★★★★★★
+// 全局变量 ，用于存储登录后动态获取的Cookie
+let dynamicCookie = '';
 
 // ================== 核心函数 ==================
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[观影网 V4.0] ${msg}`); } catch (_) { console.log(`[观影网 V4.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V5.0] ${msg}`); } catch (_) { console.log(`[观影网 V5.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 带Cookie的网络请求 ---
-async function fetchWithCookie(url, options = {}) {
-    if (!COOKIE || COOKIE.includes('YOUR_COOKIE_STRING_HERE')) {
-        $utils.toastError("Cookie未配置，请更新脚本", 3000);
-        throw new Error("Cookie not configured.");
+
+/**
+ * 执行登录操作，并从响应头中获取并返回Cookie
+ * @returns {Promise<string>} 登录成功后获取的Cookie字符串
+ */
+async function performLogin() {
+    if (!USER_CONFIG.username || !USER_CONFIG.password) {
+        throw new Error("用户名或密码未配置。");
     }
-    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, 'Referer': appConfig.site, ...options.headers };
+    
+    const loginUrl = 'https://www.gying.org/user/login';
+    // 根据curl分析构建表单数据
+    const payload = `code=&siteid=1&dosubmit=1&cookietime=10506240&username=${encodeURIComponent(USER_CONFIG.username )}&password=${encodeURIComponent(USER_CONFIG.password)}`;
+
+    log('正在尝试登录...');
+    try {
+        // 注意：这里需要一个能返回响应头的POST请求方法，假设$fetch.post返回结构为 { data, headers }
+        const response = await $fetch.post(loginUrl, payload, {
+            headers: {
+                'User-Agent': UA,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Referer': 'https://www.gying.org/user/login',
+                'Origin': 'https://www.gying.org'
+            }
+        } );
+
+        // 检查响应体是否包含登录成功的关键信息（根据实际情况调整）
+        // 例如，如果成功后返回的HTML包含“退出”链接
+        if (!response.data || response.data.includes('密码错误')) {
+             throw new Error('登录失败，请检查用户名和密码。响应内容：' + response.data.substring(0, 200));
+        }
+
+        // 从响应头中提取Set-Cookie
+        const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie'];
+        if (!setCookieHeader || setCookieHeader.length === 0) {
+            throw new Error('登录似乎成功，但未能从响应中捕获到Set-Cookie头。');
+        }
+
+        // 将Set-Cookie数组拼接成一个标准的Cookie字符串
+        const cookies = setCookieHeader.map(c => c.split(';')[0]).join('; ');
+        log('登录成功，已获取并设置动态Cookie。');
+        return cookies;
+
+    } catch (e) {
+        log(`登录请求异常: ${e.message}`);
+        $utils.toastError(`登录失败: ${e.message}`, 4000);
+        throw e; // 抛出异常，中断后续操作
+    }
+}
+
+
+/**
+ * 使用动态Cookie执行网络请求的核心函数
+ * 如果Cookie不存在，会自动尝试登录。
+ * @param {string} url 请求的URL
+ * @param {object} options 请求选项
+ * @returns {Promise<object>} 返回请求结果
+ */
+async function fetchWithCookie(url, options = {}) {
+    // 如果全局Cookie为空，则先执行登录
+    if (!dynamicCookie) {
+        try {
+            dynamicCookie = await performLogin();
+        } catch (e) {
+            // 登录失败，直接抛出错误，不再继续执行
+            throw new Error("登录失败，无法继续数据请求。");
+        }
+    }
+
+    const headers = {
+        'User-Agent': UA,
+        'Cookie': dynamicCookie, // 使用动态获取的Cookie
+        'Referer': appConfig.site,
+        ...options.headers
+    };
     const finalOptions = { ...options, headers };
-    return $fetch.get(url, finalOptions);
+
+    try {
+        // 假设$fetch.get能处理完整的响应
+        const response = await $fetch.get(url, finalOptions);
+        // 如果响应数据表明需要登录（例如返回登录页HTML），说明Cookie失效
+        if (typeof response.data === 'string' && response.data.includes('用户登录')) {
+             throw new Error('Cookie已失效');
+        }
+        return response;
+    } catch (e) {
+        // 捕获到Cookie失效的特定错误，或通用网络错误后尝试重新登录
+        log(`请求失败: ${e.message}。可能是Cookie失效，将尝试重新登录。`);
+        dynamicCookie = ''; // 清空旧Cookie
+        // 递归调用，会自动触发登录流程
+        return await fetchWithCookie(url, options);
+    }
 }
 
-async function getConfig() {
-    return jsonify(appConfig);
-}
 
-// --- 【核心修正】getCards函数，恢复原版逻辑，仅增加Cookie请求 ---
+// --- 【核心修正】getCards函数，使用新的fetchWithCookie ---
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -58,10 +144,9 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url); // 【唯一改动】使用带Cookie的请求
+        const { data } = await fetchWithCookie(url); // 【改动】使用新的带登录逻辑的请求函数
         const $ = cheerio.load(data);
 
-        // 【恢复原版逻辑】从script标签中提取数据
         const scriptContent = $('script').filter((_, script) => {
             return $(script).html().includes('_obj.header');
         }).html();
@@ -78,16 +163,13 @@ async function getCards(ext) {
         const inlistData = JSON.parse(inlistMatch[1]);
         if (inlistData && inlistData.i) {
             inlistData.i.forEach((item, index) => {
-                // 【恢复原版逻辑】构造vod_id和ext.url
                 const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
                 cards.push({
-                    vod_id: detailApiUrl, // 必须是这个格式
+                    vod_id: detailApiUrl,
                     vod_name: inlistData.t[index],
                     vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
                     vod_remarks: inlistData.g[index],
-                    ext: {
-                        url: detailApiUrl,
-                    },
+                    ext: { url: detailApiUrl },
                 } );
             });
             log(`成功从JS变量中解析到 ${cards.length} 个项目。`);
@@ -97,15 +179,14 @@ async function getCards(ext) {
 
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
-        if (e.message !== "Cookie not configured.") {
+        if (!e.message.includes("登录失败")) {
             $utils.toastError(`加载失败: ${e.message}`, 4000);
         }
         return jsonify({ list: [] });
     }
 }
 
-
-// --- getTracks, search等函数保持V3.2的Cookie版本即可 ---
+// --- getTracks, search等函数也统一使用fetchWithCookie ---
 
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -130,7 +211,7 @@ async function getTracks(ext) {
                 tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
             });
         } else if (respstr.hasOwnProperty('file')) {
-            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
+            $utils.toastError('网盘验证掉签，请前往主站完成验证');
         } else {
             $utils.toastError('没有找到网盘资源');
         }
@@ -171,9 +252,7 @@ async function search(ext) {
                 vod_name: name,
                 vod_pic: imgUrl || '',
                 vod_remarks: additionalInfo,
-                ext: {
-                    url: detailApiUrl,
-                },
+                ext: { url: detailApiUrl },
             });
         });
         return jsonify({ list: cards });
@@ -185,4 +264,9 @@ async function search(ext) {
 
 async function getPlayinfo(ext) {
     return jsonify({ urls: [ext.url] });
+}
+
+// getConfig函数保持不变
+async function getConfig() {
+    return jsonify(appConfig);
 }
