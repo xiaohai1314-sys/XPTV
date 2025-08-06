@@ -1,21 +1,22 @@
 /**
- * 观影网脚本 - v6.0 (免配置最终版)
+ * 观影网脚本 - v10.0 (后端驱动终极版)
  * 
- * 更新日志:
- * - 【v6.0】返璞归真：回归并优化Cookie模式，以适应特殊的JS运行环境。
- * - 【免配置】不再需要填写任何用户名、密码或Cookie字符串。
- * - 【自动会话】脚本将自动利用App内置WebView或系统浏览器中已有的观影网登录会话。
- * - 【登录验证】增加启动时检查函数，通过访问用户中心来验证登录状态，并提供清晰的指引。
- * - 【移除冗余】删除了所有在当前环境下无法工作的登录尝试代码。
+ * 架构: 本脚本作为客户端，从用户自部署的后端服务获取动态Cookie。
+ * 优点: 一次配置，全平台(手机/电视)永久自动登录，无需手动维护。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
+// ★★★★★【请配置你的个人后端服务地址】★★★★★
+// 将这里的IP地址替换为你运行后端服务的电脑的局域网IP地址。
+const BACKEND_API_URL = 'http://192.168.10.111:5000/getCookie'; 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
 const appConfig = {
-    ver: 6.0,
-    title: '观影网 (免配置版)',
+    ver: 10.0,
+    title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -24,88 +25,67 @@ const appConfig = {
     ],
 };
 
-// 全局变量 ，用于标记登录状态检查是否已完成
-let loginChecked = false;
-
-// ================== 核心函数 ==================
-
-// --- 辅助函数 ---
-function log(msg) { try { $log(`[观影网 V6.0] ${msg}`); } catch (_) { console.log(`[观影网 V6.0] ${msg}`); } }
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
-function jsonify(data) { return JSON.stringify(data); }
+// 全局变量 ，用于缓存从后端获取的Cookie，避免重复请求
+let dynamicCookie = ''; 
 
 /**
- * 检查登录状态的核心函数。
- * 它通过访问用户中心页面并检查页面内容来确认是否已登录。
- * 这是所有网络请求前必须执行的第一步。
+ * 从个人后端服务获取最新的有效Cookie。
+ * 带有缓存机制，在一次脚本生命周期内只获取一次。
  */
-async function checkLoginStatus() {
-    if (loginChecked) {
-        return true; // 如果已经检查过，直接返回成功
+async function getCookieFromBackend() {
+    if (dynamicCookie) {
+        log('使用已缓存的Cookie。');
+        return dynamicCookie;
     }
 
-    log('正在验证观影网登录状态...');
-    const userCenterUrl = 'https://www.gying.org/user/';
-    
+    if (!BACKEND_API_URL || BACKEND_API_URL.includes('192.168.1.88')) {
+         $utils.toastError('请先在脚本中配置你的后端服务地址！', 5000);
+         throw new Error('后端服务地址未配置。');
+    }
+
+    log('正在从个人后端获取最新Cookie...');
     try {
-        // 使用环境中唯一可用的 $fetch
-        const { data } = await $fetch.get(userCenterUrl, {
-            headers: { 'User-Agent': UA }
-        } );
+        // 使用环境中可用的 $fetch 函数
+        const { data } = await $fetch.get(BACKEND_API_URL);
+        const parsedData = JSON.parse(data);
 
-        // 检查返回的HTML是否包含表示“未登录”的关键词
-        if (data.includes('用户登录') || data.includes('立即注册')) {
-            log('验证失败：未登录。');
-            $utils.toastError('请先在手机浏览器(Safari)中登录观影网！', 5000);
-            throw new Error('Not logged in.');
+        if (parsedData.status === 'success' && parsedData.cookie) {
+            log('成功从后端获取Cookie！');
+            dynamicCookie = parsedData.cookie; // 缓存Cookie
+            return dynamicCookie;
+        } else {
+            // 如果后端返回了错误信息，则显示出来
+            const errorMessage = `后端返回错误: ${parsedData.message}`;
+            log(errorMessage);
+            $utils.toastError(errorMessage, 5000);
+            throw new Error(errorMessage);
         }
-
-        // 如果页面包含通常在登录后才出现的内容，则认为已登录
-        if (data.includes('我的收藏') || data.includes('退出登录')) {
-            log('登录状态验证成功！');
-            loginChecked = true; // 标记为已检查
-            return true;
-        }
-        
-        // 作为最后的防线
-        log('无法明确判断登录状态，将尝试继续。');
-        loginChecked = true;
-        return true;
-
     } catch (e) {
-        log(`登录状态检查异常: ${e.message}`);
-        // 如果错误不是 "Not logged in."，则显示通用错误
-        if (e.message !== 'Not logged in.') {
-            $utils.toastError('检查登录状态时发生网络错误。', 3000);
-        }
-        throw e; // 抛出异常，中断后续操作
+        const errorMessage = `无法连接到后端服务: ${e.message}`;
+        log(errorMessage);
+        $utils.toastError('无法连接到你的个人后端服务，请检查地址和网络。', 5000);
+        throw new Error(errorMessage);
     }
 }
 
 /**
- * 带有登录检查的网络请求函数。
- * @param {string} url 请求的URL
- * @param {object} options 请求选项
- * @returns {Promise<object>} 返回 $fetch 的结果
+ * 封装了所有对观影网的网络请求。
+ * 它会自动处理Cookie的获取。
  */
-async function fetchWithLoginCheck(url, options = {}) {
-    // 在每次请求前（如果需要），都先确保登录状态是有效的
-    await checkLoginStatus();
+async function fetchGying(url, options = {}) {
+    const cookie = await getCookieFromBackend();
     
-    const finalOptions = {
-        ...options,
-        headers: {
-            'User-Agent': UA,
-            'Referer': appConfig.site,
-            ...options.headers,
-        },
+    const headers = {
+        'User-Agent': UA,
+        'Referer': appConfig.site,
+        'Cookie': cookie, // 使用从后端获取的Cookie
+        ...options.headers,
     };
     
-    return $fetch.get(url, finalOptions);
+    return $fetch.get(url, { ...options, headers });
 }
 
-
-// --- getCards, getTracks, search 等函数统一使用新的请求逻辑 ---
+// --- 所有数据获取函数均统一调用 fetchGying ---
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -115,21 +95,14 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithLoginCheck(url);
+        const { data } = await fetchGying(url);
         const $ = cheerio.load(data);
 
-        const scriptContent = $('script').filter((_, script) => {
-            return $(script).html().includes('_obj.header');
-        }).html();
-
-        if (!scriptContent) {
-            throw new Error("未能找到包含'_obj.header'的关键script标签。可能是登录会话已失效。");
-        }
+        const scriptContent = $('script').filter((_, script) => $(script).html().includes('_obj.header')).html();
+        if (!scriptContent) throw new Error("未能找到关键数据，请检查后端服务是否正常。");
 
         const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) {
-            throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
-        }
+        if (!inlistMatch || !inlistMatch[1]) throw new Error("未能解析到列表数据。");
 
         const inlistData = JSON.parse(inlistMatch[1]);
         if (inlistData && inlistData.i) {
@@ -143,16 +116,11 @@ async function getCards(ext) {
                     ext: { url: detailApiUrl },
                 } );
             });
-            log(`成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
-        
         return jsonify({ list: cards });
-
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
-        if (!e.message.includes('Not logged in')) {
-            $utils.toastError(`加载失败: ${e.message}`, 4000);
-        }
+        // 不再重复弹窗，因为上游函数已经弹过了
         return jsonify({ list: [] });
     }
 }
@@ -164,7 +132,7 @@ async function getTracks(ext) {
     log(`请求详情数据: ${url}`);
 
     try {
-        const { data } = await fetchWithLoginCheck(url);
+        const { data } = await fetchGying(url);
         const respstr = JSON.parse(data);
 
         if (respstr.hasOwnProperty('panlist')) {
@@ -173,9 +141,7 @@ async function getTracks(ext) {
                 let name = '';
                 for (const keyword in regex) {
                     const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) {
-                        name = `${name}${matches[0]}`;
-                    }
+                    if (matches) name = `${name}${matches[0]}`;
                 }
                 tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
             });
@@ -199,7 +165,7 @@ async function search(ext) {
     log(`执行搜索: ${url}`);
 
     try {
-        const { data } = await fetchWithLoginCheck(url);
+        const { data } = await fetchGying(url);
         const $ = cheerio.load(data);
         let cards = [];
         $('.v5d').each((_, element) => {
