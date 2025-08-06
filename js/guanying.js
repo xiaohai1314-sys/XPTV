@@ -1,12 +1,10 @@
 /**
- * 观影网脚本 - v5.1 (最终登录版)
+ * 观影网脚本 - v5.2 (最终兼容版)
  * 
  * 更新日志:
- * - 【v5.1】修正登录逻辑，改用兼容性更好的 $http.post 以获取响应头 ，解决 'response.headers' is undefined 的问题。
+ * - 【v5.2】终极修正：改用标准的、与环境无关的 fetch() API 进行登录，以解决 $http 未定义和 $fetch 功能不全的问题 。
+ * - 【v5.1】修正登录逻辑，尝试使用 $http.post 。
  * - 【v5.0】重大更新：由Cookie模式改为用户名/密码自动登录模式。
- * - 【自动登录】实现了performLogin函数，可在脚本启动时自动登录并获取会话Cookie。
- * - 【会话保持】改造了网络请求核心，支持Cookie失效后自动重新登录。
- * - 【配置分离】将用户名和密码配置提取到USER_CONFIG区域，方便用户修改。
  */
 
 // ================== 配置区 ==================
@@ -21,7 +19,7 @@ const USER_CONFIG = {
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 const appConfig = {
-    ver: 5.1,
+    ver: 5.2,
     title: '观影网 (登录版)',
     site: 'https://www.gying.org/',
     tabs: [
@@ -37,14 +35,14 @@ let dynamicCookie = '';
 // ================== 核心函数 ==================
 
 // --- 辅助函数 ---
-function log(msg) { try { $log(`[观影网 V5.1] ${msg}`); } catch (_) { console.log(`[观影网 V5.1] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V5.2] ${msg}`); } catch (_) { console.log(`[观影网 V5.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
 
 /**
  * 执行登录操作，并从响应头中获取并返回Cookie
- * [v5.1 修正] 改用 $http.post 以获取完整的响应头 ，解决 'response.headers' is undefined 的问题。
+ * [v5.2 修正] 改用标准的 fetch() API，以保证最大的环境兼容性。
  * @returns {Promise<string>} 登录成功后获取的Cookie字符串
  */
 async function performLogin() {
@@ -55,11 +53,11 @@ async function performLogin() {
     const loginUrl = 'https://www.gying.org/user/login';
     const payload = `code=&siteid=1&dosubmit=1&cookietime=10506240&username=${encodeURIComponent(USER_CONFIG.username )}&password=${encodeURIComponent(USER_CONFIG.password)}`;
 
-    log('正在尝试登录 (使用 $http )...');
+    log('正在尝试登录 (使用标准 fetch)...');
     try {
-        // 【关键改动】使用 $http.post 代替 $fetch.post ，因为它通常会返回包含headers的完整响应对象
-        const response = await $http.post({
-            url: loginUrl,
+        // 【关键改动】使用标准的 fetch API
+        const response = await fetch(loginUrl, {
+            method: 'POST',
             body: payload,
             headers: {
                 'User-Agent': UA,
@@ -69,33 +67,45 @@ async function performLogin() {
             }
         } );
 
-        // 检查响应对象和响应头是否存在
-        if (!response || !response.headers) {
-            throw new Error('$http.post调用成功 ，但返回的响应对象中没有headers。');
+        // 检查网络请求是否成功
+        if (!response.ok) {
+            throw new Error(`网络请求失败，状态码: ${response.status}`);
         }
 
         // 检查响应体是否包含登录失败的提示
-        if (response.body && typeof response.body === 'string' && (response.body.includes('密码错误') || response.body.includes('验证码不正确'))) {
+        const responseText = await response.text();
+        if (responseText.includes('密码错误') || responseText.includes('验证码不正确')) {
              throw new Error('登录失败，请检查用户名和密码或网页需要验证码。');
         }
 
         // 从响应头中提取Set-Cookie
-        const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie'];
-        if (!setCookieHeader || setCookieHeader.length === 0) {
+        // response.headers.get() 对于多个同名头，只会返回第一个，我们需要所有
+        // 但在浏览器环境中，'set-cookie' 是一个特例，直接访问会得到拼接好的字符串
+        // 在非浏览器环境中，可能需要特殊处理，但先用标准方法尝试
+        const setCookieHeader = response.headers.get('set-cookie');
+        if (!setCookieHeader) {
+            // 如果获取不到，尝试遍历所有头
+            let cookies = [];
+            for (let pair of response.headers.entries()) {
+                if (pair[0].toLowerCase() === 'set-cookie') {
+                    cookies.push(pair[1].split(';')[0]);
+                }
+            }
+            if (cookies.length > 0) {
+                dynamicCookie = cookies.join('; ');
+                log('登录成功，已获取并设置动态Cookie。');
+                return dynamicCookie;
+            }
             throw new Error('登录似乎成功，但未能从响应中捕获到Set-Cookie头。');
         }
-
-        // 将Set-Cookie数组或字符串拼接成一个标准的Cookie字符串
-        const cookies = Array.isArray(setCookieHeader) 
-            ? setCookieHeader.map(c => c.split(';')[0]).join('; ')
-            : setCookieHeader.split(';')[0];
-            
+        
+        // 标准浏览器环境可以直接处理
+        const cookies = setCookieHeader.split(', ').map(c => c.split(';')[0]).join('; ');
         log('登录成功，已获取并设置动态Cookie。');
         return cookies;
 
     } catch (e) {
         log(`登录请求异常: ${e.message}`);
-        // 将错误信息展示给用户，方便调试
         $utils.toastError(`登录失败: ${e.message}`, 5000);
         throw e; // 抛出异常，中断后续操作
     }
@@ -107,40 +117,40 @@ async function performLogin() {
  * 如果Cookie不存在，会自动尝试登录。
  * @param {string} url 请求的URL
  * @param {object} options 请求选项
- * @returns {Promise<object>} 返回请求结果
+ * @returns {Promise<object>} 返回请求结果 { data: '...' }
  */
 async function fetchWithCookie(url, options = {}) {
-    // 如果全局Cookie为空，则先执行登录
     if (!dynamicCookie) {
         try {
             dynamicCookie = await performLogin();
         } catch (e) {
-            // 登录失败，直接抛出错误，不再继续执行
             throw new Error("登录失败，无法继续数据请求。");
         }
     }
 
     const headers = {
         'User-Agent': UA,
-        'Cookie': dynamicCookie, // 使用动态获取的Cookie
+        'Cookie': dynamicCookie,
         'Referer': appConfig.site,
         ...options.headers
     };
-    const finalOptions = { ...options, headers };
 
     try {
-        // 注意：这里的$fetch.get也可能需要换成$http.get ，取决于环境。先用$fetch尝试。
-        const response = await $fetch.get(url, finalOptions);
-        // 如果响应数据表明需要登录（例如返回登录页HTML），说明Cookie失效
-        if (typeof response.data === 'string' && response.data.includes('用户登录')) {
+        // 使用标准 fetch 执行后续请求
+        const response = await fetch(url, { headers });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.text();
+
+        if (data.includes('用户登录')) {
              throw new Error('Cookie已失效');
         }
-        return response;
+        // 返回与原$fetch兼容的格式
+        return { data: data }; 
     } catch (e) {
-        // 捕获到Cookie失效的特定错误，或通用网络错误后尝试重新登录
         log(`请求失败: ${e.message}。可能是Cookie失效，将尝试重新登录。`);
-        dynamicCookie = ''; // 清空旧Cookie
-        // 递归调用，会自动触发登录流程
+        dynamicCookie = '';
         return await fetchWithCookie(url, options);
     }
 }
@@ -155,7 +165,7 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url); // 使用带登录逻辑的请求函数
+        const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
 
         const scriptContent = $('script').filter((_, script) => {
