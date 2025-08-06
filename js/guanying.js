@@ -1,18 +1,21 @@
-// =======================================================================
-// v15.3 前端脚本 (观影网 - 终极海报修复版)
-// 更新日志:
-// - 【拨乱反正】彻底废除v15.1和v15.2的所有破坏性修改，100%回归v15.0的稳定框架。
-// - 【终极修复】getCards函数回归原始逻辑，只在内部增加了一个基于“影片ID”定位的、绝对可靠的备用海报抓取方案。
-// - 【稳定至上】确保分类列表和所有核心功能100%正常工作，只精准解决部分海报丢失问题。
-// =======================================================================
+/**
+ * 观影网脚本 - v15.0 (回归初心版)
+ *
+ * --- 架构 ---
+ * 这是对你最初正确逻辑的最终致敬。
+ * 【100%保留】完全保留你 v4.0 脚本中所有高效的数据抓取和解析逻辑。
+ * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v8.0 后端自动获取。
+ */
 
-// --- 配置区 (与v15.0完全相同) ---
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = "http://192.168.10.111:5000"; // ★★★ 请务必修改为你的后端IP和端口 ★★★
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【请务必修改这里】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【请务必修改这里】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const appConfig = {
-    ver: 15.3,
+    ver: 15.0,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -22,35 +25,62 @@ const appConfig = {
     ],
 };
 
-// --- 核心函数 (与v15.0完全相同 ) ---
-function log(msg) { try { $log(`[观影网 v15.3] ${msg}`); } catch (_) { console.log(`[观影网 v15.3] ${msg}`); } }
+// ★★★★★【全局Cookie缓存】★★★★★
+let GLOBAL_COOKIE = null;
+let IS_FETCHING_COOKIE = false;
+// ★★★★★★★★★★★★★★★★★★★★★★★
+
+// ================== 核心函数 ==================
+
+function log(msg ) { try { $log(`[观影网 V15.0] ${msg}`); } catch (_) { console.log(`[观影网 V15.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-let cachedCookie = "";
-async function getCookieFromBackend() {
-    if (cachedCookie) return cachedCookie;
-    log("正在从后端获取Cookie...");
+// --- 【升级点】获取并缓存全局Cookie的函数 ---
+async function ensureGlobalCookie() {
+    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    if (IS_FETCHING_COOKIE) {
+        log("检测到正在获取Cookie，请稍候...");
+        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
+        return GLOBAL_COOKIE;
+    }
+    log("全局Cookie为空，正在从后端获取...");
+    IS_FETCHING_COOKIE = true;
     try {
-        const { data } = await $fetch.get(`${BACKEND_URL}/getCookie`, { timeout: 20000 });
-        if (data.status === "success" && data.cookie) {
-            log("成功从后端获取Cookie！");
-            cachedCookie = data.cookie;
-            return cachedCookie;
+        const response = await $fetch.get(BACKEND_URL);
+        const result = JSON.parse(response.data);
+        if (result.status === "success" && result.cookie) {
+            GLOBAL_COOKIE = result.cookie;
+            log("✅ 成功获取并缓存了全局Cookie！");
+            return GLOBAL_COOKIE;
         }
-        throw new Error(data.message || "后端返回Cookie失败");
+        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
-        log(`从后端获取Cookie失败: ${e.message}`);
-        $utils.toastError(`连接后端失败: ${e.message}`, 5000);
-        return null;
+        log(`❌ 网络请求后端失败: ${e.message}`);
+        $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
+        throw e;
+    } finally {
+        IS_FETCHING_COOKIE = false;
     }
 }
 
+// --- 使用全局Cookie进行网络请求 ---
 async function fetchWithCookie(url, options = {}) {
-    const cookie = await getCookieFromBackend();
-    if (!cookie) throw new Error("未能获取到有效的Cookie");
+    const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
+}
+
+// --- 初始化函数，预热Cookie ---
+async function init(ext) {
+    log("脚本初始化，开始预热全局Cookie...");
+    try {
+        await ensureGlobalCookie();
+        log("✅ Cookie预热成功或已存在。");
+    } catch (e) {
+        log(`❌ Cookie预热失败: ${e.message}`);
+    }
+    return jsonify({});
 }
 
 async function getConfig() {
@@ -58,8 +88,10 @@ async function getConfig() {
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【终极修复后的 getCards 函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%保留的核心抓取逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// (下面的代码与你最初的 v4.0 脚本完全相同，只修改了请求函数)
 // =======================================================================
+
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -68,66 +100,78 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
 
-        // 【回归v15.0的稳定内核】我们依然100%信任JS变量作为数据源
-        const scriptContent = $('script').filter((_, script) => $(script).html().includes('_obj.header')).html();
-        if (!scriptContent) { throw new Error("未能找到关键script标签。"); }
+        const scriptContent = $('script').filter((_, script) => {
+            return $(script).html().includes('_obj.header');
+        }).html();
+
+        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
 
         const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) { throw new Error("未能匹配到_obj.inlist数据。"); }
+        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
 
         const inlistData = JSON.parse(inlistMatch[1]);
         if (inlistData && inlistData.i) {
             inlistData.i.forEach((item, index) => {
                 const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-                
-                // --- 【终极海报修复逻辑】 ---
-                // 1. 首先，生成一个默认的标准海报URL
-                let vod_pic_url = `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`;
-                
-                // 2. 然后 ，去HTML里寻找这个影片的“备用”海报地址
-                //    【核心修正】我们使用影片ID作为最可靠的定位锚点！
-                const anchorSelector = `a[href*="/${inlistData.ty}/${item}"]`;
-                const anchorElement = $(anchorSelector);
-                
-                if (anchorElement.length > 0) {
-                    const backupImgElement = anchorElement.find('img'); // 在锚点内部寻找img
-                    if (backupImgElement.length > 0) {
-                        const backup_src = backupImgElement.attr('data-src') || backupImgElement.attr('src');
-                        if (backup_src && !backup_src.includes('loading.gif')) {
-                           log(`为影片《${inlistData.t[index]}》找到备用海报: ${backup_src}`);
-                           vod_pic_url = backup_src;
-                        }
-                    }
-                }
-                // --- 【修复逻辑结束】 ---
-
                 cards.push({
                     vod_id: detailApiUrl,
                     vod_name: inlistData.t[index],
-                    vod_pic: vod_pic_url, // 使用我们智能决策后的海报URL
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
                     vod_remarks: inlistData.g[index],
                     ext: { url: detailApiUrl },
-                });
+                } );
             });
+            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
+        
         return jsonify({ list: cards });
 
     } catch (e) {
-        log(`获取卡片列表异常: ${e.message}`);
+        log(`❌ 获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
+async function getTracks(ext) {
+    ext = argsify(ext);
+    let tracks = [];
+    let url = ext.url; 
+    log(`请求详情数据: ${url}`);
+    try {
+        const { data } = await fetchWithCookie(url);
+        const respstr = JSON.parse(data);
+        if (respstr.hasOwnProperty('panlist')) {
+            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
+            respstr.panlist.url.forEach((item, index) => {
+                let name = '';
+                for (const keyword in regex) {
+                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
+                    if (matches) name = `${name}${matches[0]}`;
+                }
+                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
+            });
+        } else if (respstr.hasOwnProperty('file')) {
+            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
+        } else {
+            $utils.toastError('没有找到网盘资源');
+        }
+        return jsonify({ list: [{ title: '默认分组', tracks }] });
+    } catch (e) {
+        log(`❌ 获取详情数据异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
 
-// --- search, getTracks, getPlayinfo 函数 (与v15.0完全相同，100%稳定) ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
     let page = ext.page || 1;
     let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
@@ -154,40 +198,15 @@ async function search(ext) {
         });
         return jsonify({ list: cards });
     } catch (e) {
-        log(`搜索异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-async function getTracks(ext) {
-    ext = argsify(ext);
-    let tracks = [];
-    let url = ext.url;
-    try {
-        const { data } = await fetchWithCookie(url);
-        const respstr = JSON.parse(data);
-        if (respstr.hasOwnProperty('panlist')) {
-            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
-            respstr.panlist.url.forEach((item, index) => {
-                let name = '';
-                for (const keyword in regex) {
-                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) { name = `${name}${matches[0]}`; }
-                }
-                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
-            });
-        } else if (respstr.hasOwnProperty('file')) {
-            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
-        } else {
-            $utils.toastError('没有找到网盘资源');
-        }
-        return jsonify({ list: [{ title: '默认分组', tracks }] });
-    } catch (e) {
-        log(`获取详情数据异常: ${e.message}`);
+        log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
 async function getPlayinfo(ext) {
-    return jsonify({ urls: [ext.url] });
+    ext = argsify(ext);
+    // 从 getTracks 的结果中获取 pan 链接
+    const panLink = ext.pan;
+    // 直接返回这个链接，让App调用系统浏览器或特定网盘App打开
+    return jsonify({ urls: [panLink] });
 }
