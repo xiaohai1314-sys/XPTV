@@ -9,7 +9,7 @@
 // --- 配置区 (与v15.0完全相同) ---
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = "http://你的局域网IP:5000"; // ★★★ 请务必修改为你的后端IP和端口 ★★★
+const BACKEND_URL = "http://192.168.10.111:5000"; // ★★★ 请务必修改为你的后端IP和端口 ★★★
 
 const appConfig = {
     ver: 15.1,
