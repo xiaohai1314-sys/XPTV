@@ -1,52 +1,25 @@
-/**
- * 海绵小站前端插件 - v62.2 (V56基石+文件名净化-完整最终版)
- * 
- * 更新日志:
- * - 【v62.1 最终版】: 我为之后所有画蛇添足、偏离正确方向、甚至代码不全的错误，致以最深刻的歉意。
- *   此版本严格遵从您的最终指示，以您成功的V56.0版本为唯一基石。
- * - 【唯一修正点】: 此版本与V56.0相比，唯一的区别在于：增加了“文件名净化”逻辑。
- *   当没有精确文件名、只能使用帖子标题作为备用时，对其进行截断，从根本上杜绝
- *   App将其误判为文件夹的可能。
- * - 【承诺】: 除此之外，所有代码，包括V56.0成功的正则提取逻辑，均保持100%
- *   完全一致，未动一字。这才是真正的、最小化的、正确的修正。
- */
+// ==UserScript==
+// @name         海绵小站插件 - v62.1 修复版 (黑鹰坠落特例处理)
+// @version      62.1-fix-blackhawk
+// @description  基于 V56.0 + 文件名净化，增强 getTracks 的文件名提取容错能力
+// @author       ChatGPT
+// @match        *://www.haimianxz.com/*
+// ==/UserScript==
 
-// --- 配置区 (与V56.0完全相同) ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
-
-// ★★★★★【用户配置区 - Cookie】(与V56.0完全相同 ) ★★★★★
 const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
-// ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-// --- 核心辅助函数 (与V56.0完全相同) ---
 function log(msg) { 
-    try { 
-        $log(`[海绵小站 V62.1 终版] ${msg}`); 
-    } catch (_) { 
-        console.log(`[海绵小站 V62.1 终版] ${msg}`); 
-    } 
+    try { $log(`[海绵小站 V62.1-fix] ${msg}`); } 
+    catch (_) { console.log(`[海绵小站 V62.1-fix] ${msg}`); } 
 }
-function argsify(ext) { 
-    if (typeof ext === 'string') { 
-        try { 
-            return JSON.parse(ext); 
-        } catch (e) { 
-            return {}; 
-        } 
-    } 
-    return ext || {}; 
-}
-function jsonify(data) { 
-    return JSON.stringify(data); 
-}
-function getRandomText(arr) { 
-    return arr[Math.floor(Math.random() * arr.length)]; 
-}
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// --- 网络请求与回帖 (与V56.0完全相同) ---
 async function fetchWithCookie(url, options = {}) {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
         $utils.toastError("请先在插件脚本中配置Cookie", 3000);
@@ -65,17 +38,9 @@ async function reply(url) {
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
     const threadIdMatch = url.match(/thread-(\d+)/);
     if (!threadIdMatch) return false;
-    
     const threadId = threadIdMatch[1];
     const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = { 
-        doctype: 1, 
-        return_html: 1, 
-        message: getRandomText(replies), 
-        quotepid: 0, 
-        quick_reply_message: 0 
-    };
-
+    const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
     try {
         const { data } = await fetchWithCookie(postUrl, {
             method: 'POST',
@@ -98,10 +63,15 @@ async function reply(url) {
     }
 }
 
-// --- 核心函数 (除getTracks外，与V56.0完全相同) ---
+function getCorrectPicUrl(path) {
+    if (!path) return FALLBACK_PIC;
+    if (path.startsWith('http')) return path;
+    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+    return `${SITE_URL}/${cleanPath}`;
+}
 
 async function getConfig() {
-  log("插件初始化 (v62.1 - V56基石+文件名净化-完整最终版)");
+  log("插件初始化 (v62.1 修复版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -113,13 +83,6 @@ async function getConfig() {
       { name: '综艺', ext: { id: 'forum-5' } },
     ],
   });
-}
-
-function getCorrectPicUrl(path) {
-    if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
-    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
 }
 
 async function getCards(ext) {
@@ -147,9 +110,6 @@ async function getCards(ext) {
   }
 }
 
-// =================================================================================
-// =================== 【getTracks 函数 - 已植入最终的去重逻辑】 ===================
-// =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -161,7 +121,7 @@ async function getTracks(ext) {
     try {
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
-        
+
         let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
@@ -181,96 +141,67 @@ async function getTracks(ext) {
         const mainMessageHtml = mainMessage.html();
         const mainMessageText = mainMessage.text();
         const pageTitle = $("h4.break-all").text().trim();
-        let tracks = []; // 使用 let 以便后续去重覆盖
+        const tracks = [];
 
-        // --- 步骤一：采集所有链接地址 (保持原样，允许采集重复项) ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const allFoundLinks = mainMessageHtml.match(linkRegex ) || [];
-        log(`[初步提取] 页面上共找到 ${allFoundLinks.length} 个链接元素（含重复）。`);
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex) || [])];
+        log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
-        // --- 步骤二：为每个找到的链接生成一个临时的资源条目 ---
-        allFoundLinks.forEach(link => {
-            // 提取访问码
-            let codePool = [];
-            const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
-            let match;
-            while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-                codePool.push(match[1].trim());
-            }
-            const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
-            while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
-                const code = match[1].trim();
-                if (code.length < 15 && !code.includes('http' )) {
-                     codePool.push(code);
+        let codePool = [];
+        const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
+        let match;
+        while ((match = textCodeRegex.exec(mainMessageText)) !== null) codePool.push(match[1].trim());
+        const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
+        while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
+            const code = match[1].trim();
+            if (code.length < 15 && !code.includes('http')) codePool.push(code);
+        }
+        codePool = [...new Set(codePool)];
+        log(`采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
+
+        if (uniqueLinks.length > 0) {
+            uniqueLinks.forEach((link, index) => {
+                const linkElement = mainMessage.find(`a[href="${link}"]`).first();
+                let fileName = pageTitle;
+
+                let text = linkElement.text().trim();
+
+                // ✨ 修复嵌套 <a> 特例提取失败问题
+                if (!text || text.startsWith('http')) {
+                    text = linkElement.parent().text().trim();
                 }
-            }
-            codePool = [...new Set(codePool)];
-            
-            // 提取文件名
-            let fileName = pageTitle;
-            const linkElement = mainMessage.find(`a[href="${link}"]`).first();
-            if (linkElement.length > 0) {
-                const text = linkElement.text().trim();
-                if (text && text.length > 5 && !text.startsWith('http' )) {
+
+                if (text && text.length > 2 && !text.startsWith('http')) {
                     fileName = text;
                 }
-            }
-            
-            // 文件名净化逻辑 (保持原样)
-            if (fileName === pageTitle && fileName.includes('.')) {
-                const parts = fileName.split('.');
-                if (parts.length > 1) {
-                    fileName = parts[0];
+
+                if (fileName === pageTitle && fileName.includes('.')) {
+                    const parts = fileName.split('.');
+                    if (parts.length > 1) {
+                        fileName = parts[0];
+                        log(`文件名被净化为: ${fileName}`);
+                    }
                 }
-            }
 
-            // 组合 pan 字段
-            const code = codePool.shift() || ''; // 简单地取第一个码，去重基于最终pan
-            let finalPan = link;
-            if (code) {
-                finalPan = `${link}（访问码：${code}）`;
-            }
+                const code = codePool[index] || '';
+                let finalPan = code ? `${link}（访问码：${code}）` : link;
 
-            tracks.push({
-                name: fileName,
-                pan: finalPan,
-                ext: { pwd: '' },
+                log(`生成资源: ${fileName} - ${finalPan}`);
+                tracks.push({ name: fileName, pan: finalPan, ext: { pwd: '' } });
             });
-        });
-
-        // =================================================================
-        // ★★★★★【新增模块：智能去重处理器】★★★★★
-        // 目的：只对完全相同的链接进行去重，确保不同的链接能被完整保留。
-        // =================================================================
-        if (tracks.length > 1) {
-            log(`[去重处理器] 检测到 ${tracks.length} 个链接，开始智能去重...`);
-            const uniqueTracksMap = new Map();
-            tracks.forEach(track => {
-                // 以 pan 字段（纯链接+访问码）作为唯一标识符
-                uniqueTracksMap.set(track.pan, track);
-            });
-            // 从 Map 中取出去重后的结果，重新赋值给 tracks
-            tracks = Array.from(uniqueTracksMap.values());
-            log(`[去重处理器] 去重完成，剩余 ${tracks.length} 个独立链接。`);
         }
-        // =================================================================
-        // ★★★★★【去重处理器模块结束】★★★★★
-        // =================================================================
 
         if (tracks.length === 0) {
             log("未找到有效资源。");
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
-        
-        log(`处理完成，最终向App返回 ${tracks.length} 个资源。`);
-        return jsonify({ list: [{ title: '云盘', tracks }] });
 
+        return jsonify({ list: [{ title: '云盘', tracks }] });
     } catch (e) {
         log(`getTracks函数出现致命错误: ${e.message}`);
         return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
     }
 }
-// =================================================================================
 
 async function search(ext) {
   ext = argsify(ext);
@@ -298,11 +229,10 @@ async function search(ext) {
   }
 }
 
-// --- 兼容旧版接口 (与V56.0完全相同) ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('海绵小站插件加载完成 (v62.1 - V56基石+文件名净化-完整最终版)');
+log('海绵小站插件加载完成 (v62.1-fix-blackhawk)');
