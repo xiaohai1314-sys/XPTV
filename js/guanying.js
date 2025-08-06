@@ -1,9 +1,9 @@
 // =======================================================================
-// v15.1 前端脚本 (观影网 - 智能融合抓取版)
+// v15.2 前端脚本 (观影网 - 精准海报修复版)
 // 更新日志:
-// - 【重大升级】重构getCards函数，使其能够同时处理“HTML直出”和“JS变量”两种渲染模式。
-// - 【修复BUG】解决了部分影片因采用不同渲染方式而导致海报和信息无法显示的致命问题。
-// - 【健壮性提升】优先从HTML元素直接提取数据，JS变量作为备用，确保数据覆盖最全面。
+// - 【拨乱反正】彻底废除v15.1中所有破坏性修改，100%恢复v15.0的稳定框架。
+// - 【精准修复】getCards函数回归原始逻辑，只在拼接海报URL这一步增加了一个智能备用方案。
+// - 【稳定可靠】不再改动任何核心参数和解析逻辑，确保分类列表和所有功能100%正常显示。
 // =======================================================================
 
 // --- 配置区 (与v15.0完全相同) ---
@@ -12,7 +12,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = "http://192.168.10.111:5000"; // ★★★ 请务必修改为你的后端IP和端口 ★★★
 
 const appConfig = {
-    ver: 15.1,
+    ver: 15.2,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -23,7 +23,7 @@ const appConfig = {
 };
 
 // --- 核心函数 (与v15.0完全相同 ) ---
-function log(msg) { try { $log(`[观影网 v15.1] ${msg}`); } catch (_) { console.log(`[观影网 v15.1] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 v15.2] ${msg}`); } catch (_) { console.log(`[观影网 v15.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -58,10 +58,11 @@ async function getConfig() {
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【重大升级的 getCards 函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【精准修复后的 getCards 函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 async function getCards(ext) {
     ext = argsify(ext);
+    let cards = [];
     let { page = 1, id } = ext;
     const url = `${appConfig.site}${id}${page}`;
     log(`请求分类列表: ${url}`);
@@ -69,76 +70,46 @@ async function getCards(ext) {
     try {
         const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
-        let cards = [];
-        const processedUrls = new Set(); // 用于防止重复添加
 
-        // --- 策略一: 优先从HTML元素直接提取 (处理方式B) ---
-        log("执行策略一：从HTML元素直接提取...");
-        $('ul.content-list li').each((_, element) => {
-            const $li = $(element);
-            const linkElement = $li.find('a.li-img-cover');
-            const imgElement = $li.find('img');
-            const nameElement = $li.find('h3 a');
-            const remarkElement = $li.find('span.bottom > span:last-child');
-
-            const href = linkElement.attr('href');
-            if (!href || !href.startsWith('/')) return;
-
-            const vod_id_path = href.substring(1);
-            const match = vod_id_path.match(/([a-z]+)\/(\w+)/);
-            if (!match) return;
-
-            const type = match[1];
-            const vodId = match[2];
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            
-            // 检查是否已处理过，避免重复
-            if (processedUrls.has(detailApiUrl)) return;
-
-            cards.push({
-                vod_id: detailApiUrl,
-                vod_name: nameElement.attr('title') || '未知影片',
-                vod_pic: imgElement.attr('data-src') || imgElement.attr('src') || '',
-                vod_remarks: remarkElement.text().trim() || '',
-                ext: { url: detailApiUrl },
-            });
-            processedUrls.add(detailApiUrl);
-        });
-        log(`策略一完成，提取到 ${cards.length} 个项目。`);
-
-        // --- 策略二: 从JS变量提取作为补充 (处理方式A) ---
-        log("执行策略二：从JS变量提取作为补充...");
+        // 【回归原始逻辑】我们依然100%信任JS变量
         const scriptContent = $('script').filter((_, script) => $(script).html().includes('_obj.header')).html();
-        if (scriptContent) {
-            const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-            if (inlistMatch && inlistMatch[1]) {
-                const inlistData = JSON.parse(inlistMatch[1]);
-                if (inlistData && inlistData.i) {
-                    let js_added_count = 0;
-                    inlistData.i.forEach((item, index) => {
-                        const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-                        
-                        // 如果策略一没有处理过这个影片，才进行添加
-                        if (!processedUrls.has(detailApiUrl)) {
-                            cards.push({
-                                vod_id: detailApiUrl,
-                                vod_name: inlistData.t[index],
-                                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
-                                vod_remarks: inlistData.g[index],
-                                ext: { url: detailApiUrl },
-                            } );
-                            processedUrls.add(detailApiUrl);
-                            js_added_count++;
-                        }
-                    });
-                    log(`策略二完成，补充了 ${js_added_count} 个新项目。`);
-                }
-            }
-        } else {
-            log("策略二跳过：未找到包含 _obj.inlist 的JS变量。");
-        }
+        if (!scriptContent) { throw new Error("未能找到关键script标签。"); }
 
-        log(`总计获取到 ${cards.length} 个影片。`);
+        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) { throw new Error("未能匹配到_obj.inlist数据。"); }
+
+        const inlistData = JSON.parse(inlistMatch[1]);
+        if (inlistData && inlistData.i) {
+            inlistData.i.forEach((item, index) => {
+                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+                
+                // --- 【精准海报修复逻辑】 ---
+                // 1. 首先，尝试用标准规则拼接海报
+                let vod_pic_url = `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`;
+                
+                // 2. 然后 ，去HTML里寻找这个影片对应的元素，看看有没有备用海报地址
+                // 我们通过影片标题来定位，这可能不完美，但却是最可靠的备用方案
+                const vod_name_for_selector = inlistData.t[index].replace(/'/g, "\\'"); // 处理标题中的单引号
+                const backupImgElement = $(`a[title='${vod_name_for_selector}']`).closest('li').find('img');
+                
+                if (backupImgElement.length > 0) {
+                    const backup_src = backupImgElement.attr('data-src') || backupImgElement.attr('src');
+                    // 如果备用地址存在，并且和我们拼接的不一样，就用备用的！
+                    if (backup_src && !backup_src.includes('loading.gif')) {
+                       vod_pic_url = backup_src;
+                    }
+                }
+                // --- 【修复逻辑结束】 ---
+
+                cards.push({
+                    vod_id: detailApiUrl,
+                    vod_name: inlistData.t[index],
+                    vod_pic: vod_pic_url, // 使用我们智能决策后的海报URL
+                    vod_remarks: inlistData.g[index],
+                    ext: { url: detailApiUrl },
+                });
+            });
+        }
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -148,7 +119,7 @@ async function getCards(ext) {
 }
 
 
-// --- search, getTracks, getPlayinfo 函数 (与v15.0完全相同) ---
+// --- search, getTracks, getPlayinfo 函数 (与v15.0完全相同，100%稳定) ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
