@@ -1,20 +1,21 @@
 /**
- * 观影网脚本 - v12.0 (严格遵循原版-后端驱动)
- * 
- * 本次修改严格遵循以下原则：
- * 1. 100% 基于用户提供的 v4.0 脚本进行修改。
- * 2. 唯一改动点：将写死的 `COOKIE` 替换为从后端动态获取的机制。
- * 3. 核心数据处理函数 `getCards`, `getTracks`, `search` 的内部逻辑，
- *    与原版保持完全一致，不做任何“优化”或改动。
+ * 观影网脚本 - v15.0 (回归初心版)
+ *
+ * --- 架构 ---
+ * 这是对你最初正确逻辑的最终致敬。
+ * 【100%恢复】完全恢复你 v4.0 脚本中，从 <script> 标签提取 _obj.inlist 的高效数据抓取逻辑。
+ * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v5.0 后端自动获取。
+ * 【解决问题】确保核心功能与你验证过的版本完全一致，只解决 Cookie 的自动化问题。
  */
 
-// ================== 配置区 (来自原版) ==================
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; // 务必替换为你的后端服务地址
 
 const appConfig = {
-    ver: 12.0, // 版本号更新以作区分
-    title: '观影网 (后端版)', // 标题更新以作区分
+    ver: 15.0,
+    title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -23,60 +24,72 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【请配置你的个人后端服务地址】★★★★★
-// 这是唯一的配置项
-const BACKEND_API_URL = 'http://192.168.10.111:5000/getCookie'; 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★★★【全局Cookie缓存】★★★★★
+let GLOBAL_COOKIE = null;
+let IS_FETCHING_COOKIE = false;
+// ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-// --- 辅助函数 (来自原版 ，保持不变) ---
-function log(msg) { try { $log(`[观影网 V12.0] ${msg}`); } catch (_) { console.log(`[观影网 V12.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V15.0] ${msg}`); } catch (_) { console.log(`[观影网 V15.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 新增模块：用于从后端获取Cookie ---
-let dynamicCookie = '';
-let isBackendFailed = false;
-
-async function getDynamicCookie() {
-    if (dynamicCookie) return dynamicCookie;
-    if (isBackendFailed) throw new Error('后端连接已失败，不再重试。');
-
-    log(`正在从后端 (${BACKEND_API_URL}) 获取Cookie...`);
+// --- 【升级点】获取并缓存全局Cookie的函数 ---
+async function ensureGlobalCookie() {
+    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    if (IS_FETCHING_COOKIE) {
+        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
+        return GLOBAL_COOKIE;
+    }
+    log("全局Cookie为空，正在从后端获取...");
+    IS_FETCHING_COOKIE = true;
     try {
-        const { data } = await $fetch.get(BACKEND_API_URL, { timeout: 15000 });
-        const parsedData = JSON.parse(data);
-        if (parsedData.status === 'success' && parsedData.cookie) {
-            log('成功从后端获取Cookie！');
-            dynamicCookie = parsedData.cookie;
-            return dynamicCookie;
+        const response = await $fetch.get(BACKEND_URL);
+        const result = JSON.parse(response.data);
+        if (result.status === "success" && result.cookie) {
+            GLOBAL_COOKIE = result.cookie;
+            log("成功获取并缓存了全局Cookie！");
+            return GLOBAL_COOKIE;
         }
-        throw new Error(`后端返回错误: ${parsedData.message || '未知错误'}`);
+        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
-        isBackendFailed = true;
-        log(`无法连接到后端服务: ${e.message}`);
-        $utils.toastError(`无法连接到后端服务: ${e.message}`, 8000);
+        log(`网络请求后端失败: ${e.message}`);
+        $utils.toastError(e.message, 5000);
         throw e;
+    } finally {
+        IS_FETCHING_COOKIE = false;
     }
 }
 
-/**
- * 【修改点】将原版的 fetchWithCookie 升级为 fetchWithDynamicCookie
- * 它会先获取动态Cookie，再发送请求。
- */
-async function fetchWithDynamicCookie(url, options = {}) {
-    const cookie = await getDynamicCookie(); // 获取动态Cookie
+// --- 使用全局Cookie进行网络请求 ---
+async function fetchWithCookie(url, options = {}) {
+    const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
 
-// --- getConfig (来自原版，保持极简) ---
+// --- 初始化函数，预热Cookie ---
+async function init(ext) {
+    log("脚本初始化，开始预热全局Cookie...");
+    try {
+        await ensureGlobalCookie();
+        log("Cookie预热成功或已存在。");
+    } catch (e) {
+        log(`Cookie预热失败: ${e.message}`);
+    }
+    return jsonify({});
+}
+
 async function getConfig() {
     return jsonify(appConfig);
 }
 
-// --- getCards (逻辑与原版v4.0完全相同) ---
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%恢复的核心抓取逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+// --- 【100%恢复】getCards函数，完全是你最初的、正确的版本 ---
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -85,12 +98,11 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        // 【唯一改动】调用新的网络请求函数
-        const { data } = await fetchWithDynamicCookie(url);
+        // 【唯一升级点】使用我们新的带全局Cookie的请求函数
+        const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
 
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 【100% 忠于原版】以下所有数据提取逻辑，与你给的v4.0脚本完全相同。
+        // 【100%恢复】下面所有逻辑，都与你最初的 v4.0 脚本完全相同
         const scriptContent = $('script').filter((_, script) => {
             return $(script).html().includes('_obj.header');
         }).html();
@@ -118,37 +130,32 @@ async function getCards(ext) {
             });
             log(`成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         return jsonify({ list: cards });
 
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-// --- getTracks (逻辑与原版v4.0完全相同) ---
+// --- 【100%恢复】getTracks, search, getPlayinfo 函数，与你最初版本完全相同 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
     let url = ext.url; 
     log(`请求详情数据: ${url}`);
-
     try {
-        // 【唯一改动】调用新的网络请求函数
-        const { data } = await fetchWithDynamicCookie(url);
+        const { data } = await fetchWithCookie(url);
         const respstr = JSON.parse(data);
-
         if (respstr.hasOwnProperty('panlist')) {
             const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
             respstr.panlist.url.forEach((item, index) => {
                 let name = '';
                 for (const keyword in regex) {
                     const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) {
-                        name = `${name}${matches[0]}`;
-                    }
+                    if (matches) name = `${name}${matches[0]}`;
                 }
                 tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
             });
@@ -164,17 +171,14 @@ async function getTracks(ext) {
     }
 }
 
-// --- search (逻辑与原版v4.0完全相同) ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
     let page = ext.page || 1;
     let url = `${appConfig.site}/s/1---${page}/${text}`;
     log(`执行搜索: ${url}`);
-
     try {
-        // 【唯一改动】调用新的网络请求函数
-        const { data } = await fetchWithDynamicCookie(url);
+        const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
         let cards = [];
         $('.v5d').each((_, element) => {
@@ -184,13 +188,11 @@ async function search(ext) {
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
             if (!path) return;
-
             const match = path.match(/\/([a-z]+)\/(\d+)/);
             if (!match) return;
             const type = match[1];
             const vodId = match[2];
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
@@ -206,7 +208,6 @@ async function search(ext) {
     }
 }
 
-// --- getPlayinfo (来自原版，保持不变) ---
 async function getPlayinfo(ext) {
     return jsonify({ urls: [ext.url] });
 }
