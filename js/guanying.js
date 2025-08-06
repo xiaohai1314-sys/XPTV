@@ -1,18 +1,22 @@
-// =======================================================================
-// B计划：备用前端脚本 (HTML直抓版 - 完整代码)
-// 这是一个独立的、仅供测试和查漏补缺的脚本。
-// 它的getCards函数只从HTML元素提取数据，可以用来查找被v15.0遗漏的影片。
-// 不要用它作为日常主力脚本，因为它可能在某些分类下抓不到任何东西。
-// =======================================================================
+/**
+ * 观影网脚本 - v15.0 (回归初心版)
+ *
+ * --- 架构 ---
+ * 这是对你最初正确逻辑的最终致敬。
+ * 【100%保留】完全保留你 v4.0 脚本中所有高效的数据抓取和解析逻辑。
+ * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v8.0 后端自动获取。
+ */
 
-// --- 配置区 ---
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = "http://192.168.10.111:5000"; // ★★★ 请务必修改为你的后端IP和端口 ★★★
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【请务必修改这里】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【请务必修改这里】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const appConfig = {
-    ver: "B-Plan-HTML",
-    title: '观影网 (B计划 )',
+    ver: 15.0,
+    title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -21,99 +25,153 @@ const appConfig = {
     ],
 };
 
-// --- 核心函数 ---
-function log(msg ) { try { $log(`[观影网 B计划] ${msg}`); } catch (_) { console.log(`[观影网 B计划] ${msg}`); } }
+// ★★★★★【全局Cookie缓存】★★★★★
+let GLOBAL_COOKIE = null;
+let IS_FETCHING_COOKIE = false;
+// ★★★★★★★★★★★★★★★★★★★★★★★
+
+// ================== 核心函数 ==================
+
+function log(msg ) { try { $log(`[观影网 V15.0] ${msg}`); } catch (_) { console.log(`[观影网 V15.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-let cachedCookie = "";
-async function getCookieFromBackend() {
-    if (cachedCookie) return cachedCookie;
-    log("正在从后端获取Cookie...");
+// --- 【升级点】获取并缓存全局Cookie的函数 ---
+async function ensureGlobalCookie() {
+    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    if (IS_FETCHING_COOKIE) {
+        log("检测到正在获取Cookie，请稍候...");
+        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
+        return GLOBAL_COOKIE;
+    }
+    log("全局Cookie为空，正在从后端获取...");
+    IS_FETCHING_COOKIE = true;
     try {
-        const { data } = await $fetch.get(`${BACKEND_URL}/getCookie`, { timeout: 20000 });
-        if (data.status === "success" && data.cookie) {
-            log("成功从后端获取Cookie！");
-            cachedCookie = data.cookie;
-            return cachedCookie;
+        const response = await $fetch.get(BACKEND_URL);
+        const result = JSON.parse(response.data);
+        if (result.status === "success" && result.cookie) {
+            GLOBAL_COOKIE = result.cookie;
+            log("✅ 成功获取并缓存了全局Cookie！");
+            return GLOBAL_COOKIE;
         }
-        throw new Error(data.message || "后端返回Cookie失败");
+        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
-        log(`从后端获取Cookie失败: ${e.message}`);
-        $utils.toastError(`连接后端失败: ${e.message}`, 5000);
-        return null;
+        log(`❌ 网络请求后端失败: ${e.message}`);
+        $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
+        throw e;
+    } finally {
+        IS_FETCHING_COOKIE = false;
     }
 }
 
+// --- 使用全局Cookie进行网络请求 ---
 async function fetchWithCookie(url, options = {}) {
-    const cookie = await getCookieFromBackend();
-    if (!cookie) throw new Error("未能获取到有效的Cookie");
+    const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
+}
+
+// --- 初始化函数，预热Cookie ---
+async function init(ext) {
+    log("脚本初始化，开始预热全局Cookie...");
+    try {
+        await ensureGlobalCookie();
+        log("✅ Cookie预热成功或已存在。");
+    } catch (e) {
+        log(`❌ Cookie预热失败: ${e.message}`);
+    }
+    return jsonify({});
 }
 
 async function getConfig() {
     return jsonify(appConfig);
 }
 
-// --- getCards 函数 (纯HTML直抓版) ---
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%保留的核心抓取逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// (下面的代码与你最初的 v4.0 脚本完全相同，只修改了请求函数)
+// =======================================================================
+
 async function getCards(ext) {
     ext = argsify(ext);
+    let cards = [];
     let { page = 1, id } = ext;
     const url = `${appConfig.site}${id}${page}`;
-    log(`请求分类列表 (HTML直抓模式): ${url}`);
+    log(`请求分类列表: ${url}`);
+
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
-        let cards = [];
-        
-        // 只使用HTML元素抓取模式
-        $('ul.content-list li').each((_, element) => {
-            const $li = $(element);
-            const linkElement = $li.find('a.li-img-cover');
-            const imgElement = $li.find('img');
-            const nameElement = $li.find('h3 a');
-            const remarkElement = $li.find('span.bottom > span:last-child');
-            
-            const href = linkElement.attr('href');
-            if (!href || !href.startsWith('/')) return;
 
-            const vod_id_path = href.substring(1);
-            // 修正正则表达式以匹配可能包含子文件夹的路径
-            const match = vod_id_path.match(/([a-z]+)\/([\w\d\/-]+)/);
-            if (!match) return;
+        const scriptContent = $('script').filter((_, script) => {
+            return $(script).html().includes('_obj.header');
+        }).html();
 
-            const type = match[1];
-            const vodIdWithSubfolder = match[2];
-            // 提取路径中最后一部分作为ID
-            const vodId = vodIdWithSubfolder.split('/').pop();
-            
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
 
-            cards.push({
-                vod_id: detailApiUrl,
-                vod_name: nameElement.attr('title') || '未知影片',
-                vod_pic: imgElement.attr('data-src') || imgElement.attr('src') || '',
-                vod_remarks: remarkElement.text().trim() || '',
-                ext: { url: detailApiUrl },
+        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
+
+        const inlistData = JSON.parse(inlistMatch[1]);
+        if (inlistData && inlistData.i) {
+            inlistData.i.forEach((item, index) => {
+                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+                cards.push({
+                    vod_id: detailApiUrl,
+                    vod_name: inlistData.t[index],
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
+                    vod_remarks: inlistData.g[index],
+                    ext: { url: detailApiUrl },
+                } );
             });
-        });
+            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
+        }
         
-        log(`HTML直抓模式完成，共找到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
 
     } catch (e) {
-        log(`HTML直抓异常: ${e.message}`);
+        log(`❌ 获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-// --- search, getTracks, getPlayinfo 函数 (与v15.0完全相同) ---
+async function getTracks(ext) {
+    ext = argsify(ext);
+    let tracks = [];
+    let url = ext.url; 
+    log(`请求详情数据: ${url}`);
+    try {
+        const { data } = await fetchWithCookie(url);
+        const respstr = JSON.parse(data);
+        if (respstr.hasOwnProperty('panlist')) {
+            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
+            respstr.panlist.url.forEach((item, index) => {
+                let name = '';
+                for (const keyword in regex) {
+                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
+                    if (matches) name = `${name}${matches[0]}`;
+                }
+                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
+            });
+        } else if (respstr.hasOwnProperty('file')) {
+            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
+        } else {
+            $utils.toastError('没有找到网盘资源');
+        }
+        return jsonify({ list: [{ title: '默认分组', tracks }] });
+    } catch (e) {
+        log(`❌ 获取详情数据异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
+
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
     let page = ext.page || 1;
     let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
@@ -140,40 +198,15 @@ async function search(ext) {
         });
         return jsonify({ list: cards });
     } catch (e) {
-        log(`搜索异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-async function getTracks(ext) {
-    ext = argsify(ext);
-    let tracks = [];
-    let url = ext.url;
-    try {
-        const { data } = await fetchWithCookie(url);
-        const respstr = JSON.parse(data);
-        if (respstr.hasOwnProperty('panlist')) {
-            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
-            respstr.panlist.url.forEach((item, index) => {
-                let name = '';
-                for (const keyword in regex) {
-                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) { name = `${name}${matches[0]}`; }
-                }
-                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
-            });
-        } else if (respstr.hasOwnProperty('file')) {
-            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
-        } else {
-            $utils.toastError('没有找到网盘资源');
-        }
-        return jsonify({ list: [{ title: '默认分组', tracks }] });
-    } catch (e) {
-        log(`获取详情数据异常: ${e.message}`);
+        log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
 async function getPlayinfo(ext) {
-    return jsonify({ urls: [ext.url] });
+    ext = argsify(ext);
+    // 从 getTracks 的结果中获取 pan 链接
+    const panLink = ext.pan;
+    // 直接返回这个链接，让App调用系统浏览器或特定网盘App打开
+    return jsonify({ urls: [panLink] });
 }
