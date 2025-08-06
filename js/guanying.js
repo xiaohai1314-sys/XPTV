@@ -1,26 +1,21 @@
 /**
- * 观影网脚本 - v5.2 (最终兼容版)
+ * 观影网脚本 - v6.0 (免配置最终版)
  * 
  * 更新日志:
- * - 【v5.2】终极修正：改用标准的、与环境无关的 fetch() API 进行登录，以解决 $http 未定义和 $fetch 功能不全的问题 。
- * - 【v5.1】修正登录逻辑，尝试使用 $http.post 。
- * - 【v5.0】重大更新：由Cookie模式改为用户名/密码自动登录模式。
+ * - 【v6.0】返璞归真：回归并优化Cookie模式，以适应特殊的JS运行环境。
+ * - 【免配置】不再需要填写任何用户名、密码或Cookie字符串。
+ * - 【自动会话】脚本将自动利用App内置WebView或系统浏览器中已有的观影网登录会话。
+ * - 【登录验证】增加启动时检查函数，通过访问用户中心来验证登录状态，并提供清晰的指引。
+ * - 【移除冗余】删除了所有在当前环境下无法工作的登录尝试代码。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
-// ★★★★★【请在这里填写你的观影网账号信息】★★★★★
-const USER_CONFIG = {
-    username: '1083328569@qq.com', // 替换为你的观影网登录邮箱或用户名
-    password: 'xiaohai1314'             // 替换为你的观影网登录密码
-};
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
 const appConfig = {
-    ver: 5.2,
-    title: '观影网 (登录版)',
+    ver: 6.0,
+    title: '观影网 (免配置版)',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -29,134 +24,89 @@ const appConfig = {
     ],
 };
 
-// 全局变量 ，用于存储登录后动态获取的Cookie
-let dynamicCookie = '';
+// 全局变量 ，用于标记登录状态检查是否已完成
+let loginChecked = false;
 
 // ================== 核心函数 ==================
 
 // --- 辅助函数 ---
-function log(msg) { try { $log(`[观影网 V5.2] ${msg}`); } catch (_) { console.log(`[观影网 V5.2] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V6.0] ${msg}`); } catch (_) { console.log(`[观影网 V6.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-
 /**
- * 执行登录操作，并从响应头中获取并返回Cookie
- * [v5.2 修正] 改用标准的 fetch() API，以保证最大的环境兼容性。
- * @returns {Promise<string>} 登录成功后获取的Cookie字符串
+ * 检查登录状态的核心函数。
+ * 它通过访问用户中心页面并检查页面内容来确认是否已登录。
+ * 这是所有网络请求前必须执行的第一步。
  */
-async function performLogin() {
-    if (!USER_CONFIG.username || !USER_CONFIG.password || USER_CONFIG.username.includes('YOUR_USERNAME')) {
-        throw new Error("用户名或密码未配置。");
+async function checkLoginStatus() {
+    if (loginChecked) {
+        return true; // 如果已经检查过，直接返回成功
     }
-    
-    const loginUrl = 'https://www.gying.org/user/login';
-    const payload = `code=&siteid=1&dosubmit=1&cookietime=10506240&username=${encodeURIComponent(USER_CONFIG.username )}&password=${encodeURIComponent(USER_CONFIG.password)}`;
 
-    log('正在尝试登录 (使用标准 fetch)...');
+    log('正在验证观影网登录状态...');
+    const userCenterUrl = 'https://www.gying.org/user/';
+    
     try {
-        // 【关键改动】使用标准的 fetch API
-        const response = await fetch(loginUrl, {
-            method: 'POST',
-            body: payload,
-            headers: {
-                'User-Agent': UA,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Referer': 'https://www.gying.org/user/login',
-                'Origin': 'https://www.gying.org'
-            }
+        // 使用环境中唯一可用的 $fetch
+        const { data } = await $fetch.get(userCenterUrl, {
+            headers: { 'User-Agent': UA }
         } );
 
-        // 检查网络请求是否成功
-        if (!response.ok) {
-            throw new Error(`网络请求失败，状态码: ${response.status}`);
+        // 检查返回的HTML是否包含表示“未登录”的关键词
+        if (data.includes('用户登录') || data.includes('立即注册')) {
+            log('验证失败：未登录。');
+            $utils.toastError('请先在手机浏览器(Safari)中登录观影网！', 5000);
+            throw new Error('Not logged in.');
         }
 
-        // 检查响应体是否包含登录失败的提示
-        const responseText = await response.text();
-        if (responseText.includes('密码错误') || responseText.includes('验证码不正确')) {
-             throw new Error('登录失败，请检查用户名和密码或网页需要验证码。');
-        }
-
-        // 从响应头中提取Set-Cookie
-        // response.headers.get() 对于多个同名头，只会返回第一个，我们需要所有
-        // 但在浏览器环境中，'set-cookie' 是一个特例，直接访问会得到拼接好的字符串
-        // 在非浏览器环境中，可能需要特殊处理，但先用标准方法尝试
-        const setCookieHeader = response.headers.get('set-cookie');
-        if (!setCookieHeader) {
-            // 如果获取不到，尝试遍历所有头
-            let cookies = [];
-            for (let pair of response.headers.entries()) {
-                if (pair[0].toLowerCase() === 'set-cookie') {
-                    cookies.push(pair[1].split(';')[0]);
-                }
-            }
-            if (cookies.length > 0) {
-                dynamicCookie = cookies.join('; ');
-                log('登录成功，已获取并设置动态Cookie。');
-                return dynamicCookie;
-            }
-            throw new Error('登录似乎成功，但未能从响应中捕获到Set-Cookie头。');
+        // 如果页面包含通常在登录后才出现的内容，则认为已登录
+        if (data.includes('我的收藏') || data.includes('退出登录')) {
+            log('登录状态验证成功！');
+            loginChecked = true; // 标记为已检查
+            return true;
         }
         
-        // 标准浏览器环境可以直接处理
-        const cookies = setCookieHeader.split(', ').map(c => c.split(';')[0]).join('; ');
-        log('登录成功，已获取并设置动态Cookie。');
-        return cookies;
+        // 作为最后的防线
+        log('无法明确判断登录状态，将尝试继续。');
+        loginChecked = true;
+        return true;
 
     } catch (e) {
-        log(`登录请求异常: ${e.message}`);
-        $utils.toastError(`登录失败: ${e.message}`, 5000);
+        log(`登录状态检查异常: ${e.message}`);
+        // 如果错误不是 "Not logged in."，则显示通用错误
+        if (e.message !== 'Not logged in.') {
+            $utils.toastError('检查登录状态时发生网络错误。', 3000);
+        }
         throw e; // 抛出异常，中断后续操作
     }
 }
 
-
 /**
- * 使用动态Cookie执行网络请求的核心函数
- * 如果Cookie不存在，会自动尝试登录。
+ * 带有登录检查的网络请求函数。
  * @param {string} url 请求的URL
  * @param {object} options 请求选项
- * @returns {Promise<object>} 返回请求结果 { data: '...' }
+ * @returns {Promise<object>} 返回 $fetch 的结果
  */
-async function fetchWithCookie(url, options = {}) {
-    if (!dynamicCookie) {
-        try {
-            dynamicCookie = await performLogin();
-        } catch (e) {
-            throw new Error("登录失败，无法继续数据请求。");
-        }
-    }
-
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': dynamicCookie,
-        'Referer': appConfig.site,
-        ...options.headers
+async function fetchWithLoginCheck(url, options = {}) {
+    // 在每次请求前（如果需要），都先确保登录状态是有效的
+    await checkLoginStatus();
+    
+    const finalOptions = {
+        ...options,
+        headers: {
+            'User-Agent': UA,
+            'Referer': appConfig.site,
+            ...options.headers,
+        },
     };
-
-    try {
-        // 使用标准 fetch 执行后续请求
-        const response = await fetch(url, { headers });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.text();
-
-        if (data.includes('用户登录')) {
-             throw new Error('Cookie已失效');
-        }
-        // 返回与原$fetch兼容的格式
-        return { data: data }; 
-    } catch (e) {
-        log(`请求失败: ${e.message}。可能是Cookie失效，将尝试重新登录。`);
-        dynamicCookie = '';
-        return await fetchWithCookie(url, options);
-    }
+    
+    return $fetch.get(url, finalOptions);
 }
 
 
-// --- 【核心修正】getCards函数，使用新的fetchWithCookie ---
+// --- getCards, getTracks, search 等函数统一使用新的请求逻辑 ---
+
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -165,7 +115,7 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithLoginCheck(url);
         const $ = cheerio.load(data);
 
         const scriptContent = $('script').filter((_, script) => {
@@ -173,7 +123,7 @@ async function getCards(ext) {
         }).html();
 
         if (!scriptContent) {
-            throw new Error("未能找到包含'_obj.header'的关键script标签。");
+            throw new Error("未能找到包含'_obj.header'的关键script标签。可能是登录会话已失效。");
         }
 
         const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
@@ -200,14 +150,12 @@ async function getCards(ext) {
 
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
-        if (!e.message.includes("登录失败")) {
+        if (!e.message.includes('Not logged in')) {
             $utils.toastError(`加载失败: ${e.message}`, 4000);
         }
         return jsonify({ list: [] });
     }
 }
-
-// --- getTracks, search等函数也统一使用fetchWithCookie ---
 
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -216,7 +164,7 @@ async function getTracks(ext) {
     log(`请求详情数据: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithLoginCheck(url);
         const respstr = JSON.parse(data);
 
         if (respstr.hasOwnProperty('panlist')) {
@@ -251,7 +199,7 @@ async function search(ext) {
     log(`执行搜索: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithLoginCheck(url);
         const $ = cheerio.load(data);
         let cards = [];
         $('.v5d').each((_, element) => {
@@ -287,7 +235,6 @@ async function getPlayinfo(ext) {
     return jsonify({ urls: [ext.url] });
 }
 
-// getConfig函数保持不变
 async function getConfig() {
     return jsonify(appConfig);
 }
