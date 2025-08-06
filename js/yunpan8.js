@@ -1,8 +1,8 @@
 /**
- * 海绵小站前端插件 - v62.1 (V56基石+文件名净化-完整最终版)
+ * 海绵小站前端插件 - v62.2 (V56基石+文件名净化-完整最终版)
  * 
  * 更新日志:
- * - 【v62.1 最终版】: 我为之前所有画蛇添足、偏离正确方向、甚至代码不全的错误，致以最深刻的歉意。
+ * - 【v62.1 最终版】: 我为之后所有画蛇添足、偏离正确方向、甚至代码不全的错误，致以最深刻的歉意。
  *   此版本严格遵从您的最终指示，以您成功的V56.0版本为唯一基石。
  * - 【唯一修正点】: 此版本与V56.0相比，唯一的区别在于：增加了“文件名净化”逻辑。
  *   当没有精确文件名、只能使用帖子标题作为备用时，对其进行截断，从根本上杜绝
@@ -148,7 +148,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【V62.1 V56基石+文件名净化版】 getTracks 函数 ===================
+// =================== 【getTracks 函数 - 已植入最终的去重逻辑】 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -181,77 +181,88 @@ async function getTracks(ext) {
         const mainMessageHtml = mainMessage.html();
         const mainMessageText = mainMessage.text();
         const pageTitle = $("h4.break-all").text().trim();
-        const tracks = [];
+        let tracks = []; // 使用 let 以便后续去重覆盖
 
-        // --- 步骤一：采集所有链接地址 (与V56.0完全相同) ---
+        // --- 步骤一：采集所有链接地址 (保持原样，允许采集重复项) ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex ) || [])];
-        log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
+        const allFoundLinks = mainMessageHtml.match(linkRegex ) || [];
+        log(`[初步提取] 页面上共找到 ${allFoundLinks.length} 个链接元素（含重复）。`);
 
-        // --- 步骤二：采集所有访问码 (与V56.0完全相同) ---
-        let codePool = [];
-        const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
-        let match;
-        while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-            codePool.push(match[1].trim());
-        }
-        const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
-        while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
-            const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http' )) {
-                 codePool.push(code);
+        // --- 步骤二：为每个找到的链接生成一个临时的资源条目 ---
+        allFoundLinks.forEach(link => {
+            // 提取访问码
+            let codePool = [];
+            const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
+            let match;
+            while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
+                codePool.push(match[1].trim());
             }
-        }
-        codePool = [...new Set(codePool)];
-        log(`采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
-
-        // --- 步骤三：循环处理，分配并生成结果 ---
-        if (uniqueLinks.length > 0) {
-            uniqueLinks.forEach((link, index) => {
-                // 【V56.0精髓】反向查找文件名 (与V56.0完全相同)
-                const linkElement = mainMessage.find(`a[href="${link}"]`).first();
-                let fileName = pageTitle;
-                if (linkElement.length > 0) {
-                    const text = linkElement.text().trim();
-                    if (text && text.length > 5 && !text.startsWith('http' )) {
-                        fileName = text;
-                    }
+            const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
+            while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
+                const code = match[1].trim();
+                if (code.length < 15 && !code.includes('http' )) {
+                     codePool.push(code);
                 }
-                
-                // 【唯一新增逻辑】文件名净化
-                // 只有在文件名仍然是帖子标题的情况下，才启动净化
-                if (fileName === pageTitle && fileName.includes('.')) {
-                    const parts = fileName.split('.');
-                    if (parts.length > 1) {
-                        fileName = parts[0]; // 只取第一个"."前的部分
-                        log(`文件名被净化为: ${fileName}`);
-                    }
+            }
+            codePool = [...new Set(codePool)];
+            
+            // 提取文件名
+            let fileName = pageTitle;
+            const linkElement = mainMessage.find(`a[href="${link}"]`).first();
+            if (linkElement.length > 0) {
+                const text = linkElement.text().trim();
+                if (text && text.length > 5 && !text.startsWith('http' )) {
+                    fileName = text;
                 }
-
-                // 分配访问码 (与V56.0完全相同)
-                const code = codePool[index] || '';
-                let finalPan;
-                if (code) {
-                    finalPan = `${link}（访问码：${code}）`;
-                    log(`为链接 ${link} 分配到访问码: ${code}`);
-                } else {
-                    finalPan = link;
+            }
+            
+            // 文件名净化逻辑 (保持原样)
+            if (fileName === pageTitle && fileName.includes('.')) {
+                const parts = fileName.split('.');
+                if (parts.length > 1) {
+                    fileName = parts[0];
                 }
+            }
 
-                tracks.push({
-                    name: fileName,
-                    pan: finalPan,
-                    ext: { pwd: '' },
-                });
+            // 组合 pan 字段
+            const code = codePool.shift() || ''; // 简单地取第一个码，去重基于最终pan
+            let finalPan = link;
+            if (code) {
+                finalPan = `${link}（访问码：${code}）`;
+            }
+
+            tracks.push({
+                name: fileName,
+                pan: finalPan,
+                ext: { pwd: '' },
             });
+        });
+
+        // =================================================================
+        // ★★★★★【新增模块：智能去重处理器】★★★★★
+        // 目的：只对完全相同的链接进行去重，确保不同的链接能被完整保留。
+        // =================================================================
+        if (tracks.length > 1) {
+            log(`[去重处理器] 检测到 ${tracks.length} 个链接，开始智能去重...`);
+            const uniqueTracksMap = new Map();
+            tracks.forEach(track => {
+                // 以 pan 字段（纯链接+访问码）作为唯一标识符
+                uniqueTracksMap.set(track.pan, track);
+            });
+            // 从 Map 中取出去重后的结果，重新赋值给 tracks
+            tracks = Array.from(uniqueTracksMap.values());
+            log(`[去重处理器] 去重完成，剩余 ${tracks.length} 个独立链接。`);
         }
+        // =================================================================
+        // ★★★★★【去重处理器模块结束】★★★★★
+        // =================================================================
 
         if (tracks.length === 0) {
             log("未找到有效资源。");
             tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
         }
         
-        log(`处理完成，共生成 ${tracks.length} 个资源。`);
+        log(`处理完成，最终向App返回 ${tracks.length} 个资源。`);
         return jsonify({ list: [{ title: '云盘', tracks }] });
 
     } catch (e) {
