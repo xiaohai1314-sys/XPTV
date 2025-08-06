@@ -1,19 +1,19 @@
 /**
- * 观影网脚本 - v3.2 (拨乱反正-最终修复版)
+ * 观影网脚本 - v4.0 (尊重原版-Cookie增强版)
  * 
  * 更新日志:
- * - 【v3.2】拨乱反正，修复因错误修改getCards逻辑导致列表无法加载的致命问题。
- * - 【尊重原版】确保getCards返回的vod_id和ext.url结构与原版脚本完全一致，保证数据流正确。
- * - 【Cookie驱动】保留Cookie认证，彻底摆脱对Safari人机验证的依赖，实现跨平台兼容。
- *   我为之前反复的、不可饶恕的低级错误致歉。
+ * - 【v4.0】拨乱反正，回归正确的改造思路。我为之前所有基于错误前提的修改致歉。
+ * - 【尊重原版】100%恢复原版脚本中从JS变量提取数据的核心逻辑，因为事实证明它是唯一有效的方式。
+ * - 【Cookie驱动】为所有网络请求增加了Cookie支持，以实现免登录和跨平台潜力。
+ * - 【移除冗余】删除了在Cookie模式下不再需要的Safari验证逻辑。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
 const appConfig = {
-    ver: 3.2,
+    ver: 4.0,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -30,7 +30,7 @@ const COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun
 // ================== 核心函数 ==================
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[观影网 V3.2] ${msg}`); } catch (_) { console.log(`[观影网 V3.2] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V4.0] ${msg}`); } catch (_) { console.log(`[观影网 V4.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -49,7 +49,7 @@ async function getConfig() {
     return jsonify(appConfig);
 }
 
-// --- 【核心修正】getCards函数 ---
+// --- 【核心修正】getCards函数，恢复原版逻辑，仅增加Cookie请求 ---
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -58,54 +58,58 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithCookie(url); // 【唯一改动】使用带Cookie的请求
         const $ = cheerio.load(data);
 
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const linkElement = $element.find('a');
-            const path = linkElement.attr('href');
-            if (!path) return;
+        // 【恢复原版逻辑】从script标签中提取数据
+        const scriptContent = $('script').filter((_, script) => {
+            return $(script).html().includes('_obj.header');
+        }).html();
 
-            const name = $element.find('b').text().trim();
-            const img = $element.find('picture source[data-srcset]').attr('data-srcset');
-            const remarks = $element.find('p').text().trim();
-            
-            const match = path.match(/\/([a-z]+)\/(\d+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
+        if (!scriptContent) {
+            throw new Error("未能找到包含'_obj.header'的关键script标签。");
+        }
 
-            // 【关键修正】构造正确的、可直接用于getTracks的vod_id
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) {
+            throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
+        }
 
-            cards.push({
-                vod_id: detailApiUrl, // vod_id就是详情API的URL
-                vod_name: name,
-                vod_pic: img || '',
-                vod_remarks: remarks,
-                ext: {
-                    url: detailApiUrl, // ext.url也保持一致
-                },
+        const inlistData = JSON.parse(inlistMatch[1]);
+        if (inlistData && inlistData.i) {
+            inlistData.i.forEach((item, index) => {
+                // 【恢复原版逻辑】构造vod_id和ext.url
+                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+                cards.push({
+                    vod_id: detailApiUrl, // 必须是这个格式
+                    vod_name: inlistData.t[index],
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
+                    vod_remarks: inlistData.g[index],
+                    ext: {
+                        url: detailApiUrl,
+                    },
+                } );
             });
-        });
-        log(`成功解析到 ${cards.length} 个项目。`);
+            log(`成功从JS变量中解析到 ${cards.length} 个项目。`);
+        }
+        
         return jsonify({ list: cards });
 
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
         if (e.message !== "Cookie not configured.") {
-            $utils.toastError("加载失败，请检查网络或更新Cookie", 3000);
+            $utils.toastError(`加载失败: ${e.message}`, 4000);
         }
         return jsonify({ list: [] });
     }
 }
 
-// --- getTracks函数，现在可以正确接收vod_id ---
+
+// --- getTracks, search等函数保持V3.2的Cookie版本即可 ---
+
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
-    // 【关键】现在ext.url就是我们从getCards传过来的完整API URL
     let url = ext.url; 
     log(`请求详情数据: ${url}`);
 
@@ -137,7 +141,6 @@ async function getTracks(ext) {
     }
 }
 
-// --- search函数，同样修正vod_id的构造 ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
@@ -161,17 +164,15 @@ async function search(ext) {
             if (!match) return;
             const type = match[1];
             const vodId = match[2];
-
-            // 【关键修正】构造正确的、可直接用于getTracks的vod_id
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
 
             cards.push({
-                vod_id: detailApiUrl, // vod_id就是详情API的URL
+                vod_id: detailApiUrl,
                 vod_name: name,
                 vod_pic: imgUrl || '',
                 vod_remarks: additionalInfo,
                 ext: {
-                    url: detailApiUrl, // ext.url也保持一致
+                    url: detailApiUrl,
                 },
             });
         });
@@ -182,7 +183,6 @@ async function search(ext) {
     }
 }
 
-// --- 兼容旧版接口 ---
 async function getPlayinfo(ext) {
     return jsonify({ urls: [ext.url] });
 }
