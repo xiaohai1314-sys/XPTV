@@ -1,145 +1,183 @@
 /**
- * Gying 前端插件 - 终极按钮生成版 v1.0.0
+ * 观影网脚本 - v3.1 (Cookie内置最终版)
  * 
- * 作者: 基于对 SeedHub 按钮生成逻辑的最终、最精确理解
- * 版本: v1.0.0
  * 更新日志:
- * v1.0.0: 
- * 1. 【回归正轨】: 彻底理解并精确复刻了 SeedHub 生成 `网盘[夸]` 按钮的逻辑。
- * 2. 【核心实现】: getTracks 函数现在会分析原始标题，提取网盘类型，并生成一个简洁的、带缩写的按钮名称，同时将真实链接直接赋给按钮。
- * 3. 【大道至简】: getPlayinfo 函数保持最简单，只负责播放。
- * 4. 我为之前所有错误的尝试，致以最诚挚的歉意。这才是对 SeedHub 最精确的模仿。
+ * - 【v3.1】内置用户提供的有效Cookie，实现开箱即用。
+ * - 【统一架构】废弃原版脆弱的JS变量解析逻辑，在所有平台(手机/Apple TV)统一采用
+ *   更稳定的HTML标签解析方案。
+ * - 【免登录】通过配置Cookie，实现免登录访问，确保获取到的是完整的、已登录状态的HTML页面。
+ * - 【跨平台】移除了所有特定于手机端的代码，确保在Apple TV等无浏览器环境下也能完美运行。
  */
 
-// ==================== 配置区 ====================
-const API_BASE_URL = 'http://192.168.1.3:3001/api'; // 【重要】请再次确认这是您电脑的正确IP地址
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
+// ================== 配置区 ==================
+const cheerio = createCheerio();
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
-// ==================== 工具函数 ====================
-function log(msg) { try { if (typeof $log === 'function') { $log(`[Gying] ${msg}`); } else { console.log(`[Gying] ${msg}`); } } catch (e) { console.log(`[Gying-ERROR] log function failed: ${e}`) } }
-async function request(url) { try { log(`发起请求: ${url}`); if (typeof $fetch === 'object' && typeof $fetch.get === 'function') { const { data, status } = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 15000 }); if (status !== 200) { log(`请求失败: HTTP ${status}`); return { error: `HTTP ${status}` }; } const result = typeof data === 'object' ? data : JSON.parse(data); log(`请求成功`); return result; } else { const response = await fetch(url, { headers: { 'User-Agent': UA } }); if (!response.ok) { log(`请求失败: HTTP ${response.status}`); return { error: `HTTP ${response.status}` }; } const result = await response.json(); log(`请求成功`); return result; } } catch (error) { log(`请求异常: ${error.message}`); return { error: error.message }; } }
-function jsonify(obj) { return JSON.stringify(obj); }
-function argsify(str) { if (typeof str === 'object') return str; try { return JSON.parse(str); } catch { return {}; } }
+const appConfig = {
+    ver: 3.1,
+    title: '观影网',
+    site: 'https://www.gying.org/',
+    tabs: [
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
+    ],
+};
 
-// 【核心】用于从标题获取网盘缩写的函数
-function getPanAbbr(title) {
-    const lowerTitle = title.toLowerCase();
-    if (lowerTitle.includes('百度')) return '百';
-    if (lowerTitle.includes('迅雷')) return '迅';
-    if (lowerTitle.includes('夸克')) return '夸';
-    if (lowerTitle.includes('阿里')) return '阿';
-    if (lowerTitle.includes('天翼')) return '天';
-    if (lowerTitle.includes('115')) return '115';
-    if (lowerTitle.includes('uc')) return 'UC';
-    return '源'; // 如果识别不出来，就叫“源”
+// ★★★★★【用户Cookie已内置】★★★★★
+const COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;PHPSESSID=i63pfrc51f5osto68bi40a3dq2;';
+// ★★★★★★★★★★★★★★★★★★★★★★★★★
+
+// ================== 核心函数 ==================
+
+// --- 辅助函数 ---
+function log(msg ) { try { $log(`[观影网 V3.1] ${msg}`); } catch (_) { console.log(`[观影网 V3.1] ${msg}`); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+
+// --- 带Cookie的网络请求 ---
+async function fetchWithCookie(url, options = {}) {
+    if (!COOKIE || COOKIE === 'YOUR_COOKIE_STRING_HERE') {
+        $utils.toastError("Cookie未配置，请更新脚本", 3000);
+        throw new Error("Cookie not configured.");
+    }
+    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, 'Referer': appConfig.site, ...options.headers };
+    const finalOptions = { ...options, headers };
+    return $fetch.get(url, finalOptions);
 }
 
-// ==================== XPTV App 标准接口 ====================
-async function getConfig() { log(`插件初始化，后端地址: ${API_BASE_URL}`); return jsonify({ ver: 1, title: 'Gying观影 (按钮版)', site: 'gying.org', tabs: [{ name: '剧集', ext: { id: 'tv' } }, { name: '电影', ext: { id: 'mv' } }, { name: '动漫', ext: { id: 'ac' } }] }); }
+async function getConfig() {
+    return jsonify(appConfig);
+}
 
+// --- 【核心改造】getCards函数，采用统一的HTML解析 ---
 async function getCards(ext) {
     ext = argsify(ext);
-    const { id, page = 1 } = ext;
-    if (!id) { log('缺少分类ID参数'); return jsonify({ list: [] }); }
-    log(`获取分类: ${id}, 页码: ${page}`);
-    const url = `${API_BASE_URL}/vod?id=${id}&page=${page}`;
-    const data = await request(url);
-    if (data.error) { log(`分类获取失败: ${data.error}`); return jsonify({ list: [], total: 0 }); }
+    let cards = [];
+    let { page = 1, id } = ext;
+    const url = `${appConfig.site}${id}${page}`;
+    log(`请求分类列表: ${url}`);
 
-    const cards = (data.list || []).map(item => ({
-        vod_id: item.vod_id,
-        vod_name: item.vod_name,
-        vod_pic: item.vod_pic,
-        vod_remarks: item.vod_remarks,
-        ext: { url: item.vod_id }
-    }));
-    return jsonify({ list: cards, total: data.total || 0 });
+    try {
+        const { data } = await fetchWithCookie(url);
+        const $ = cheerio.load(data);
+
+        // 统一使用HTML标签解析，适用于所有平台
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const linkElement = $element.find('a');
+            const path = linkElement.attr('href');
+            if (!path) return;
+
+            const name = $element.find('b').text().trim();
+            const img = $element.find('picture source[data-srcset]').attr('data-srcset');
+            const remarks = $element.find('p').text().trim();
+            
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+
+            cards.push({
+                vod_id: vodId,
+                vod_name: name,
+                vod_pic: img || '',
+                vod_remarks: remarks,
+                ext: {
+                    url: `${appConfig.site}res/downurl/${type}/${vodId}`,
+                },
+            });
+        });
+        log(`成功解析到 ${cards.length} 个项目。`);
+        return jsonify({ list: cards });
+
+    } catch (e) {
+        log(`获取卡片列表异常: ${e.message}`);
+        if (e.message !== "Cookie not configured.") {
+            $utils.toastError("加载失败，请检查网络或更新Cookie", 3000);
+        }
+        return jsonify({ list: [] });
+    }
 }
 
-async function search(ext) {
-    ext = argsify(ext);
-    const { text } = ext;
-    if (!text) { log('搜索关键词为空'); return jsonify({ list: [] }); }
-    log(`搜索: ${text}`);
-    const url = `${API_BASE_URL}/search?wd=${encodeURIComponent(text)}`;
-    const data = await request(url);
-    if (data.error) { log(`搜索失败: ${data.error}`); return jsonify({ list: [] }); }
-
-    const cards = (data.list || []).map(item => ({
-        vod_id: item.vod_id,
-        vod_name: item.vod_name,
-        vod_pic: item.vod_pic,
-        vod_remarks: item.vod_remarks,
-        ext: { url: item.vod_id }
-    }));
-    return jsonify({ list: cards });
-}
-
-// --- 【核心】getTracks 函数精确复刻 SeedHub 的按钮生成逻辑 ---
+// --- getTracks函数，处理的是JSON数据 ---
 async function getTracks(ext) {
     ext = argsify(ext);
-    const vod_id = ext.url || ext.id || ext;
-    log(`getTracks调用: vod_id=${vod_id}`);
+    let tracks = [];
+    let url = ext.url;
+    log(`请求详情数据: ${url}`);
 
-    const detailUrl = `${API_BASE_URL}/detail?ids=${encodeURIComponent(vod_id)}`;
-    const data = await request(detailUrl);
+    try {
+        const { data } = await fetchWithCookie(url); // 改为带Cookie的请求
+        const respstr = JSON.parse(data);
 
-    if (data.error || !data.list || data.list.length === 0) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取资源失败', pan: '' }] }] });
+        if (respstr.hasOwnProperty('panlist')) {
+            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
+            respstr.panlist.url.forEach((item, index) => {
+                let name = '';
+                for (const keyword in regex) {
+                    const matches = respstr.panlist.name[index].match(regex[keyword]);
+                    if (matches) {
+                        name = `${name}${matches[0]}`;
+                    }
+                }
+                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
+            });
+        } else if (respstr.hasOwnProperty('file')) {
+            $utils.toastError('网盘验证掉签，请前往主站完成验证或更新Cookie');
+        } else {
+            $utils.toastError('没有找到网盘资源');
+        }
+        return jsonify({ list: [{ title: '默认分组', tracks }] });
+    } catch (e) {
+        log(`获取详情数据异常: ${e.message}`);
+        return jsonify({ list: [] });
     }
-    
-    const playUrlString = data.list[0].vod_play_url;
-    if (!playUrlString || playUrlString === '暂无任何网盘资源') {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: '暂无任何网盘资源', pan: '' }] }] });
-    }
-    
-    log(`开始解析资源字符串: ${playUrlString}`);
-    const tracks = playUrlString.split('#').map(item => {
-        const parts = item.split('$');
-        const title = (parts[0] || '未知资源').trim();
-        const link = (parts[1] || '').trim();
-        if (!link) return null;
-        
-        // 1. 分析标题，获取缩写
-        const abbr = getPanAbbr(title);
-        // 2. 拼接成新的、简洁的按钮名字
-        const buttonName = `网盘[${abbr}]`;
-        
-        // 3. 组装最终的按钮对象
-        return { 
-            name: buttonName, // 使用新的、简洁的名字
-            pan: link,        // 包裹真实的链接
-        };
-    }).filter(item => item !== null);
-
-    if (tracks.length === 0) {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: '解析后无有效资源', pan: '' }] }] });
-    }
-
-    log(`资源解析完成，共 ${tracks.length} 个按钮`);
-    return jsonify({
-        list: [
-            {
-                title: '云盘', // 分组标题
-                tracks: tracks,
-            },
-        ],
-    });
 }
 
-// --- getPlayinfo 函数只负责播放 ---
-async function getPlayinfo(ext) {
+// --- search函数，改为带Cookie请求 ---
+async function search(ext) {
     ext = argsify(ext);
-    const panUrl = ext.pan || ext.url || '';
-    log(`准备播放: ${panUrl}`);
-    return jsonify({ urls: [{ name: '点击播放', url: panUrl }] });
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
+
+    try {
+        const { data } = await fetchWithCookie(url); // 改为带Cookie的请求
+        const $ = cheerio.load(data);
+        let cards = [];
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+            const additionalInfo = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
+            if (!path) return;
+
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+
+            cards.push({
+                vod_id: vodId,
+                vod_name: name,
+                vod_pic: imgUrl || '',
+                vod_remarks: additionalInfo,
+                ext: {
+                    url: `${appConfig.site}res/downurl/${type}/${vodId}`,
+                },
+            });
+        });
+        return jsonify({ list: cards });
+    } catch (e) {
+        log(`搜索异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
 }
 
-// ==================== 标准接口转发 ====================
-async function init() { return await getConfig(); }
-async function home(ext) { return await getCards(ext); }
-async function category(ext) { return await getCards(ext); }
-async function detail(id) { return await getTracks(id); }
-async function play(ext) { return await getPlayinfo(ext); }
-
-log('Gying前端插件加载完成 (终极按钮生成版)');
+// --- 兼容旧版接口 ---
+async function getPlayinfo(ext) {
+    return jsonify({ urls: [ext.url] });
+}
