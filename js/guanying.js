@@ -1,10 +1,10 @@
 /**
- * 观影网脚本 - v15.1 (前端缓存优化版)
+ * 观影网脚本 - v15.2 (缓存最终修复版)
  *
  * --- 架构 ---
- * 【体验优化】新增前端持久化缓存，App重启后秒速恢复Cookie，告别首次操作的缓慢等待。
- * 【100%保留】完全保留你 v4.0 脚本中所有高效的数据抓取和解析逻辑。
- * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v8.1 后端自动获取，并增加了前端缓存。
+ * 【重大修复】修复了v15.1中因缓存逻辑不当导致分类列表加载失败的严重问题。
+ * 【体验保留】保留了前端持久化缓存带来的启动加速优势。
+ * 【100%兼容】完全保留并兼容 v15.0 脚本中所有数据抓取逻辑。
  */
 
 // ================== 配置区 ==================
@@ -15,7 +15,7 @@ const BACKEND_URL = 'http://192.168.10.111:5000/getCookie';
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【请务必修改这里】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const appConfig = {
-    ver: 15.1, // 版本号+0.1
+    ver: 15.2, // 版本号+0.1
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -28,21 +28,28 @@ const appConfig = {
 // ★★★★★【全局Cookie缓存 & 新增缓存键】★★★★★
 let GLOBAL_COOKIE = null;
 let IS_FETCHING_COOKIE = false;
-const COOKIE_CACHE_KEY = 'gying_v15_cookie_cache'; // 新增持久化缓存的键名
+const COOKIE_CACHE_KEY = 'gying_v15_cookie_cache'; // 持久化缓存的键名
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg  ) { try { $log(`[观影网 V15.1] ${msg}`); } catch (_) { console.log(`[观影网 V15.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V15.2] ${msg}`); } catch (_) { console.log(`[观影网 V15.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 【核心升级点】获取并缓存全局Cookie的函数 ---
+// --- 【核心升级点 - 最终修复版】获取并缓存全局Cookie的函数 ---
 async function ensureGlobalCookie() {
     // 1. 优先从内存读取
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
 
-    // 2. 其次从持久化缓存读取
+    // 2. 如果有其他请求正在获取Cookie，则等待它完成
+    if (IS_FETCHING_COOKIE) {
+        log("检测到正在获取Cookie，请稍候...");
+        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
+        return GLOBAL_COOKIE; // 等待结束后，直接返回已填充的全局Cookie
+    }
+
+    // 3. 尝试从持久化缓存读取
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) {
@@ -54,23 +61,18 @@ async function ensureGlobalCookie() {
         log(`⚠️ 读取本地缓存失败 (可能是首次运行): ${e.message}`);
     }
 
-    // 3. 最后才从后端获取 (这是慢速路径)
-    if (IS_FETCHING_COOKIE) {
-        log("检测到正在从后端获取Cookie，请稍候...");
-        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
-        return GLOBAL_COOKIE;
-    }
+    // 4. 最后才从后端获取 (这是慢速路径)
     log("缓存未命中，正在从后端获取...");
-    IS_FETCHING_COOKIE = true;
+    IS_FETCHING_COOKIE = true; // 加锁
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
-            // 【关键】获取成功后，写入持久化缓存！
+            log("✅ 成功获取并缓存了新的全局Cookie！");
+            // 获取成功后，写入持久化缓存
             try {
                 $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE);
-                log("✅ 成功获取并写入缓存了新的全局Cookie！");
             } catch(e) {
                 log(`⚠️ 写入本地缓存失败: ${e.message}`);
             }
@@ -80,9 +82,9 @@ async function ensureGlobalCookie() {
     } catch (e) {
         log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
-        throw e;
+        throw e; // 抛出异常，让上层知道失败了
     } finally {
-        IS_FETCHING_COOKIE = false;
+        IS_FETCHING_COOKIE = false; // 解锁
     }
 }
 
