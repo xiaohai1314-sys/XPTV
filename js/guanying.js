@@ -1,19 +1,19 @@
 /**
- * 观影网脚本 - v18.0 (异步预热性能版)
+ * 观影网脚本 - v17.0 (时序兼容最终版)
  *
  * --- 核心思想 ---
- * 追求极致的冷启动性能。利用 init 函数在后台“异步预热”Cookie。
- * 当用户点击分类时，Cookie很可能已经通过缓存或后台请求准备就绪，从而实现“秒开”体验。
- * 这是在v17.0稳定版基础上进行的性能探索，若出现问题，可随时回退至v17.0。
+ * 解决了在App冷启动时，因脚本“抢跑”导致`$prefs`变量尚未准备就绪而崩溃的问题。
+ * 通过为所有`$prefs`调用增加`try...catch`保护，实现了对App加载时序的完美兼容。
+ * 这是结合了之前所有修复的、最稳定、最健壮的最终版本。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (与V16.0完全一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 18.0,
+    ver: 17.0,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -23,31 +23,24 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【全局Cookie缓存 & 并发锁】★★★★★
+// ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-let IS_FETCHING_COOKIE = false; // 重新引入并发锁
-const COOKIE_CACHE_KEY = 'gying_v18_cookie_cache'; // 使用新的缓存键
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache'; // 使用新的缓存键
+// ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg  ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V17.0] ${msg}`); } catch (_) { console.log(`[观影网 V17.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 【性能版】ensureGlobalCookie ---
+// --- 【唯一修改点】ensureGlobalCookie (时序兼容版) ---
 async function ensureGlobalCookie() {
-    // 1. 优先从内存返回
-    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
-
-    // 2. 如果正在获取，则等待
-    if (IS_FETCHING_COOKIE) {
-        log("...检测到Cookie正在后台预热中，请稍候...");
-        while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
+    if (GLOBAL_COOKIE) {
         return GLOBAL_COOKIE;
     }
 
-    // 3. 尝试从缓存恢复 (受try...catch保护)
+    // 【关键修复】为 $prefs 调用增加 try...catch 保护
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) {
@@ -56,19 +49,23 @@ async function ensureGlobalCookie() {
             return GLOBAL_COOKIE;
         }
     } catch (e) {
-        log(`⚠️ 读取本地缓存失败 (可能是冷启动): ${e.message}`);
+        log(`⚠️ 读取本地缓存失败 (可能是冷启动时 $prefs 未就绪): ${e.message}`);
     }
     
-    // 4. 缓存未命中，从后端获取 (加锁)
-    log("缓存未命中，正在从后端获取...");
-    IS_FETCHING_COOKIE = true;
+    log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
             log("✅ 成功从后端获取并缓存了全局Cookie！");
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
+            
+            // 【关键修复】为 $prefs 调用增加 try...catch 保护
+            try {
+                $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
+            } catch (e) {
+                log(`⚠️ 写入本地缓存失败 (可能是 $prefs 未就绪): ${e.message}`);
+            }
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
@@ -76,35 +73,28 @@ async function ensureGlobalCookie() {
         log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
         throw e;
-    } finally {
-        IS_FETCHING_COOKIE = false; // 解锁
     }
 }
 
-// --- 【性能版】init 函数，负责异步预热 ---
-async function init(ext) {
-    log("脚本初始化，开始在后台异步预热Cookie...");
-    // 调用但不等待(await)它，让它在后台自己运行
-    ensureGlobalCookie().catch(e => {
-        log(`后台预热Cookie失败: ${e.message}`);
-    });
-    return jsonify({}); // 立刻返回，不阻塞UI
-}
-
-// --- fetchWithCookie (无改动) ---
+// --- fetchWithCookie (与V16.0完全一致) ---
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
 
-// --- getConfig (无改动) ---
+// --- init (与V16.0完全一致) ---
+async function init(ext) {
+    return jsonify({});
+}
+
+// --- getConfig (与V16.0完全一致) ---
 async function getConfig() {
     return jsonify(appConfig);
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%原封不动的核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%原封不动的V16.0核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
