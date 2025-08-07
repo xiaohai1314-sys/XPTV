@@ -1,22 +1,20 @@
 /**
- * 观影网脚本 - v17.3 (V17最终安全修复版)
+ * 观影网脚本 - v17.4 (V17.0海报修复最终版)
  *
- * --- 核心思想 ---
- * 严格基于稳定可靠的V17.0版本进行最小化、最安全的修改。
- * 1. 保留V17.0从JS变量`_obj.inlist`获取数据的主体逻辑。
- * 2. 在处理每条数据时，反向去HTML中定位对应的影片块。
- * 3. 从HTML块的`<img>`标签中精准提取`data-src`作为海报URL。
- * 4. 用这个100%正确的URL，替换掉V17.0中旧的、不可靠的拼接规则。
+ * --- 核心原则 ---
+ * 绝对忠于V17.0的稳定逻辑，不动核心函数。
+ * 仅在V17.0的 getCards 函数内部，对 vod_pic 的赋值方式进行外科手术式替换。
+ * 彻底放弃之前所有失败的、复杂的、画蛇添足的修改。
  */
 
-// ================== 配置区 (回归V17.0) ==================
+// ================== 配置区 (与V17.0完全一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: 17.3,
+    ver: 17.4,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -30,7 +28,7 @@ let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 
 // ================== 核心函数(与v17.0完全一致 ) ==================
-function log(msg ) { try { $log(`[观影网 V17.3] ${msg}`); } catch (_) { console.log(`[观影网 V17.3] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V17.4] ${msg}`); } catch (_) { console.log(`[观影网 V17.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function ensureGlobalCookie() {
@@ -65,7 +63,7 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0基础上的海报修复】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0 核心函数 - 最小化修改】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
@@ -86,33 +84,35 @@ async function getCards(ext) {
         if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
         const inlistData = JSON.parse(inlistMatch[1]);
 
+        // 【V17.0核心逻辑】预先抓取所有海报信息，存入一个字典，方便快速查找
+        const picMap = {};
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            const picUrl = $element.find('img').attr('data-src');
+            if (name && picUrl) {
+                picMap[name] = picUrl;
+            }
+        });
+
         if (inlistData && inlistData.i) {
             // 【V17.0核心逻辑】继续遍历JS变量里的数据
             inlistData.i.forEach((item, index) => {
                 const name = inlistData.t[index];
                 const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
                 
-                // 【V17.3修复点】在这里执行“微创手术”
-                let picUrl = '';
-                try {
-                    // 1. 根据标题找到HTML中对应的 .v5d 元素
-                    const v5dElement = $(`.v5d:contains("${name}")`);
-                    if (v5dElement.length > 0) {
-                        // 2. 从中精准提取海报URL
-                        picUrl = v5dElement.first().find('img').attr('data-src');
-                    }
-                } catch(e) {
-                    log(`为"${name}"提取海报时出错: ${e.message}`);
-                }
+                // 【V17.4 唯一改动点】
+                // 不再拼接URL，而是从我们预先抓好的海报字典里查找
+                const picUrl = picMap[name];
 
                 cards.push({
                     vod_id: detailApiUrl,
                     vod_name: name,
-                    // 3. 使用新提取的URL，如果失败则用旧规则或默认图兜底
-                    vod_pic: picUrl || `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp` || FALLBACK_PIC,
+                    // 使用查到的URL，如果查不到，则使用默认图
+                    vod_pic: picUrl || FALLBACK_PIC,
                     vod_remarks: inlistData.g[index],
                     ext: { url: detailApiUrl },
-                } );
+                });
             });
             log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
