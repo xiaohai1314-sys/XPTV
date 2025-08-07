@@ -1,17 +1,16 @@
 /**
- * 海绵小站前端插件 - v64.1 (后端日志测试版 - 排版修正)
+ * 海绵小站前端插件 - v65.1 (预检逻辑测试版 - 功能完整)
  * 
  * 更新日志:
- * - 【v64.1-test】: 严格按照用户要求的正确排版格式进行重写，解决分类列表无法识别的问题。
- *   - 用于验证最小化、无损修复方案的测试版本。
- *   - 1. 【待验证】修正主标题获取逻辑，确保只获取纯净标题。
- *   - 2. 【待验证】移除“按点截断”净化逻辑。
- *   - 3. 保留所有成熟提取逻辑，并添加详细日志以供验证。
+ * - 【v65.1-test】: 修正排版和分类列表缺失问题，确保插件可完整测试。
+ *   - 引入全新的“链接预检”逻辑，旨在从根本上解决单文件文件夹问题。
+ *   - 1. 【待验证】在获取到链接后，会主动访问链接以分析其内部HTML。
+ *   - 2. 【待验证】通过分析内部HTML，智能判断分享类型是“文件直链”还是“文件夹”。
+ *   - 3. 【待验证】为两种类型链接启用不同的、正确的处理逻辑。
  */
 
 // ★★★★★【后端日志配置区】★★★★★
-const DEBUG_MODE = true; // 设置为 true 开启后端日志功能
-// 【重要】请将下面的 IP 地址修改为您运行后端服务器的电脑的局域网IP地址
+const DEBUG_MODE = true; 
 const DEBUG_ENDPOINT = "http://192.168.10.111:3000/log"; 
 // ★★★★★★★★★★★★★★★★★★★★★
 
@@ -22,13 +21,13 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1753817104,1754316688,1754316727; HMACCOUNT=DBCFE6207073AAA3; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754316803";
 
-// --- 【改造后】的日志函数 ---
+// --- 日志与核心辅助函数 ---
 async function log(message, level = 'info' ) {
     const timestamp = new Date().toISOString();
     try { 
-        $log(`[海绵小站 V64.1-test] ${message}`); 
+        $log(`[海绵小站 V65.1-test] ${message}`); 
     } catch (_) { 
-        console.log(`[海绵小站 V64.1-test] ${message}`); 
+        console.log(`[海绵小站 V65.1-test] ${message}`); 
     }
     if (DEBUG_MODE) {
         try {
@@ -38,15 +37,9 @@ async function log(message, level = 'info' ) {
         }
     }
 }
-
-// --- 核心辅助函数 ---
 function argsify(ext) { 
     if (typeof ext === 'string') { 
-        try { 
-            return JSON.parse(ext); 
-        } catch (e) { 
-            return {}; 
-        } 
+        try { return JSON.parse(ext); } catch (e) { return {}; } 
     } 
     return ext || {}; 
 }
@@ -71,29 +64,16 @@ async function fetchWithCookie(url, options = {}) {
     }
     return $fetch.get(url, finalOptions);
 }
-
 async function reply(url) {
     await log("尝试使用Cookie自动回帖...");
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
     const threadIdMatch = url.match(/thread-(\d+)/);
     if (!threadIdMatch) return false;
-    
     const threadId = threadIdMatch[1];
     const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = { 
-        doctype: 1, 
-        return_html: 1, 
-        message: getRandomText(replies), 
-        quotepid: 0, 
-        quick_reply_message: 0 
-    };
-
+    const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
     try {
-        const { data } = await fetchWithCookie(postUrl, {
-            method: 'POST',
-            body: postData,
-            headers: { 'Referer': url }
-        });
+        const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
         if (data.includes("您尚未登录")) {
             await log("回帖失败：Cookie已失效或不正确。", "error");
             return false;
@@ -108,7 +88,7 @@ async function reply(url) {
 
 // --- 核心函数 ---
 async function getConfig() {
-  await log("插件初始化 (v64.1 - 后端日志测试版 - 排版修正)");
+  await log("插件初始化 (v65.1 - 预检逻辑测试版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -121,14 +101,12 @@ async function getConfig() {
     ],
   });
 }
-
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
-
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -155,7 +133,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【待验证的 getTracks 函数】 ===================
+// =================== 【全新 getTracks 函数 - 带预检逻辑】 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -166,99 +144,92 @@ async function getTracks(ext) {
     await log(`--- 开始处理详情页: ${detailUrl} ---`);
     
     try {
+        // 步骤一：获取论坛页面内容
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
         
-        let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
-        if (isContentHidden) {
-            await log("内容被隐藏，需要回帖。", "warn");
-            const replied = await reply(detailUrl);
-            if (replied) {
-                await log("回帖成功，重新获取页面内容...");
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const retryResponse = await fetchWithCookie(detailUrl);
-                data = retryResponse.data;
-                $ = cheerio.load(data);
-            } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或无法回帖，无法获取资源", pan: '', ext: {} }] }] });
+        if ($("div.alert.alert-warning").text().includes("回复后")) {
+            if (!await reply(detailUrl)) {
+                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或无法回帖", pan: '', ext: {} }] }] });
             }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const retryResponse = await fetchWithCookie(detailUrl);
+            data = retryResponse.data;
+            $ = cheerio.load(data);
         }
 
         const mainMessage = $('.message[isfirst="1"]');
         const mainMessageHtml = mainMessage.html();
-        const mainMessageText = mainMessage.text();
-        
-        // 【待验证-1】使用 clone() 方法获取纯净的主标题
-        const pageTitle = $("h4.break-all").clone().children().remove().end().text().trim();
-        await log(`【主标题提取】: 获取到纯净主标题: "${pageTitle}"`);
+        const initialTitle = $("h4.break-all").clone().children().remove().end().text().trim();
         const tracks = [];
 
-        // --- 步骤一：采集链接 (逻辑不变) ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
         const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex ) || [])];
-        await log(`【链接提取】: 共找到 ${uniqueLinks.length} 个链接。 列表: ${JSON.stringify(uniqueLinks)}`);
+        await log(`【论坛解析】: 找到 ${uniqueLinks.length} 个链接。`);
 
-        // --- 步骤二：采集访问码 (逻辑不变) ---
-        let codePool = [];
-        const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
-        let match;
-        while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-            codePool.push(match[1].trim());
-        }
-        const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
-        while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
-            const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http' )) {
-                 codePool.push(code);
-            }
-        }
-        codePool = [...new Set(codePool)];
-        await log(`【访问码提取】: 共找到 ${codePool.length} 个。 列表: ${JSON.stringify(codePool)}`);
-
-        // --- 步骤三：文件名获取与分配 ---
         if (uniqueLinks.length > 0) {
-            uniqueLinks.forEach((link, index) => {
-                log(`--- 开始处理第 ${index + 1} 个链接: ${link} ---`);
-                let fileName = '';
+            for (const link of uniqueLinks) {
+                await log(`--- 开始处理链接: ${link} ---`);
                 
-                // 1. 优先尝试从链接自身的文本获取文件名 (逻辑不变)
-                const linkElement = mainMessage.find(`a[href="${link}"]`).first();
-                if (linkElement.length > 0) {
-                    const text = linkElement.text().trim();
-                    log(`链接的文本内容是: "${text}"`);
-                    if (text && text.length > 5 && !text.startsWith('http' )) {
-                        fileName = text;
-                        log(`链接文本有效，文件名被设置为: "${fileName}"`);
+                // 步骤二：【新增】预检链接
+                let finalName = initialTitle; // 默认使用论坛的标题
+                let isFolder = true; // 默认假设是文件夹，让App决定
+
+                try {
+                    await log(`【预检】: 正在访问链接内部...`);
+                    const { data: panPageHtml } = await fetchWithCookie(link);
+                    const $$ = cheerio.load(panPageHtml);
+
+                    // 尝试定位文件列表
+                    const fileListItems = $$('ul.file-list-ul > li.file-item');
+                    
+                    if (fileListItems.length > 0) {
+                        // 这是一个文件夹分享
+                        await log(`【预检结果】: 这是一个文件夹分享，包含 ${fileListItems.length} 个项目。`);
+                        // 文件夹名称从页面顶部获取
+                        const folderName = $$('p.info-detail-name > span').attr('title');
+                        if (folderName) finalName = folderName;
+                        isFolder = true;
+                    } else {
+                        // 可能是单文件分享页面
+                        const singleFileName = $$('p.info-detail-name > span').attr('title');
+                        if (singleFileName) {
+                            finalName = singleFileName;
+                            isFolder = false; // 明确是文件
+                            await log(`【预检结果】: 这是一个单文件分享。提取到文件名: "${finalName}"`);
+                        } else {
+                            await log(`【预检警告】: 无法确定链接类型，将按默认方式（文件夹）处理。`);
+                        }
                     }
+                } catch (e) {
+                    await log(`【预检失败】: 访问链接失败: ${e.message}。将使用论坛标题并按文件夹处理。`, "error");
                 }
 
-                // 2. 如果第一步失败，安全回退到使用纯净的页面主标题 (逻辑不变)
-                if (!fileName) {
-                    fileName = pageTitle;
-                    log(`链接文本无效，回退使用主标题作为文件名: "${fileName}"`);
-                }
+                // 步骤三：组装结果
+                // 我们不再手动添加“[文件夹]”标识，让App根据isFolder属性来决定如何渲染
+                // 但为了让App能区分，我们需要一个方法。一个简单的方法是，如果是文件夹，我们返回一个稍微不同的结构或名称
+                // 这里我们还是用名字来区分，因为App可能没有适配新的属性
+                const trackName = isFolder ? `[文件夹] ${finalName}` : finalName;
                 
-                // 3. 【待验证-2】确认原有的净化逻辑已被移除
-                log(`【文件名净化检查】: 当前文件名是 "${fileName}"。确认没有进行按点截断。`, "info");
-
-                const code = codePool[index] || '';
-                let finalPan = code ? `${link}（访问码：${code}）` : link;
-
-                tracks.push({ name: fileName, pan: finalPan, ext: { pwd: '' } });
-                log(`第 ${index + 1} 个资源处理完成。最终文件名: "${fileName}"`);
-            });
+                tracks.push({
+                    name: trackName,
+                    pan: link,
+                    ext: { pwd: '' },
+                });
+                await log(`--- 链接处理完成。最终名称: "${trackName}" ---`);
+            }
         }
 
         if (tracks.length === 0) {
             await log("【最终结果】: 未找到任何有效资源。", "error");
         }
         
-        await log(`--- 全部处理完成，共生成 ${tracks.length} 个资源 ---`);
+        await log(`--- 全部处理完成 ---`);
         return jsonify({ list: [{ title: '云盘', tracks }] });
 
     } catch (e) {
         await log(`getTracks函数出现致命错误: ${e.message}`, "error");
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败", pan: '', ext: {} }] }] });
     }
 }
 // =================================================================================
