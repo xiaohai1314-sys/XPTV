@@ -1,10 +1,10 @@
 /**
- * 观影网脚本 - v15.0 (回归初心版)
+ * 观影网脚本 - v15.1 (前端缓存优化版)
  *
  * --- 架构 ---
- * 这是对你最初正确逻辑的最终致敬。
+ * 【体验优化】新增前端持久化缓存，App重启后秒速恢复Cookie，告别首次操作的缓慢等待。
  * 【100%保留】完全保留你 v4.0 脚本中所有高效的数据抓取和解析逻辑。
- * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v8.0 后端自动获取。
+ * 【唯一升级】将 Cookie 的获取方式，从手动配置升级为从 v8.1 后端自动获取，并增加了前端缓存。
  */
 
 // ================== 配置区 ==================
@@ -15,7 +15,7 @@ const BACKEND_URL = 'http://192.168.10.111:5000/getCookie';
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【请务必修改这里】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const appConfig = {
-    ver: 15.0,
+    ver: 15.1, // 版本号+0.1
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -25,33 +25,55 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【全局Cookie缓存】★★★★★
+// ★★★★★【全局Cookie缓存 & 新增缓存键】★★★★★
 let GLOBAL_COOKIE = null;
 let IS_FETCHING_COOKIE = false;
-// ★★★★★★★★★★★★★★★★★★★★★★★
+const COOKIE_CACHE_KEY = 'gying_v15_cookie_cache'; // 新增持久化缓存的键名
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V15.0] ${msg}`); } catch (_) { console.log(`[观影网 V15.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V15.1] ${msg}`); } catch (_) { console.log(`[观影网 V15.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 【升级点】获取并缓存全局Cookie的函数 ---
+// --- 【核心升级点】获取并缓存全局Cookie的函数 ---
 async function ensureGlobalCookie() {
+    // 1. 优先从内存读取
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+
+    // 2. 其次从持久化缓存读取
+    try {
+        const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
+        if (cachedCookie) {
+            log("✅ 从本地缓存中恢复了Cookie！");
+            GLOBAL_COOKIE = cachedCookie;
+            return GLOBAL_COOKIE;
+        }
+    } catch (e) {
+        log(`⚠️ 读取本地缓存失败 (可能是首次运行): ${e.message}`);
+    }
+
+    // 3. 最后才从后端获取 (这是慢速路径)
     if (IS_FETCHING_COOKIE) {
-        log("检测到正在获取Cookie，请稍候...");
+        log("检测到正在从后端获取Cookie，请稍候...");
         while(IS_FETCHING_COOKIE) { await new Promise(resolve => setTimeout(resolve, 200)); }
         return GLOBAL_COOKIE;
     }
-    log("全局Cookie为空，正在从后端获取...");
+    log("缓存未命中，正在从后端获取...");
     IS_FETCHING_COOKIE = true;
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
-            log("✅ 成功获取并缓存了全局Cookie！");
+            // 【关键】获取成功后，写入持久化缓存！
+            try {
+                $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE);
+                log("✅ 成功获取并写入缓存了新的全局Cookie！");
+            } catch(e) {
+                log(`⚠️ 写入本地缓存失败: ${e.message}`);
+            }
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
@@ -75,8 +97,9 @@ async function fetchWithCookie(url, options = {}) {
 async function init(ext) {
     log("脚本初始化，开始预热全局Cookie...");
     try {
-        await ensureGlobalCookie();
-        log("✅ Cookie预热成功或已存在。");
+        // 这里调用一次，会优先尝试从缓存加载，速度很快
+        await ensureGlobalCookie(); 
+        log("✅ Cookie预热成功或已从缓存加载。");
     } catch (e) {
         log(`❌ Cookie预热失败: ${e.message}`);
     }
@@ -89,7 +112,7 @@ async function getConfig() {
 
 // =======================================================================
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%保留的核心抓取逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// (下面的代码与你最初的 v4.0 脚本完全相同，只修改了请求函数)
+// (下面的代码与你最初的 v15.0 脚本完全相同，无需任何改动)
 // =======================================================================
 
 async function getCards(ext) {
@@ -122,7 +145,7 @@ async function getCards(ext) {
                     vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
                     vod_remarks: inlistData.g[index],
                     ext: { url: detailApiUrl },
-                } );
+                }  );
             });
             log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
