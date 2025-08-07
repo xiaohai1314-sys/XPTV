@@ -1,11 +1,11 @@
 /**
- * 观影网脚本 - v17.6 (绝对纯净的海报修复)
+ * 观影网脚本 - v17.0 (海报安全补丁版)
  *
  * --- 核心原则 ---
- * 彻底放弃在 getCards 内部进行任何有风险的Cheerio操作。
+ * 绝对忠于V17.0的稳定逻辑，不动核心函数。
+ * 仅在V17.0的 getCards 函数内部，对 vod_pic 的赋值方式进行外科手术式替换。
  * 采用“纯字符串查找”的模式，在函数开头一次性获取HTML文本，
  * 后续通过正则表达式进行海报URL的查找，完全避免与核心逻辑的冲突。
- * 这是对V17.0最不具侵入性的、最安全的修复。
  */
 
 // ================== 配置区 (与V17.0完全一致) ==================
@@ -15,7 +15,7 @@ const BACKEND_URL = 'http://192.168.10.111:5000/getCookie';
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: 17.6,
+    ver: "17.0_patch", // 版本号明确表示为补丁版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -29,7 +29,7 @@ let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 
 // ================== 核心函数(与v17.0完全一致 ) ==================
-function log(msg ) { try { $log(`[观影网 V17.6] ${msg}`); } catch (_) { console.log(`[观影网 V17.6] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V17.0_patch] ${msg}`); } catch (_) { console.log(`[观影网 V17.0_patch] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function ensureGlobalCookie() {
@@ -64,7 +64,7 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0 核心函数 - 绝对安全修改】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0 核心函数 - 安全补丁】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
@@ -78,27 +78,32 @@ async function getCards(ext) {
         const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
 
-        // 【V17.6 修复点】在开头一次性获取HTML纯文本
+        // 【补丁第一步】在开头一次性获取HTML纯文本，这是一个安全操作
         const htmlText = $.html();
 
         // 【V17.0核心逻辑】继续从JS变量获取数据
-        const scriptContent = $('script').filter((_, script) => script.html().includes('_obj.inlist')).html();
+        const scriptContent = $('script').filter((_, script) => {
+            return script.html().includes('_obj.inlist');
+        }).html();
+
         if (!scriptContent) throw new Error("未能找到包含'_obj.inlist'的关键script标签。");
+
         const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
         if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
-        const inlistData = JSON.parse(inlistMatch[1]);
 
+        const inlistData = JSON.parse(inlistMatch[1]);
         if (inlistData && inlistData.i) {
-            // 【V17.0核心逻辑】继续遍历JS变量里的数据
             inlistData.i.forEach((item, index) => {
                 const name = inlistData.t[index];
                 const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
                 
-                // 【V17.6 修复点】使用纯字符串和正则查找海报，不使用任何Cheerio操作
+                // 【补丁第二步】使用纯字符串和正则查找海报，不使用任何有风险的Cheerio操作
                 let picUrl = '';
                 try {
                     // 正则表达式：查找包含特定标题的.v5d块，并从中捕获data-src的内容
-                    const regex = new RegExp(`<div class="v5d"[^>]*>.*?<b>${name}</b>.*?data-src="([^"]+)"`, 's');
+                    // 增加了对特殊字符的转义，增强鲁棒性
+                    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const regex = new RegExp(`<div class="v5d"[^>]*>.*?<b>${escapedName}</b>.*?data-src="([^"]+)"`, 's');
                     const picMatch = htmlText.match(regex);
                     if (picMatch && picMatch[1]) {
                         picUrl = picMatch[1];
@@ -110,7 +115,7 @@ async function getCards(ext) {
                 cards.push({
                     vod_id: detailApiUrl,
                     vod_name: name,
-                    // 如果找到了，就用；找不到，就还用V17.0的老办法
+                    // 【补丁第三步】如果找到了，就用；找不到，就还用V17.0的老办法
                     vod_pic: picUrl || `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
                     vod_remarks: inlistData.g[index],
                     ext: { url: detailApiUrl },
@@ -142,7 +147,7 @@ async function search(ext) {
         $('.v5d').each((_, element) => {
             const $element = $(element);
             const name = $element.find('b').text().trim();
-            const imgUrl = $element.find('img').attr('data-src') || $element.find('img').attr('src');
+            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
             if (!path) return;
@@ -154,7 +159,7 @@ async function search(ext) {
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
-                vod_pic: imgUrl || FALLBACK_PIC,
+                vod_pic: imgUrl || '',
                 vod_remarks: additionalInfo,
                 ext: { url: detailApiUrl },
             });
