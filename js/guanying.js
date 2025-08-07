@@ -1,20 +1,21 @@
 /**
- * 观影网脚本 - v17.4 (V17.0海报修复最终版)
+ * 观影网脚本 - v17.5 (绝对安全的海报修复)
  *
  * --- 核心原则 ---
- * 绝对忠于V17.0的稳定逻辑，不动核心函数。
- * 仅在V17.0的 getCards 函数内部，对 vod_pic 的赋值方式进行外科手术式替换。
- * 彻底放弃之前所有失败的、复杂的、画蛇添足的修改。
+ * 彻底放弃在 getCards 核心函数内进行任何有风险的改动。
+ * 采用“被动缓存”策略，利用安全的 search 函数来“顺手”收集海报信息。
+ * getCards 只负责从缓存中读取海报，读取不到则沿用V17.0的旧逻辑。
+ * 这是为了保证核心功能绝对稳定而采取的最保守、最安全的修复方案。
  */
 
-// ================== 配置区 (与V17.0完全一致) ==================
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: 17.4,
+    ver: 17.5,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -26,9 +27,11 @@ const appConfig = {
 
 let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
+// 【新增】全局海报缓存 ，用于在不同函数间安全传递信息
+let PIC_CACHE = {};
 
-// ================== 核心函数(与v17.0完全一致 ) ==================
-function log(msg ) { try { $log(`[观影网 V17.4] ${msg}`); } catch (_) { console.log(`[观影网 V17.4] ${msg}`); } }
+// ================== 核心函数(与v17.0完全一致) ==================
+function log(msg ) { try { $log(`[观影网 V17.5] ${msg}`); } catch (_) { console.log(`[观影网 V17.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function ensureGlobalCookie() {
@@ -63,9 +66,10 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0 核心函数 - 最小化修改】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【V17.0 核心函数 - 绝对安全修改】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
+// --- getCards 函数，只增加“查字典”动作，不增加任何HTML解析 ---
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -84,35 +88,24 @@ async function getCards(ext) {
         if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
         const inlistData = JSON.parse(inlistMatch[1]);
 
-        // 【V17.0核心逻辑】预先抓取所有海报信息，存入一个字典，方便快速查找
-        const picMap = {};
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const picUrl = $element.find('img').attr('data-src');
-            if (name && picUrl) {
-                picMap[name] = picUrl;
-            }
-        });
-
         if (inlistData && inlistData.i) {
             // 【V17.0核心逻辑】继续遍历JS变量里的数据
             inlistData.i.forEach((item, index) => {
                 const name = inlistData.t[index];
                 const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
                 
-                // 【V17.4 唯一改动点】
-                // 不再拼接URL，而是从我们预先抓好的海报字典里查找
-                const picUrl = picMap[name];
+                // 【V17.5 唯一改动点】
+                // 从全局缓存中查找海报URL
+                const picUrl = PIC_CACHE[name];
 
                 cards.push({
                     vod_id: detailApiUrl,
                     vod_name: name,
-                    // 使用查到的URL，如果查不到，则使用默认图
-                    vod_pic: picUrl || FALLBACK_PIC,
+                    // 如果在缓存中找到了，就用；找不到，就还用V17.0的老办法
+                    vod_pic: picUrl || `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
                     vod_remarks: inlistData.g[index],
                     ext: { url: detailApiUrl },
-                });
+                } );
             });
             log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
@@ -126,7 +119,7 @@ async function getCards(ext) {
     }
 }
 
-// search函数不受影响，因为它本来就是解析HTML的，保持原样
+// --- search 函数，增加“顺手”缓存海报的动作 ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
@@ -141,6 +134,12 @@ async function search(ext) {
             const $element = $(element);
             const name = $element.find('b').text().trim();
             const imgUrl = $element.find('img').attr('data-src') || $element.find('img').attr('src');
+            
+            // 【V17.5 新增】顺手把海报信息存入全局缓存
+            if (name && imgUrl) {
+                PIC_CACHE[name] = imgUrl;
+            }
+
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
             if (!path) return;
@@ -157,6 +156,7 @@ async function search(ext) {
                 ext: { url: detailApiUrl },
             });
         });
+        log(`✅ 搜索完成，并顺手缓存了 ${Object.keys(PIC_CACHE).length} 条海报信息。`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
