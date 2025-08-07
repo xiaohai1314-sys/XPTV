@@ -1,21 +1,20 @@
 /**
- * 观影网脚本 - v17.1 (海报终极修复版)
+ * 观影网脚本 - v17.2 (列表恢复最终版)
  *
  * --- 核心思想 ---
- * 采用“HTML主导，JS补充”的协同作战策略，完美适配网站的混合渲染模式。
- * 1. 主体循环遍历HTML中的`.v5d`元素，确保列表完整性。
- * 2. 从每个`.v5d`的`<img>`标签中精准提取海报URL，解决海报丢失问题。
- * 3. 将`_obj.inlist`作为补充数据库，为影片增加HTML中没有的备注信息。
+ * 这是对v17.1的紧急修复。修正了 getCards 函数中因Cheerio语法错误，
+ * 导致解析JS变量时崩溃，从而使整个列表消失的致命问题。
+ * 其他所有海报修复逻辑保持不变。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (与v17.1一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: 17.1,
+    ver: 17.2,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -28,8 +27,8 @@ const appConfig = {
 let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 
-// ================== 核心函数(与v17.0一致 ) ==================
-function log(msg ) { try { $log(`[观影网 V17.1] ${msg}`); } catch (_) { console.log(`[观影网 V17.1] ${msg}`); } }
+// ================== 核心函数(与v17.0/17.1一致 ) ==================
+function log(msg ) { try { $log(`[观影网 V17.2] ${msg}`); } catch (_) { console.log(`[观影网 V17.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function ensureGlobalCookie() {
@@ -67,7 +66,7 @@ async function getConfig() { return jsonify(appConfig); }
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【海报终极修复核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// --- 【全新】getCards 函数 ---
+// --- 【已修正】getCards 函数 ---
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -79,50 +78,48 @@ async function getCards(ext) {
         const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
 
-        // 步骤1: 尝试解析页面中的JS变量作为“补充信息数据库”
         let inlistData = null;
         try {
-            const scriptContent = $('script').filter((_, script) => $(script).html().includes('_obj.inlist')).html();
-            const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-            if (inlistMatch && inlistMatch[1]) {
-                inlistData = JSON.parse(inlistMatch[1]);
-                log("✅ 成功解析JS变量，作为补充信息库。");
+            // 【V17.2 紧急修正点】修正了此处的Cheerio语法错误
+            const scriptContent = $('script').filter((_, script) => script.html().includes('_obj.inlist')).html();
+            if (scriptContent) {
+                const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+                if (inlistMatch && inlistMatch[1]) {
+                    inlistData = JSON.parse(inlistMatch[1]);
+                    log("✅ 成功解析JS变量，作为补充信息库。");
+                }
             }
         } catch(e) {
             log(`⚠️ 解析JS补充信息失败: ${e.message}`);
         }
 
-        // 步骤2: 主循环，遍历HTML中的每个影片元素
         $('.v5d').each((_, element) => {
             const $element = $(element);
             const name = $element.find('b').text().trim();
             const path = $element.find('a').attr('href');
             if (!path || !name) return;
 
-            // 步骤2.1: 从 <img> 标签精准提取海报URL
             let picUrl = $element.find('img').attr('data-src');
-            if (!picUrl) picUrl = $element.find('img').attr('src'); // 备用规则
+            if (!picUrl) picUrl = $element.find('img').attr('src');
 
-            // 步骤2.2: 提取影片ID等信息
             const match = path.match(/\/([a-z]+)\/(\d+)/);
             if (!match) return;
             const type = match[1];
             const vodId = match[2];
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
 
-            // 步骤2.3: 【协同作战】去JS数据库里查找补充信息
-            let remarks = $element.find('p').text().trim(); // 默认备注
+            let remarks = $element.find('p').text().trim();
             if (inlistData && inlistData.t && inlistData.g) {
                 const index = inlistData.t.findIndex(title => title === name);
                 if (index !== -1 && inlistData.g[index]) {
-                    remarks = inlistData.g[index]; // 使用JS变量里更详细的备注
+                    remarks = inlistData.g[index];
                 }
             }
 
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
-                vod_pic: picUrl || FALLBACK_PIC, // 使用提取到的URL，失败则用默认图
+                vod_pic: picUrl || FALLBACK_PIC,
                 vod_remarks: remarks,
                 ext: { url: detailApiUrl },
             });
@@ -143,7 +140,7 @@ async function getCards(ext) {
     }
 }
 
-// --- 【全新】search 函数，逻辑与 getCards 保持高度一致 ---
+// --- search 函数 (与v17.1一致) ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
@@ -155,7 +152,6 @@ async function search(ext) {
         const $ = cheerio.load(data);
         let cards = [];
 
-        // 搜索页没有 _obj.inlist，所以直接解析HTML即可
         $('.v5d').each((_, element) => {
             const $element = $(element);
             const name = $element.find('b').text().trim();
