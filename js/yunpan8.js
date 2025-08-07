@@ -1,8 +1,9 @@
 /**
- * 海绵小站前端插件 - v64.0 (后端日志测试版)
+ * 海绵小站前端插件 - v64.1 (后端日志测试版 - 排版修正)
  * 
  * 更新日志:
- * - 【v64.0-test】: 用于验证最小化、无损修复方案的测试版本。
+ * - 【v64.1-test】: 严格按照用户要求的正确排版格式进行重写，解决分类列表无法识别的问题。
+ *   - 用于验证最小化、无损修复方案的测试版本。
  *   - 1. 【待验证】修正主标题获取逻辑，确保只获取纯净标题。
  *   - 2. 【待验证】移除“按点截断”净化逻辑。
  *   - 3. 保留所有成熟提取逻辑，并添加详细日志以供验证。
@@ -24,7 +25,11 @@ const COOKIE = "_xn_accesscount_visited=1; bbs_sid=787sg4qld077s6s68h6i1ijids; b
 // --- 【改造后】的日志函数 ---
 async function log(message, level = 'info' ) {
     const timestamp = new Date().toISOString();
-    try { $log(`[海绵小站 V64.0-test] ${message}`); } catch (_) { console.log(`[海绵小站 V64.0-test] ${message}`); }
+    try { 
+        $log(`[海绵小站 V64.1-test] ${message}`); 
+    } catch (_) { 
+        console.log(`[海绵小站 V64.1-test] ${message}`); 
+    }
     if (DEBUG_MODE) {
         try {
             await $fetch.post(DEBUG_ENDPOINT, { level, message, timestamp }, { headers: { 'Content-Type': 'application/json' } });
@@ -35,9 +40,22 @@ async function log(message, level = 'info' ) {
 }
 
 // --- 核心辅助函数 ---
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
-function jsonify(data) { return JSON.stringify(data); }
-function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function argsify(ext) { 
+    if (typeof ext === 'string') { 
+        try { 
+            return JSON.parse(ext); 
+        } catch (e) { 
+            return {}; 
+        } 
+    } 
+    return ext || {}; 
+}
+function jsonify(data) { 
+    return JSON.stringify(data); 
+}
+function getRandomText(arr) { 
+    return arr[Math.floor(Math.random() * arr.length)]; 
+}
 
 // --- 网络请求与回帖 ---
 async function fetchWithCookie(url, options = {}) {
@@ -48,19 +66,34 @@ async function fetchWithCookie(url, options = {}) {
     }
     const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
     const finalOptions = { ...options, headers };
-    if (options.method === 'POST') { return $fetch.post(url, options.body, finalOptions); }
+    if (options.method === 'POST') {
+        return $fetch.post(url, options.body, finalOptions);
+    }
     return $fetch.get(url, finalOptions);
 }
+
 async function reply(url) {
     await log("尝试使用Cookie自动回帖...");
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
     const threadIdMatch = url.match(/thread-(\d+)/);
     if (!threadIdMatch) return false;
+    
     const threadId = threadIdMatch[1];
     const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
+    const postData = { 
+        doctype: 1, 
+        return_html: 1, 
+        message: getRandomText(replies), 
+        quotepid: 0, 
+        quick_reply_message: 0 
+    };
+
     try {
-        const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
+        const { data } = await fetchWithCookie(postUrl, {
+            method: 'POST',
+            body: postData,
+            headers: { 'Referer': url }
+        });
         if (data.includes("您尚未登录")) {
             await log("回帖失败：Cookie已失效或不正确。", "error");
             return false;
@@ -75,20 +108,27 @@ async function reply(url) {
 
 // --- 核心函数 ---
 async function getConfig() {
-  await log("插件初始化 (v64.0 - 后端日志测试版)");
+  await log("插件初始化 (v64.1 - 后端日志测试版 - 排版修正)");
   return jsonify({
-    ver: 1, title: '海绵小站', site: SITE_URL,
+    ver: 1, 
+    title: '海绵小站', 
+    site: SITE_URL,
     tabs: [
-      { name: '电影', ext: { id: 'forum-1' } }, { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } }, { name: '综艺', ext: { id: 'forum-5' } },
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
     ],
   });
 }
+
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
-    return `${SITE_URL}/${path.startsWith('./') ? path.substring(2) : path}`;
+    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+    return `${SITE_URL}/${cleanPath}`;
 }
+
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -129,9 +169,11 @@ async function getTracks(ext) {
         let { data } = await fetchWithCookie(detailUrl);
         let $ = cheerio.load(data);
         
-        if ($("div.alert.alert-warning").text().includes("回复后")) {
+        let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
+        if (isContentHidden) {
             await log("内容被隐藏，需要回帖。", "warn");
-            if (await reply(detailUrl)) {
+            const replied = await reply(detailUrl);
+            if (replied) {
                 await log("回帖成功，重新获取页面内容...");
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const retryResponse = await fetchWithCookie(detailUrl);
@@ -160,11 +202,15 @@ async function getTracks(ext) {
         let codePool = [];
         const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
         let match;
-        while ((match = textCodeRegex.exec(mainMessageText)) !== null) { codePool.push(match[1].trim()); }
+        while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
+            codePool.push(match[1].trim());
+        }
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http' )) { codePool.push(code); }
+            if (code.length < 15 && !code.includes('http' )) {
+                 codePool.push(code);
+            }
         }
         codePool = [...new Set(codePool)];
         await log(`【访问码提取】: 共找到 ${codePool.length} 个。 列表: ${JSON.stringify(codePool)}`);
@@ -172,34 +218,34 @@ async function getTracks(ext) {
         // --- 步骤三：文件名获取与分配 ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
-                await log(`--- 开始处理第 ${index + 1} 个链接: ${link} ---`);
+                log(`--- 开始处理第 ${index + 1} 个链接: ${link} ---`);
                 let fileName = '';
                 
                 // 1. 优先尝试从链接自身的文本获取文件名 (逻辑不变)
                 const linkElement = mainMessage.find(`a[href="${link}"]`).first();
                 if (linkElement.length > 0) {
                     const text = linkElement.text().trim();
-                    await log(`链接的文本内容是: "${text}"`);
+                    log(`链接的文本内容是: "${text}"`);
                     if (text && text.length > 5 && !text.startsWith('http' )) {
                         fileName = text;
-                        await log(`链接文本有效，文件名被设置为: "${fileName}"`);
+                        log(`链接文本有效，文件名被设置为: "${fileName}"`);
                     }
                 }
 
                 // 2. 如果第一步失败，安全回退到使用纯净的页面主标题 (逻辑不变)
                 if (!fileName) {
                     fileName = pageTitle;
-                    await log(`链接文本无效，回退使用主标题作为文件名: "${fileName}"`);
+                    log(`链接文本无效，回退使用主标题作为文件名: "${fileName}"`);
                 }
                 
                 // 3. 【待验证-2】确认原有的净化逻辑已被移除
-                await log(`【文件名净化检查】: 当前文件名是 "${fileName}"。确认没有进行按点截断。`, "info");
+                log(`【文件名净化检查】: 当前文件名是 "${fileName}"。确认没有进行按点截断。`, "info");
 
                 const code = codePool[index] || '';
                 let finalPan = code ? `${link}（访问码：${code}）` : link;
 
                 tracks.push({ name: fileName, pan: finalPan, ext: { pwd: '' } });
-                await log(`第 ${index + 1} 个资源处理完成。最终文件名: "${fileName}"`);
+                log(`第 ${index + 1} 个资源处理完成。最终文件名: "${fileName}"`);
             });
         }
 
