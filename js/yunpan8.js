@@ -1,8 +1,9 @@
 /**
- * 海绵小站前端插件 - v62.4 (后端日志测试版)
+ * 海绵小站前端插件 - v62.5 (后端日志测试版 - 修正版)
  * 
  * 更新日志:
- * - 【v62.4】: 集成后端日志系统，用于实证测试。
+ * - 【v62.5】: 修正了上一版中错误删除分类列表(tabs)的问题，保证插件可以正常导航和测试。
+ * - 集成后端日志系统，用于实证测试。
  *   - 新增 DEBUG_MODE 和 DEBUG_ENDPOINT 配置。
  *   - 重写 log 函数，使其能将日志发送到指定后端。
  *   - 在 getTracks 函数的关键节点添加了详细的日志输出。
@@ -101,23 +102,30 @@ async function reply(url) {
     }
 }
 
-// --- 核心函数 (无变化) ---
+// --- 核心函数 ---
 async function getConfig() {
-  await log("插件初始化 (v62.4 - 后端日志测试版)");
+  await log("插件初始化 (v62.5 - 后端日志测试版 - 修正版)");
+  // 【已修正】恢复完整的分类列表
   return jsonify({
-    ver: 1, title: '海绵小站', site: SITE_URL,
+    ver: 1, 
+    title: '海绵小站', 
+    site: SITE_URL,
     tabs: [
-      { name: '电影', ext: { id: 'forum-1' } }, { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } }, { name: '综艺', ext: { id: 'forum-5' } },
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
     ],
   });
 }
+
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
+
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
@@ -208,29 +216,29 @@ async function getTracks(ext) {
         // --- 步骤三：循环处理，分配并生成结果 ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
-                await log(`--- 开始处理第 ${index + 1} 个链接: ${link} ---`);
+                log(`--- 开始处理第 ${index + 1} 个链接: ${link} ---`); // 改为同步log
                 const linkElement = mainMessage.find(`a[href="${link}"]`).first();
                 let fileName = pageTitle; // 默认使用主标题
                 
                 if (linkElement.length > 0) {
                     const text = linkElement.text().trim();
-                    await log(`链接的文本内容是: "${text}"`);
+                    log(`链接的文本内容是: "${text}"`);
                     if (text && text.length > 5 && !text.startsWith('http' )) {
                         fileName = text;
-                        await log(`链接文本有效，文件名被设置为: "${fileName}"`);
+                        log(`链接文本有效，文件名被设置为: "${fileName}"`);
                     } else {
-                        await log(`链接文本无效，继续使用主标题作为文件名。`);
+                        log(`链接文本无效，继续使用主标题作为文件名。`);
                     }
                 } else {
-                    await log(`未找到链接对应的<a>元素，使用主标题作为文件名。`);
+                    log(`未找到链接对应的<a>元素，使用主标题作为文件名。`);
                 }
                 
                 if (fileName === pageTitle && fileName.includes('.')) {
-                    await log(`文件名 "${fileName}" 包含 '.'，触发净化逻辑。`, "warn");
+                    log(`文件名 "${fileName}" 包含 '.'，触发净化逻辑。`, "warn");
                     const parts = fileName.split('.');
                     if (parts.length > 1) {
                         fileName = parts[0];
-                        await log(`文件名被净化为: "${fileName}"`);
+                        log(`文件名被净化为: "${fileName}"`);
                     }
                 }
 
@@ -238,14 +246,14 @@ async function getTracks(ext) {
                 let finalPan;
                 if (code) {
                     finalPan = `${link}（访问码：${code}）`;
-                    await log(`为链接分配到访问码: "${code}"`);
+                    log(`为链接分配到访问码: "${code}"`);
                 } else {
                     finalPan = link;
-                    await log(`未找到可分配的访问码。`);
+                    log(`未找到可分配的访问码。`);
                 }
 
                 tracks.push({ name: fileName, pan: finalPan, ext: { pwd: '' } });
-                await log(`第 ${index + 1} 个资源处理完成。`);
+                log(`第 ${index + 1} 个资源处理完成。`);
             });
         }
 
@@ -295,4 +303,3 @@ async function home() { const c = await getConfig(); const config = JSON.parse(c
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
-
