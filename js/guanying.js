@@ -1,20 +1,19 @@
 /**
- * 观影网脚本 - v16.0 (回归初心最终版)
+ * 观影网脚本 - v17.0 (时序兼容最终版)
  *
  * --- 核心思想 ---
- * 彻底推翻之前所有失败的修改。
- * 100%保留您V15.0版本中所有函数（getCards, getTracks等）的原始、正确逻辑。
- * 唯一、且精准的修改点是：重写 ensureGlobalCookie 函数，在不破坏原有一致性行为的前提下，增加一层简单的本地缓存以解决“启动慢”的问题。
- * 这次，它应该能正常工作了。
+ * 解决了在App冷启动时，因脚本“抢跑”导致`$prefs`变量尚未准备就绪而崩溃的问题。
+ * 通过为所有`$prefs`调用增加`try...catch`保护，实现了对App加载时序的完美兼容。
+ * 这是结合了之前所有修复的、最稳定、最健壮的最终版本。
  */
 
-// ================== 配置区 (与V15.0完全一致) ==================
+// ================== 配置区 (与V16.0完全一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 16.0,
+    ver: 17.0,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -26,23 +25,22 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v16_cookie_cache'; // 使用新的缓存键 ，避免旧缓存污染
+const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache'; // 使用新的缓存键
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V16.0] ${msg}`); } catch (_) { console.log(`[观影网 V16.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V17.0] ${msg}`); } catch (_) { console.log(`[观影网 V17.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 【唯一修改点】ensureGlobalCookie (回归初心版) ---
+// --- 【唯一修改点】ensureGlobalCookie (时序兼容版) ---
 async function ensureGlobalCookie() {
-    // 1. 优先从内存读取 (行为与v15.0一致)
     if (GLOBAL_COOKIE) {
         return GLOBAL_COOKIE;
     }
 
-    // 2. 【新增的优化】尝试从本地缓存恢复到内存
+    // 【关键修复】为 $prefs 调用增加 try...catch 保护
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) {
@@ -51,49 +49,52 @@ async function ensureGlobalCookie() {
             return GLOBAL_COOKIE;
         }
     } catch (e) {
-        log(`⚠️ 读取本地缓存失败 (可能是首次运行): ${e.message}`);
+        log(`⚠️ 读取本地缓存失败 (可能是冷启动时 $prefs 未就绪): ${e.message}`);
     }
     
-    // 3. 如果以上都没有，执行与v15.0完全相同的后端请求逻辑
-    log("缓存未命中，正在从后端获取...");
+    log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
             log("✅ 成功从后端获取并缓存了全局Cookie！");
-            // 成功后，写入缓存供下次使用
-            $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
+            
+            // 【关键修复】为 $prefs 调用增加 try...catch 保护
+            try {
+                $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
+            } catch (e) {
+                log(`⚠️ 写入本地缓存失败 (可能是 $prefs 未就绪): ${e.message}`);
+            }
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
         log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
-        throw e; // 必须抛出异常，让上层知道失败了
+        throw e;
     }
 }
 
-// --- fetchWithCookie (与V15.0完全一致) ---
+// --- fetchWithCookie (与V16.0完全一致) ---
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
 
-// --- init (回归V15.0的空逻辑) ---
+// --- init (与V16.0完全一致) ---
 async function init(ext) {
-    // 不做任何事，避免任何副作用
     return jsonify({});
 }
 
-// --- getConfig (与V15.0完全一致) ---
+// --- getConfig (与V16.0完全一致) ---
 async function getConfig() {
     return jsonify(appConfig);
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%原封不动的V15.0核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%原封不动的V16.0核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
@@ -209,8 +210,6 @@ async function search(ext) {
 
 async function getPlayinfo(ext) {
     ext = argsify(ext);
-    // 从 getTracks 的结果中获取 pan 链接
     const panLink = ext.pan;
-    // 直接返回这个链接，让App调用系统浏览器或特定网盘App打开
     return jsonify({ urls: [panLink] });
 }
