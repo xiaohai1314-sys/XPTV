@@ -1,71 +1,67 @@
 /**
- * 观影网脚本 - v44.1 (详情页修复版)
- *
- * --- 核心思想 ---
- * 修复因v44架构升级后，未同步修改详情页(getTracks)参数传递方式而导致的“网盘提取”功能失效问题。
+ * 观影网脚本 - v45.1 (网盘提取修复版)
  *
  * --- 更新日志 ---
- *  - v44.1 (详情页修复版):
- *    - 【核心修复】修正 getTracks 函数，使其从 ext.vod_id (而不是旧的 ext.url) 中获取详情页API地址。
- *    - 【功能恢复】“网盘提取”功能现在应该可以正常工作了。
- *    - 【保持架构】继续保持v44版本前后端分离的稳定架构。
+ *  - v45.1:
+ *    - 【核心修复】根据与v37.0的对比，将 getTracks 函数的实现恢复为最稳定可靠的逻辑。
+ *    - 【逻辑统一】getTracks 现在重新使用全局的 fetchWithCookie 函数来发起请求，确保了Cookie的正确性和一致性。
+ *    - 【拨乱反正】移除了在v45.0中画蛇添足的、独立的 ensureCookieForTracks 函数和相关逻辑。
  */
 
 // ================== 配置区 ==================
 const BACKEND_API_URL = 'http://192.168.10.111:5000/api/movies'; 
+const COOKIE_BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; // 为fetchWithCookie定义Cookie后端地址
 
 const appConfig = {
-    ver: "44.1", // 详情页修复版
+    ver: "45.1", // 网盘提取修复版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { category: 'mv' } },
-        { name: '剧集', ext: { category: 'tv' } },
-        { name: '动漫', ext: { category: 'ac' } },
+        { name: '电影', ext: { id: 'mv' } },
+        { name: '剧集', ext: { id: 'tv' } },
+        { name: '动漫', ext: { id: 'ac' } },
     ],
 };
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V44.1] ${msg}`); } catch (_) { console.log(`[观影网 V44.1] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V45.1] ${msg}`); } catch (_) { console.log(`[观影网 V45.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ★★★★★【详情页Cookie缓存】★★★★★
-// 为了让getTracks能拿到cookie，我们需要一个地方缓存它。
-// 在init或getCards成功后，可以把从后端拿到的cookie存一下。
-// 但一个更简单的做法是，让getTracks自己去请求一个有效的cookie。
-// 我们暂时保留一个独立的ensureGlobalCookie函数给getTracks用。
+// ★★★ 全局、统一的Cookie处理逻辑 (回归v37的经典模式) ★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v44_cookie_cache';
+const COOKIE_CACHE_KEY = 'gying_v45_cookie_cache';
 
-async function ensureCookieForTracks() {
-    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
-    try {
-        const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
-        if (cachedCookie) {
-            GLOBAL_COOKIE = cachedCookie;
-            return GLOBAL_COOKIE;
+async function fetchWithCookie(url, options = {}) {
+    if (!GLOBAL_COOKIE) {
+        try {
+            const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
+            if (cachedCookie) {
+                log("从缓存中恢复了Cookie");
+                GLOBAL_COOKIE = cachedCookie;
+            } else {
+                log("缓存未命中，从后端获取Cookie...");
+                const { data } = await $fetch.get(COOKIE_BACKEND_URL);
+                const result = JSON.parse(data);
+                if (result.status === "success" && result.cookie) {
+                    GLOBAL_COOKIE = result.cookie;
+                    $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE);
+                }
+            }
+        } catch (e) {
+            log("获取Cookie失败: " + e.message);
         }
-    } catch (e) { /* ignore */ }
-    
-    // 如果缓存没有，需要一个能获取Cookie的途径。
-    // 最简单的办法是复用旧后端的/getCookie接口。
-    // 我们假设您的后端同时保留了/getCookie和/api/movies。
-    try {
-        const { data } = await $fetch.get('http://192.168.10.111:5000/getCookie' );
-        const result = JSON.parse(data);
-        if (result.status === "success" && result.cookie) {
-            GLOBAL_COOKIE = result.cookie;
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { /* ignore */ }
-            return GLOBAL_COOKIE;
-        }
-    } catch(e) {
-        log("为详情页获取Cookie失败: " + e.message);
     }
-    return ""; // 返回空字符串
+    
+    const headers = { 
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 
+        'Cookie': GLOBAL_COOKIE, 
+        'Referer': appConfig.site,
+        ...options.headers 
+    };
+    return $fetch.get(url, { ...options, headers });
 }
-
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
@@ -76,12 +72,14 @@ async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
-    const { page = 1, category } = ext;
-    
+    const page = ext.page || 1;
+    const category = ext.id || 'mv';
+
     const url = `${BACKEND_API_URL}?category=${category}&page=${page}`;
     log(`请求后端API: ${url}`);
     
     try {
+        // getCards直接请求自己的后端，不需要cookie
         const { data } = await $fetch.get(url);
         log(`✅ 成功从后端获取到数据。`);
         return data; 
@@ -97,28 +95,19 @@ async function search(ext) {
     return jsonify({ list: [] });
 }
 
-// --- getTracks 和 getPlayinfo ★★★ 核心修正区域 ★★★ ---
+// --- getTracks 和 getPlayinfo (★ 核心修复区域 ★) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
     
-    // ★★★ 核心修正：从 ext.vod_id 获取URL ★★★
+    // 1. URL来源使用新架构的 ext.vod_id
     let url = ext.vod_id; 
-    if (!url) {
-        log("❌ getTracks失败：ext.vod_id为空。");
-        return jsonify({ list: [] });
-    }
+    if (!url) { return jsonify({ list: [] }); }
 
     log(`请求详情数据: ${url}`);
     try {
-        // 详情页请求观影网，依然需要有效的Cookie
-        const cookie = await ensureCookieForTracks();
-        const headers = { 
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 
-            'Cookie': cookie, 
-            'Referer': appConfig.site 
-        };
-        const { data } = await $fetch.get(url, { headers });
+        // 2. 请求方式恢复为v37的、最可靠的 fetchWithCookie
+        const { data } = await fetchWithCookie(url);
 
         const respstr = JSON.parse(data);
         if (respstr.hasOwnProperty('panlist')) {
