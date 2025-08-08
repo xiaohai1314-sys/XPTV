@@ -1,21 +1,19 @@
 /**
- * 观影网脚本 - v39.0 (双模式兼容最终版)
+ * 观影网脚本 - v40.0 (择优录取最终版)
  *
  * --- 核心思想 ---
- * 经过多次严谨的分析和确认，最终明确网站存在两种并存的页面渲染模式：
- * 1. API模式：主要数据通过 <script> 标签内的 _obj.inlist JavaScript对象提供。
- * 2. 直连/SEO模式：数据被直接完整地渲染在HTML的 <li> 元素中。
+ * v39版本的“优先/回退”逻辑存在缺陷：当页面同时存在_obj.inlist和HTML元素，但_obj.inlist为空或无效时，脚本会错误地选择它并返回空列表。
  * 
- * 本版本通过重构核心解析函数 parsePage，实现了对这两种模式的智能兼容。
- * 它会优先检查API模式，如果失败则自动切换到HTML元素解析模式，从而确保在任何情况下都能正确解析数据。
- * 同时，针对API模式下的海报问题，提供了一个包含所有已知格式的“全家桶”URL方案。
+ * 本最终版本采用“择优录取”的全新逻辑：
+ * 1. 同时尝试解析 _obj.inlist 和 HTML <li> 元素，分别得到两份数据。
+ * 2. 比较两份数据的结果，选择其中包含项目更多（更丰富）的一份作为最终结果返回。
+ * 这种方法可以智能地忽略无效或空的数据源，确保在任何复杂的页面结构下都能采用最有效的数据进行解析。
  *
  * --- 更新日志 ---
- *  - v39.0 (双模式兼容最终版):
- *    - 【核心重构】parsePage 函数实现双模式兼容。优先尝试解析 _obj.inlist，如果失败，则自动回退到使用Cheerio解析HTML的 <li> 元素。
- *    - 【海报全家桶】在解析 _obj.inlist 模式时，使用包含主站和图床共三种可能性的URL拼接方案，最大限度地解决海报丢失问题。
- *    - 【健壮性】无论服务器返回哪种页面结构，脚本都能自适应并正确解析，保证了最高的稳定性和兼容性。
- *    - 【保持兼容】所有后端通信逻辑保持不变。
+ *  - v40.0 (择优录取最终版):
+ *    - 【核心重构】parsePage 函数彻底重写，不再使用“回退”逻辑，而是“择优”逻辑。
+ *    - 【智能决策】函数会同时执行两种解析，并返回包含更多卡片数量的那个结果。
+ *    - 【终极健壮】从根本上解决了因数据源混乱或存在“假数据”而导致列表为空的问题。
  */
 
 // ================== 配置区 (原封不动) ==================
@@ -24,7 +22,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 39.0, // 双模式兼容最终版
+    ver: 40.0, // 择优录取最终版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -36,12 +34,12 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】(原封不动 ) ★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v39_cookie_cache'; // 更新版本号避免缓存冲突
+const COOKIE_CACHE_KEY = 'gying_v40_cookie_cache';
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 (通信部分原封不动) ==================
 
-function log(msg) { try { $log(`[观影网 V39.0] ${msg}`); } catch (_) { console.log(`[观影网 V39.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V40.0] ${msg}`); } catch (_) { console.log(`[观影网 V40.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -87,95 +85,71 @@ async function getConfig() { return jsonify(appConfig); }
 // =======================================================================
 
 /**
- * 统一的、双模式兼容的页面解析函数
+ * 统一的、采用“择优录取”逻辑的页面解析函数
  * @param {string} html 网页的HTML源码
  * @returns {Array} 卡片对象数组
  */
 function parsePage(html) {
-    // --- 模式一：优先尝试解析 _obj.inlist (API模式) ---
+    let cardsFromObj = [];
+    let cardsFromHtml = [];
+
+    // --- 解析路径1：尝试解析 _obj.inlist ---
     const scriptContentMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
     if (scriptContentMatch && scriptContentMatch[1]) {
-        log("检测到 API 模式 (_obj.inlist)，开始解析...");
         try {
             const inlistData = JSON.parse(scriptContentMatch[1]);
-            const cards = [];
-            const vodType = inlistData.ty;
-
-            if (!inlistData.t || !inlistData.i) {
-                log("❌ _obj.inlist 数据不完整。");
-                return [];
-            }
-
-            inlistData.t.forEach((name, index) => {
-                const vodId = inlistData.i[index];
-                if (!vodId) return;
-
-                const detailApiUrl = `${appConfig.site}res/downurl/${vodType}/${vodId}`;
-                
-                // ★★★ 海报URL全家桶方案 ★★★
-                const picUrl1 = `${appConfig.site}img/${vodType}/${vodId}.webp`;
-                const picUrl2 = `https://s.tutu.pm/img/${vodType}/${vodId}/220.webp`;
-                const picUrl3 = `https://s.tutu.pm/img/${vodType}/${vodId}.webp`;
-                const picUrl = `${picUrl1}@${picUrl2}@${picUrl3}`;
-
-                const remarks = inlistData.q && inlistData.q[index] ? inlistData.q[index].join(' ' ) : '';
-
-                cards.push({
-                    vod_id: detailApiUrl,
-                    vod_name: name,
-                    vod_pic: picUrl,
-                    vod_remarks: remarks,
-                    ext: { url: detailApiUrl },
+            if (inlistData.t && inlistData.i) {
+                const vodType = inlistData.ty;
+                inlistData.t.forEach((name, index) => {
+                    const vodId = inlistData.i[index];
+                    if (!vodId) return;
+                    const detailApiUrl = `${appConfig.site}res/downurl/${vodType}/${vodId}`;
+                    const picUrl1 = `${appConfig.site}img/${vodType}/${vodId}.webp`;
+                    const picUrl2 = `https://s.tutu.pm/img/${vodType}/${vodId}/220.webp`;
+                    const picUrl3 = `https://s.tutu.pm/img/${vodType}/${vodId}.webp`;
+                    const picUrl = `${picUrl1}@${picUrl2}@${picUrl3}`;
+                    const remarks = inlistData.q && inlistData.q[index] ? inlistData.q[index].join(' ' ) : '';
+                    cardsFromObj.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarks, ext: { url: detailApiUrl } });
                 });
-            });
-            
-            log(`✅ API 模式解析成功，找到 ${cards.length} 个项目。`);
-            return cards;
-
+            }
         } catch (e) {
-            log(`⚠️ API 模式解析失败: ${e.message}。将尝试回退到HTML解析模式。`);
+            log(`⚠️ 解析 _obj.inlist 时发生错误: ${e.message}`);
         }
     }
+    log(`路径1 (_obj.inlist) 解析到 ${cardsFromObj.length} 个项目。`);
 
-    // --- 模式二：回退到解析HTML元素 (直连/SEO模式) ---
-    log("未检测到 _obj.inlist 或解析失败，回退到 HTML 元素解析模式...");
-    const $ = cheerio.load(html);
-    const cards = [];
-    
-    $('ul.content-list > li').each((_, element) => {
-        const $li = $(element);
-        const $anchor = $li.find('a').first();
-        const path = $anchor.attr('href');
-        const name = $anchor.attr('title');
-        const $image = $li.find('img.lazy');
-        const picUrl = $image.attr('data-src');
-        const remarksText = $li.find('.li-bottom').text().trim();
-        
-        if (!path || !name || !picUrl) return;
-        
-        const match = path.match(/\/([a-z]+)\/(\w+)/);
-        if (!match) return;
-        const type = match[1];
-        const vodId = match[2];
-        
-        const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-        
-        cards.push({
-            vod_id: detailApiUrl,
-            vod_name: name,
-            vod_pic: picUrl, // 直接使用最准确的地址
-            vod_remarks: remarksText,
-            ext: { url: detailApiUrl },
+    // --- 解析路径2：尝试解析 HTML <li> 元素 ---
+    try {
+        const $ = cheerio.load(html);
+        $('ul.content-list > li').each((_, element) => {
+            const $li = $(element);
+            const $anchor = $li.find('a').first();
+            const path = $anchor.attr('href');
+            const name = $anchor.attr('title');
+            const $image = $li.find('img.lazy');
+            const picUrl = $image.attr('data-src');
+            const remarksText = $li.find('.li-bottom').text().trim();
+            if (!path || !name || !picUrl) return;
+            const match = path.match(/\/([a-z]+)\/(\w+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            cardsFromHtml.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarksText, ext: { url: detailApiUrl } });
         });
-    });
-    
-    if (cards.length > 0) {
-        log(`✅ HTML 元素解析模式成功，找到 ${cards.length} 个项目。`);
-    } else {
-        log("❌ 两种解析模式均未找到任何项目。请检查网站结构是否再次发生变化。");
+    } catch (e) {
+        log(`⚠️ 解析 HTML <li> 时发生错误: ${e.message}`);
     }
-    
-    return cards;
+    log(`路径2 (HTML <li>) 解析到 ${cardsFromHtml.length} 个项目。`);
+
+    // --- 最终决策：择优录取 ---
+    if (cardsFromHtml.length > cardsFromObj.length) {
+        log(`✅ 最终决策：选择 HTML <li> 解析结果 (${cardsFromHtml.length} 个项目)。`);
+        return cardsFromHtml;
+    } else {
+        log(`✅ 最终决策：选择 _obj.inlist 解析结果 (${cardsFromObj.length} 个项目)。`);
+        return cardsFromObj;
+    }
 }
 
 
@@ -186,7 +160,7 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data); // 使用我们全新的双模解析函数
+        const cards = parsePage(data);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -203,7 +177,7 @@ async function search(ext) {
     log(`请求搜索页: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data); // 使用我们全新的双模解析函数
+        const cards = parsePage(data);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
