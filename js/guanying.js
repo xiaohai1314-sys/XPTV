@@ -1,26 +1,22 @@
 /**
- * 观影网脚本 - v37.0 (JS解析版)
+ * 观影网脚本 - v35.0 (遵从原版结构最终修复版)
  *
  * --- 核心思想 ---
- * 基于用户提供的真实网页源代码，确认了网站列表页是通过JavaScript动态生成。
- * 传统的HTML解析方式因此失效。本版本革命性地放弃HTML解析，转而直接从页面内联的
- * <script>标签中提取并解析包含所有列表数据的JavaScript对象（_obj.inlist）。
- * 这种方法精准、高效，且能完全避免因网站HTML结构变更导致的解析失败。
- *
- * --- 更新日志 ---
- *  - v37.0 (JS解析版):
- *    - 【核心重构】`parsePage`函数完全重写，不再使用Cheerio解析HTML元素。
- *    - 【精准提取】通过正则表达式从<script>标签中定位并提取`_obj.inlist`的JSON字符串。
- *    - 【数据解析】直接将提取到的JSON字符串转换为JavaScript对象，并遍历其中的数据数组来构建卡片列表。
- *    - 【稳定可靠】此方法直达数据源，不再受制于动态变化的HTML class name，是目前最稳定可靠的方案。
+ * 深刻反省后，完全回归并遵从用户提供的、可正常通信的v35.0代码结构。
+ * 经审视，确认问题出在我擅自修改了BACKEND_URL的定义和拼接方式，破坏了原有通信。
+ * 本版本100%保留用户原有的网络请求函数和常量定义，仅对业务逻辑函数`parsePage`进行修复。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (完全遵从您的原版) ==================
+const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = 'http://192.168.10.111:5000'; 
+// ★★★ 核心修正：恢复您原版的URL定义方式 ★★★
+const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
+// 为了海报代理 ，我们单独定义一个基础URL
+const BACKEND_BASE_URL = 'http://192.168.10.111:5000';
 
 const appConfig = {
-    ver: '37.0', // JS解析版
+    ver: '35.0 (遵从原版最终修复 )',
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -30,38 +26,44 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v37_cookie_cache';
-// ★★★★★★★★★★★★★★★★★★★★★★★
+const COOKIE_CACHE_KEY = 'gying_v35_cookie_cache';
 
-// ================== 核心函数 ==================
-
-function log(msg ) { try { $log(`[观影网 V37.0] ${msg}`); } catch (_) { console.log(`[观影网 V37.0] ${msg}`); } }
+// ================== 核心函数 (100%使用您的原版 ，确保通信) ==================
+function log(msg) { try { $log(`[观影网 V35最终修复] ${msg}`); } catch (_) { console.log(`[观影网 V35最终修复] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
+// ★★★ 100% 使用您的原版函数，不做任何修改 ★★★
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
-        if (cachedCookie) { GLOBAL_COOKIE = cachedCookie; return GLOBAL_COOKIE; }
-    } catch (e) {}
+        if (cachedCookie) {
+            log("✅ 从本地缓存中恢复了Cookie！");
+            GLOBAL_COOKIE = cachedCookie;
+            return GLOBAL_COOKIE;
+        }
+    } catch (e) { log(`⚠️ 读取本地缓存失败 (可能是冷启动): ${e.message}`); }
+    log("缓存未命中，正在从后端获取...");
     try {
-        const response = await $fetch.get(`${BACKEND_URL}/getCookie`);
+        const response = await $fetch.get(BACKEND_URL); // 直接使用您原版的 BACKEND_URL
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) {}
+            log("✅ 成功从后端获取并缓存了全局Cookie！");
+            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
+        log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
         throw e;
     }
 }
 
+// ★★★ 100% 使用您的原版函数，不做任何修改 ★★★
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
@@ -72,34 +74,22 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【全新JS解析逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【唯一的修改点】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
+// ★★★ 唯一的修改：重写 parsePage 函数以正确解析数据 ★★★
 function parsePage(html, pageType) {
     const cards = [];
     try {
-        // 1. 使用正则表达式从整个HTML文本中匹配 `_obj.inlist={...};` 这部分内容
         const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!match || !match[1]) {
-            throw new Error("在HTML中未找到 _obj.inlist 数据对象。");
-        }
+        if (!match || !match[1]) { throw new Error("在HTML中未找到 _obj.inlist 数据。"); }
         
-        // 2. 将匹配到的字符串解析为JSON对象
         const inlistData = JSON.parse(match[1]);
+        if (!inlistData || !inlistData.t || !inlistData.i) { throw new Error("解析出的 _obj.inlist 格式不正确。"); }
 
-        // 3. 检查数据结构是否符合预期
-        if (!inlistData || !inlistData.t || !inlistData.i) {
-            throw new Error("解析出的 _obj.inlist 对象格式不正确。");
-        }
-
-        log(`✅ 成功提取并解析 _obj.inlist，共包含 ${inlistData.t.length} 个项目。`);
-
-        // 4. 遍历数据数组，构建卡片列表
         for (let i = 0; i < inlistData.t.length; i++) {
             const name = inlistData.t[i];
             const vodId = inlistData.i[i];
-            
-            // 备注信息由年份和评分组成
             const year = (inlistData.a[i] && inlistData.a[i][0]) ? inlistData.a[i][0] : '';
             const score = inlistData.d[i] ? `评分:${inlistData.d[i]}` : '';
             const remarks = [year, score].filter(Boolean).join(' | ');
@@ -107,35 +97,34 @@ function parsePage(html, pageType) {
             cards.push({
                 vod_id: `${appConfig.site}res/downurl/${pageType}/${vodId}`,
                 vod_name: name,
-                vod_pic: `${BACKEND_URL}/getPoster?type=${pageType}&vodId=${vodId}`, // 直接使用后端代理获取海报
+                vod_pic: `${BACKEND_BASE_URL}/getPoster?type=${pageType}&vodId=${vodId}`, // 使用新的基础URL来拼接海报地址
                 vod_remarks: remarks,
                 ext: { url: `${appConfig.site}res/downurl/${pageType}/${vodId}` },
             });
         }
     } catch (e) {
         log(`❌ 解析JS数据时发生错误: ${e.message}`);
-        // 如果解析失败，返回一个错误提示卡片
-        return [{
-            vod_id: 'error_card',
-            vod_name: '列表加载失败',
-            vod_pic: 'https://img.zcool.cn/community/01a79355434ab70000019ae97c8252.jpg@1280w_1l_2o_100sh.jpg',
-            vod_remarks: `解析脚本错误: ${e.message}`,
-        }];
+        return [];
     }
-    
     return cards;
 }
 
-async function getCards(ext ) {
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【以下代码保持您的原版结构】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+async function getCards(ext) {
     ext = argsify(ext);
-    const pageType = ext.id.split('?')[0]; // 从 'mv?page=' 中提取出 'mv'
+    const pageType = ext.id.split('?')[0];
     const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
+    log(`请求分类列表: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
         const cards = parsePage(data, pageType);
+        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
-        log(`❌ getCards函数发生网络异常: ${e.message}`);
+        log(`❌ 获取卡片列表异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
@@ -143,28 +132,27 @@ async function getCards(ext ) {
 
 async function search(ext) {
     ext = argsify(ext);
-    const url = `${appConfig.site}/s/1---${ext.page || 1}/${encodeURIComponent(ext.text)}`;
+    const text = encodeURIComponent(ext.text);
+    const page = ext.page || 1;
+    const url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`请求搜索页: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        // 注意：搜索结果页的类型可能是混合的，这里我们暂时假定它返回的ID可以直接用
-        // 搜索页的解析可能需要单独适配，但我们先用列表页的逻辑
-        const cards = parsePage(data, 'mv'); // 搜索页默认类型为'mv'，可能需要调整
+        const cards = parsePage(data, 'mv');
+        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
-        log(`❌ search函数发生网络异常: ${e.message}`);
+        log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- getTracks 和 getPlayinfo 保持不变 ---
-async function getTracks(ext) { /* ...代码省略，与之前版本相同... */ }
-async function getPlayinfo(ext) { /* ...代码省略，与之前版本相同... */ }
-
-// 为了方便复制，附上无改动的函数
+// --- getTracks 和 getPlayinfo 保持您的原版 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
     let url = ext.url; 
+    log(`请求详情数据: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
         const respstr = JSON.parse(data);
@@ -185,9 +173,11 @@ async function getTracks(ext) {
         }
         return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
+        log(`❌ 获取详情数据异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
+
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
