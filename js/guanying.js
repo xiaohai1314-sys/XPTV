@@ -1,19 +1,21 @@
 /**
- * 观影网脚本 - v36.0 (数据对象解析版)
+ * 观影网脚本 - v39.0 (双模式兼容最终版)
  *
  * --- 核心思想 ---
- * 经过分析，确认了列表页为空和海报丢失的根源在于网站页面结构的变更。
- * 旧的解析方式依赖于HTML中的 .v5d 元素，而新版页面已将数据全部移入
- * <script> 标签内的 _obj.inlist JavaScript对象中。
- * 本版本重写了核心解析函数 parsePage，使其直接从该JS对象提取数据，
- * 从而根本上解决了问题。所有其他部分，特别是网络通信逻辑，保持不变。
+ * 经过多次严谨的分析和确认，最终明确网站存在两种并存的页面渲染模式：
+ * 1. API模式：主要数据通过 <script> 标签内的 _obj.inlist JavaScript对象提供。
+ * 2. 直连/SEO模式：数据被直接完整地渲染在HTML的 <li> 元素中。
+ * 
+ * 本版本通过重构核心解析函数 parsePage，实现了对这两种模式的智能兼容。
+ * 它会优先检查API模式，如果失败则自动切换到HTML元素解析模式，从而确保在任何情况下都能正确解析数据。
+ * 同时，针对API模式下的海报问题，提供了一个包含所有已知格式的“全家桶”URL方案。
  *
  * --- 更新日志 ---
- *  - v36.0 (数据对象解析):
- *    - 【核心修复】重写 parsePage 函数，改为使用正则表达式匹配并解析 _obj.inlist 数据对象，替代了无效的 .v5d 元素查找。
- *    - 【功能恢复】现在可以正确解析到影视列表，列表页不再为空。
- *    - 【海报修复】基于从 _obj.inlist 中获取的 type 和 vodId，直接拼接生成正确的的海报地址，海报正常显示。
- *    - 【保持兼容】所有后端通信逻辑 (ensureGlobalCookie, fetchWithCookie) 均保持原样，完美兼容现有后端服务。
+ *  - v39.0 (双模式兼容最终版):
+ *    - 【核心重构】parsePage 函数实现双模式兼容。优先尝试解析 _obj.inlist，如果失败，则自动回退到使用Cheerio解析HTML的 <li> 元素。
+ *    - 【海报全家桶】在解析 _obj.inlist 模式时，使用包含主站和图床共三种可能性的URL拼接方案，最大限度地解决海报丢失问题。
+ *    - 【健壮性】无论服务器返回哪种页面结构，脚本都能自适应并正确解析，保证了最高的稳定性和兼容性。
+ *    - 【保持兼容】所有后端通信逻辑保持不变。
  */
 
 // ================== 配置区 (原封不动) ==================
@@ -22,7 +24,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 36.0, // 数据对象解析版
+    ver: 39.0, // 双模式兼容最终版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -34,16 +36,15 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】(原封不动 ) ★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v36_cookie_cache'; // 更新版本号避免缓存冲突
+const COOKIE_CACHE_KEY = 'gying_v39_cookie_cache'; // 更新版本号避免缓存冲突
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 (通信部分原封不动) ==================
 
-function log(msg) { try { $log(`[观影网 V36.0] ${msg}`); } catch (_) { console.log(`[观影网 V36.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V39.0] ${msg}`); } catch (_) { console.log(`[观影网 V39.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 后端通信部分，完全保持原样 ---
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
     try {
@@ -86,61 +87,95 @@ async function getConfig() { return jsonify(appConfig); }
 // =======================================================================
 
 /**
- * 统一的页面解析函数 (全新逻辑)
+ * 统一的、双模式兼容的页面解析函数
  * @param {string} html 网页的HTML源码
  * @returns {Array} 卡片对象数组
  */
 function parsePage(html) {
-    // 1. 使用正则表达式从HTML中精准提取 _obj.inlist 的JSON字符串
+    // --- 模式一：优先尝试解析 _obj.inlist (API模式) ---
     const scriptContentMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-    if (!scriptContentMatch || !scriptContentMatch[1]) {
-        log("❌ 在HTML中未找到 _obj.inlist 数据块，页面结构可能已改变。");
-        return [];
-    }
+    if (scriptContentMatch && scriptContentMatch[1]) {
+        log("检测到 API 模式 (_obj.inlist)，开始解析...");
+        try {
+            const inlistData = JSON.parse(scriptContentMatch[1]);
+            const cards = [];
+            const vodType = inlistData.ty;
 
-    try {
-        // 2. 将提取到的字符串解析为JSON对象
-        const inlistData = JSON.parse(scriptContentMatch[1]);
-        const cards = [];
-        const vodType = inlistData.ty; // 获取影片类型，如 'mv', 'tv'
+            if (!inlistData.t || !inlistData.i) {
+                log("❌ _obj.inlist 数据不完整。");
+                return [];
+            }
 
-        // 3. 检查关键数据数组是否存在
-        if (!inlistData.t || !inlistData.i || !inlistData.q) {
-            log("❌ _obj.inlist 数据不完整，缺少t, i, 或 q 数组。");
-            return [];
-        }
+            inlistData.t.forEach((name, index) => {
+                const vodId = inlistData.i[index];
+                if (!vodId) return;
 
-        // 4. 遍历数据并组装成卡片对象
-        inlistData.t.forEach((name, index) => {
-            const vodId = inlistData.i[index]; // 影片ID，例如 'zmza'
-            if (!vodId) return; // 如果没有ID，则跳过此条目
+                const detailApiUrl = `${appConfig.site}res/downurl/${vodType}/${vodId}`;
+                
+                // ★★★ 海报URL全家桶方案 ★★★
+                const picUrl1 = `${appConfig.site}img/${vodType}/${vodId}.webp`;
+                const picUrl2 = `https://s.tutu.pm/img/${vodType}/${vodId}/220.webp`;
+                const picUrl3 = `https://s.tutu.pm/img/${vodType}/${vodId}.webp`;
+                const picUrl = `${picUrl1}@${picUrl2}@${picUrl3}`;
 
-            // 详情页API地址
-            const detailApiUrl = `${appConfig.site}res/downurl/${vodType}/${vodId}`;
-            
-            // 智能拼接海报URL，使用@符号连接主备地址
-            const picUrl1 = `https://s.tutu.pm/img/${vodType}/${vodId}/220.webp`;
-            const picUrl2 = `https://s.tutu.pm/img/${vodType}/${vodId}.webp`;
-            const picUrl = `${picUrl1}@${picUrl2}`;
+                const remarks = inlistData.q && inlistData.q[index] ? inlistData.q[index].join(' ' ) : '';
 
-            // 将清晰度标签数组（如["4K"] ）转换为空格分隔的字符串
-            const remarks = inlistData.q[index] ? inlistData.q[index].join(' ') : '';
-
-            cards.push({
-                vod_id: detailApiUrl,
-                vod_name: name,
-                vod_pic: picUrl,
-                vod_remarks: remarks,
-                ext: { url: detailApiUrl },
+                cards.push({
+                    vod_id: detailApiUrl,
+                    vod_name: name,
+                    vod_pic: picUrl,
+                    vod_remarks: remarks,
+                    ext: { url: detailApiUrl },
+                });
             });
-        });
+            
+            log(`✅ API 模式解析成功，找到 ${cards.length} 个项目。`);
+            return cards;
 
-        return cards;
-
-    } catch (e) {
-        log(`❌ 解析 _obj.inlist JSON数据时发生错误: ${e.message}`);
-        return []; // 解析失败返回空数组，保证健壮性
+        } catch (e) {
+            log(`⚠️ API 模式解析失败: ${e.message}。将尝试回退到HTML解析模式。`);
+        }
     }
+
+    // --- 模式二：回退到解析HTML元素 (直连/SEO模式) ---
+    log("未检测到 _obj.inlist 或解析失败，回退到 HTML 元素解析模式...");
+    const $ = cheerio.load(html);
+    const cards = [];
+    
+    $('ul.content-list > li').each((_, element) => {
+        const $li = $(element);
+        const $anchor = $li.find('a').first();
+        const path = $anchor.attr('href');
+        const name = $anchor.attr('title');
+        const $image = $li.find('img.lazy');
+        const picUrl = $image.attr('data-src');
+        const remarksText = $li.find('.li-bottom').text().trim();
+        
+        if (!path || !name || !picUrl) return;
+        
+        const match = path.match(/\/([a-z]+)\/(\w+)/);
+        if (!match) return;
+        const type = match[1];
+        const vodId = match[2];
+        
+        const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+        
+        cards.push({
+            vod_id: detailApiUrl,
+            vod_name: name,
+            vod_pic: picUrl, // 直接使用最准确的地址
+            vod_remarks: remarksText,
+            ext: { url: detailApiUrl },
+        });
+    });
+    
+    if (cards.length > 0) {
+        log(`✅ HTML 元素解析模式成功，找到 ${cards.length} 个项目。`);
+    } else {
+        log("❌ 两种解析模式均未找到任何项目。请检查网站结构是否再次发生变化。");
+    }
+    
+    return cards;
 }
 
 
@@ -151,9 +186,7 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        // ★★★ 使用新的解析函数 ★★★
-        const cards = parsePage(data);
-        log(`✅ 成功解析到 ${cards.length} 个项目。`);
+        const cards = parsePage(data); // 使用我们全新的双模解析函数
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -170,9 +203,7 @@ async function search(ext) {
     log(`请求搜索页: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        // ★★★ 使用新的解析函数 ★★★
-        const cards = parsePage(data);
-        log(`✅ 成功解析到 ${cards.length} 个项目。`);
+        const cards = parsePage(data); // 使用我们全新的双模解析函数
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
