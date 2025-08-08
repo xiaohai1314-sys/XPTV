@@ -1,26 +1,29 @@
 /**
- * 观影网脚本 - v36.0 (回归圣杯版)
+ * 观影网脚本 - v35.1 (海报代理修复版)
  *
  * --- 核心思想 ---
- * 在经历了所有弯路后，我们最终回归了被证明是唯一稳定可靠的数据源：<script>标签内的_obj.inlist对象。
- * 之前的失败在于错误地抛弃了这个“数据金矿”，而去依赖不稳定的HTML元素。
- * 本版本将v17的稳定数据源逻辑，与我们后来打磨出的完美海报方案进行最终的、正确的融合。
+ * 本版本基于v35.0的健壮解析逻辑，精准修复了海报代理URL的生成错误。
+ * 此前版本将代理参数作为路径(Path)拼接，导致后端无法识别。
+ * 此修复将参数改为正确的查询参数(Query Parameters)格式，确保后端海报代理服务能被正确调用。
  *
  * --- 更新日志 ---
- *  - v36.0 (回归圣杯):
- *    - [数据源回归] 100%恢复v17从<script>标签提取JSON的核心逻辑，确保数据源的绝对稳定。
- *    - [海报方案融合] 将最完善的“智能提取+备用拼接”海报方案，正确地应用在稳定的数据逻辑之上。
- *    - [健壮性] 即使HTML元素残缺不全，只要_obj.inlist存在，脚本就能正常工作。
- *    - 这，就是我们从一开始就应该抵达的终点。
+ *  - v35.1 (海报代理修复):
+ *    - 【核心修复】修正了`parsePage`函数中备用海报URL的拼接逻辑。现在会生成 `.../getPoster?type=xx&vodId=xx` 格式的正确URL，以匹配后端接口。
+ *    - 【功能完整】保留了v35.0的所有优点，包括移除无用检查和基于.v5d元素的稳定解析。
+ *  - v35.0 (无用检查移除):
+ *    - 【核心修复】彻底移除了在getCards/search函数中对scriptContent是否存在的检查，因为它已不适用于新的解析模式。
+ *    - 【健壮性】现在，即使服务器返回不完整的HTML，脚本也不会崩溃，最多是临时显示空列表。
+ *    - 【功能完整】保留了v31版本最完善的、基于HTML元素(.v5d)的解析逻辑和智能海报方案。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
+// ★★★ 请确保这里的IP和端口与你的后端服务一致 ★★★
+const BACKEND_URL = 'http://192.168.10.111:5000'; 
 
 const appConfig = {
-    ver: 36.0, // 回归圣杯版
+    ver: '35.1', // 海报代理修复版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -32,12 +35,12 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v36_cookie_cache';
+const COOKIE_CACHE_KEY = 'gying_v35_cookie_cache';
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
-// ================== 核心函数 ==================
+// ================== 核心函数 (回归v31的稳定逻辑  ) ==================
 
-function log(msg ) { try { $log(`[观影网 V36.0] ${msg}`); } catch (_) { console.log(`[观影网 V36.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V35.1] ${msg}`); } catch (_) { console.log(`[观影网 V35.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -53,7 +56,7 @@ async function ensureGlobalCookie() {
     } catch (e) { log(`⚠️ 读取本地缓存失败 (可能是冷启动): ${e.message}`); }
     log("缓存未命中，正在从后端获取...");
     try {
-        const response = await $fetch.get(BACKEND_URL);
+        const response = await $fetch.get(`${BACKEND_URL}/getCookie`); // 从后端获取Cookie
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
@@ -79,115 +82,82 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终的融合逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终的健壮逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// --- getCards (基于v17的稳定数据源，并植入完美海报方案) ---
-async function getCards(ext) {
-    ext = argsify(ext);
-    let cards = [];
-    let { page = 1, id } = ext;
-    const url = `${appConfig.site}${id}${page}`;
-    log(`请求分类列表: ${url}`);
+// 统一的、带有完美海报方案的解析函数
+function parsePage(html) {
+    const $ = cheerio.load(html);
+    const cards = [];
+    // 直接解析.v5d元素，这是最可靠的方式
+    $('.v5d').each((_, element) => {
+        const $element = $(element);
+        const name = $element.find('b').text().trim();
+        const remarks = $element.find('p').text().trim();
+        const path = $element.find('a').attr('href');
+        if (!path) return;
 
-    try {
-        const { data } = await fetchWithCookie(url); 
-        const $ = cheerio.load(data);
+        const match = path.match(/\/([a-z]+)\/(\w+)/);
+        if (!match) return;
+        const type = match[1];
+        const vodId = match[2];
 
-        const scriptContent = $('script').filter((_, script) => {
-            return $(script).html().includes('_obj.header');
-        }).html();
-
-        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
-
-        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
-
-        const inlistData = JSON.parse(inlistMatch[1]);
-        if (inlistData && inlistData.i) {
-            inlistData.i.forEach((vodId, index) => {
-                const type = inlistData.ty;
-                const name = inlistData.t[index];
-                // 从JSON数据中获取备注，这比从HTML中获取更可靠
-                const remarks = inlistData.q && inlistData.q[index] ? inlistData.q[index].join(' ') : '';
-                
-                // ★★★ 完美海报方案植入点 ★★★
-                // 即使HTML元素是残缺的，我们也要尝试从中提取海报，这是最好的情况
-                let picUrl = '';
-                const $container = $(`a.v5d[href="/${type}/${vodId}"]`);
-                if ($container.length > 0) {
-                    picUrl = $container.find('picture source[data-srcset]').attr('data-srcset');
-                    if (!picUrl) { picUrl = $container.find('img.lazy[data-src]').attr('data-src'); }
-                }
-                // 如果从HTML中提取失败（因为HTML是残次品），我们启用最可靠的备用拼接方案
-                if (!picUrl) {
-                    const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`;
-                    const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-                    picUrl = `${picUrl1}@${picUrl2}`;
-                }
-                
-                const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-                cards.push({
-                    vod_id: detailApiUrl,
-                    vod_name: name,
-                    vod_pic: picUrl,
-                    vod_remarks: remarks,
-                    ext: { url: detailApiUrl },
-                } );
-            });
-            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
+        // 智能提取海报
+        let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+        if (!picUrl) {
+            picUrl = $element.find('img.lazy[data-src]').attr('data-src');
         }
         
-        return jsonify({ list: cards });
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // ★★★ 核心修复：如果无法直接提取到海报，则拼接一个指向后端代理的、带有正确查询参数的URL ★★★
+        if (!picUrl) {
+            picUrl = `${BACKEND_URL}/getPoster?type=${type}&vodId=${vodId}`;
+        }
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
+        const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+        cards.push({
+            vod_id: detailApiUrl,
+            vod_name: name,
+            vod_pic: picUrl,
+            vod_remarks: remarks,
+            ext: { url: detailApiUrl },
+        } );
+    });
+    return cards;
+}
+
+
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { page = 1, id } = ext;
+    const url = `${appConfig.site}${id}${page}`;
+    log(`请求分类列表: ${url}`);
+    try {
+        const { data } = await fetchWithCookie(url);
+        // ★★★ 核心修改：不再需要任何script检查，直接解析 ★★★
+        const cards = parsePage(data);
+        log(`✅ 成功解析到 ${cards.length} 个项目。`);
+        return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
+        // 这里只在网络请求本身失败时才会触发，而不是因为解析失败
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-// --- search (搜索页逻辑相对稳定，我们使用最健壮的HTML解析) ---
 async function search(ext) {
     ext = argsify(ext);
-    let text = encodeURIComponent(ext.text);
-    let page = ext.page || 1;
-    let url = `${appConfig.site}/s/1---${page}/${text}`;
-    log(`执行搜索: ${url}`);
+    const text = encodeURIComponent(ext.text);
+    const page = ext.page || 1;
+    const url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`请求搜索页: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        const $ = cheerio.load(data);
-        let cards = [];
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const remarks = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-
-            const match = path.match(/\/([a-z]+)\/(\w+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
-
-            let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-            if (!picUrl) { picUrl = $element.find('img.lazy[data-src]').attr('data-src'); }
-            if (!picUrl) {
-                const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`;
-                const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-                picUrl = `${picUrl1}@${picUrl2}`;
-            }
-
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            cards.push({
-                vod_id: detailApiUrl,
-                vod_name: name,
-                vod_pic: picUrl,
-                vod_remarks: remarks,
-                ext: { url: detailApiUrl },
-            } );
-        });
-        log(`✅ 成功从搜索页解析到 ${cards.length} 个项目。`);
+        // ★★★ 核心修改：不再需要任何script检查，直接解析 ★★★
+        const cards = parsePage(data);
+        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
@@ -195,8 +165,7 @@ async function search(ext) {
     }
 }
 
-
-// --- getTracks 和 getPlayinfo (保持不变) ---
+// --- getTracks 和 getPlayinfo 保持不变 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
