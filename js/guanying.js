@@ -1,12 +1,11 @@
 /**
- * 观影网脚本 - v49.1 (完整缓存最终版)
+ * 观影网脚本 - v49.2 (聚合加载修正版)
  *
  * --- 更新日志 ---
- *  - v49.1:
- *    - 【代码完整】根据您的要求，提供了未经任何省略的完整脚本文件。
- *    - 【缓存回归】在 getTracks 函数中，重新引入了一个安全的、局部的Cookie缓存机制。
- *    - 【安全设计】此缓存机制完全独立，只在进入详情页时触发，确保不会影响列表页的性能和APP的响应能力。
- *    - 【最终匹配】此版本前端与 v14.0 版本的后端完全匹配，构成了最终的、功能与性能兼顾的解决方案。
+ *  - v49.2:
+ *    - 【列表修正】重构 getCards 函数。不再被动等待分类，而是主动并行请求所有分类(电影、剧集、动漫)。
+ *    - 【UI优化】将不同分类的数据聚合在一起，并为每个视频名称前添加分类标识（如 "[电影] "），解决列表不全的问题。
+ *    - 【兼容性】此修改确保了即使在不加载分类Tab的App环境中，也能看到所有分类的内容。
  */
 
 // ================== 配置区 ==================
@@ -14,7 +13,7 @@ const LIST_API_URL = 'http://192.168.1.4:5000/api/data';
 const COOKIE_API_URL = 'http://192.168.1.4:5000/getCookie';
 
 const appConfig = {
-    ver: "49.1 (完整缓存 )",
+    ver: "49.2 (聚合加载 )",
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -26,7 +25,7 @@ const appConfig = {
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V49.1] ${msg}`); } catch (_) { console.log(`[观影网 V49.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V49.2] ${msg}`); } catch (_) { console.log(`[观影网 V49.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -34,24 +33,60 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 列表获取 (纯净版) ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 列表获取 (聚合加载版) ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
-    const category = ext.id || 'mv';
 
-    const url = `${LIST_API_URL}?category=${category}&page=${page}`;
-    log(`请求列表API: ${url}`);
+    // 如果是翻页或指定了分类，保持原逻辑
+    if (ext.id) {
+        const category = ext.id;
+        const url = `${LIST_API_URL}?category=${category}&page=${page}`;
+        log(`请求指定分类列表: ${url}`);
+        try {
+            const { data } = await $fetch.get(url);
+            log(`✅ 成功从后端获取到 [${category}] 列表数据。`);
+            return data;
+        } catch (e) {
+            log(`❌ 请求列表API失败: ${e.message}`);
+            $utils.toastError(`加载失败: 无法连接数据中心`, 4000);
+            return jsonify({ list: [] });
+        }
+    }
+
+    // 如果是首页加载 (ext.id 为空)，则聚合所有分类
+    log("首页加载，开始聚合所有分类...");
+    const categories = [
+        { id: 'mv', name: '电影' },
+        { id: 'tv', name: '剧集' },
+        { id: 'ac', name: '动漫' },
+    ];
     
+    const allRequests = categories.map(cat => 
+        $fetch.get(`${LIST_API_URL}?category=${cat.id}&page=${page}`)
+            .then(response => {
+                const parsedData = JSON.parse(response.data);
+                parsedData.list.forEach(item => {
+                    item.vod_name = `[${cat.name}] ${item.vod_name}`;
+                });
+                return parsedData.list;
+            })
+            .catch(e => {
+                log(`❌ 加载分类 [${cat.name}] 失败: ${e.message}`);
+                return [];
+            })
+    );
+
     try {
-        const { data } = await $fetch.get(url);
-        log(`✅ 成功从后端获取到列表数据。`);
-        return data; 
+        const results = await Promise.all(allRequests);
+        const combinedList = [].concat(...results);
+        log(`✅ 成功聚合所有分类，共 ${combinedList.length} 个项目。`);
+        return jsonify({ list: combinedList });
     } catch (e) {
-        log(`❌ 请求列表API失败: ${e.message}`);
-        $utils.toastError(`加载失败: 无法连接数据中心`, 4000);
+        log(`❌ 聚合所有分类时发生严重错误: ${e.message}`);
+        $utils.toastError(`聚合加载失败`, 4000);
         return jsonify({ list: [] });
     }
 }
@@ -65,7 +100,6 @@ async function search(ext) {
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 详情获取 (带安全缓存) ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// 用于详情页的、安全的、局部的Cookie缓存
 let GLOBAL_TRACKS_COOKIE = null;
 const TRACKS_COOKIE_CACHE_KEY = 'gying_v49_tracks_cookie_cache';
 
@@ -78,9 +112,7 @@ async function getTracks(ext) {
 
     log(`准备请求详情数据: ${detailApiUrl}`);
     try {
-        // 1. 优先从内存中获取Cookie
         if (!GLOBAL_TRACKS_COOKIE) {
-            // 2. 内存中没有，则尝试从持久化缓存中获取
             try {
                 const cachedCookie = $prefs.get(TRACKS_COOKIE_CACHE_KEY);
                 if (cachedCookie) {
@@ -92,7 +124,6 @@ async function getTracks(ext) {
             }
         }
 
-        // 3. 如果两种缓存都没有，才发起网络请求
         if (!GLOBAL_TRACKS_COOKIE) {
             log(" [详情页] 所有缓存未命中，正在从后端获取新Cookie...");
             try {
@@ -101,7 +132,6 @@ async function getTracks(ext) {
                 if (result.status === "success" && result.cookie) {
                     GLOBAL_TRACKS_COOKIE = result.cookie;
                     log("✅ [详情页] 成功获取到新Cookie。");
-                    // 将新Cookie存入持久化缓存
                     $prefs.set(TRACKS_COOKIE_CACHE_KEY, GLOBAL_TRACKS_COOKIE);
                 }
             } catch (cookieError) {
@@ -109,15 +139,13 @@ async function getTracks(ext) {
             }
         }
 
-        // 4. 使用最终获取到的Cookie，请求详情API
         const headers = { 
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 
-            'Cookie': GLOBAL_TRACKS_COOKIE || "", // 确保即使获取失败，也传递一个空字符串
+            'Cookie': GLOBAL_TRACKS_COOKIE || "",
             'Referer': appConfig.site 
         };
         const { data } = await $fetch.get(detailApiUrl, { headers });
 
-        // 5. 解析网盘资源
         const respstr = JSON.parse(data);
         if (respstr.hasOwnProperty('panlist')) {
             const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
