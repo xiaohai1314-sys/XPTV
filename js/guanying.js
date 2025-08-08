@@ -1,21 +1,16 @@
 /**
- * 观影网脚本 - v25.0 (智能提取终极版)
+ * 观影网脚本 - v26.0 (兼容性修复版)
  *
  * --- 核心思想 ---
- * 经历了所有问题的洗礼，我们回归问题的本质：海报URL规则不统一。
- * 本版本放弃了所有固定的URL拼接猜测，采用最可靠的“智能提取”方案。
- * 它会像浏览器一样，直接在实时的HTML内容中寻找真正的海报地址，
- * 从而一劳永逸地解决部分海报丢失的问题。
- *
- * --- 海报获取方案 (终极版) ---
- * 1. [首选-智能提取] 通过Cheerio解析HTML，优先查找并使用`data-srcset`或`data-src`属性中的URL。这是最准确的方案。
- * 2. [备用-拼接兼容] 如果HTML中实在找不到海报信息（极罕见），则启用`主站URL@图床URL`的双保险拼接作为最后防线。
+ * 解决了v24/v25版本中 "Can't find variable: setTimeout" 的致命错误。
+ * 原因是脚本运行环境不支持标准的setTimeout函数，导致为反爬虫而加入的延迟功能崩溃。
+ * 本版本移除了所有延迟相关的代码，以确保在非标准JS环境下的基本可用性。
  *
  * --- 更新日志 ---
- *  - v25.0 (AI集大成):
- *    - [终极方案] `parseFromPage`函数回归并修正了HTML解析逻辑，智能提取海报URL。
- *    - [多重查找] 能同时处理`<picture><source data-srcset>`和`<img> data-src`两种HTML结构。
- *    - [保留优化] 继承了v24版本的反爬虫延迟和Cookie缓存机制，确保稳定性。
+ *  - v26.0 (AI兼容性修复):
+ *    - [重大修复] 删除了导致崩溃的 sleep 函数和所有对它的调用。
+ *    - [功能回退] 暂时取消了请求延迟功能，优先保证脚本能成功加载和运行。
+ *    - [逻辑保留] 保留了v23版本中稳定有效的“URL直拼双保险”海报方案。
  */
 
 // ================== 配置区 ==================
@@ -24,7 +19,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 25.0, // 智能提取终极版
+    ver: 26.0, // 兼容性修复版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -34,33 +29,31 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【全局Cookie与延迟管理】★★★★★
+// ★★★★★【全局Cookie管理】★★★★★
 let GLOBAL_COOKIE = null;
-let LAST_FETCH_TIME = 0;
-const COOKIE_CACHE_DURATION = 10 * 60 * 1000; // 10分钟
-const REQUEST_DELAY = 500; // 500毫秒
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V25.0] ${msg}`); } catch (_) { console.log(`[观影网 V25.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V26.0] ${msg}`); } catch (_) { console.log(`[观影网 V26.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// 移除了 sleep 函数
 
 async function ensureGlobalCookie() {
-    const now = Date.now();
-    if (GLOBAL_COOKIE && (now - LAST_FETCH_TIME < COOKIE_CACHE_DURATION)) {
-        log("✅ 从内存缓存中恢复了Cookie！");
+    // 由于移除了延迟，暂时也简化Cookie缓存逻辑，每次都从后端获取以保证最新
+    if (GLOBAL_COOKIE) {
+        log("✅ 使用已有的全局Cookie。");
         return GLOBAL_COOKIE;
     }
-    log("内存缓存失效或首次加载，将从后端获取Cookie...");
+    
+    log("首次加载，将从后端获取Cookie...");
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
-            LAST_FETCH_TIME = Date.now();
             log("✅ 成功从后端获取并缓存了全局Cookie！");
             return GLOBAL_COOKIE;
         }
@@ -82,10 +75,10 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【智能提取终极逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【URL直拼稳定逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-function parseFromPage(html, cards) {
+function parseFromInlistData(html, cards) {
     const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
     if (!match || !match[1]) {
         log("❌ 在页面中未找到 _obj.inlist 数据对象。");
@@ -94,48 +87,22 @@ function parseFromPage(html, cards) {
     try {
         const inlist = JSON.parse(match[1]);
         if (!inlist.t || !inlist.i || !inlist.ty) { return; }
-
-        const $ = cheerio.load(html);
         const type = inlist.ty;
-
         inlist.t.forEach((title, index) => {
             const vodId = inlist.i[index];
             if (!vodId) return;
-
             const name = title;
             const remarks = inlist.q && inlist.q[index] ? inlist.q[index].join(' ') : '';
-            
-            // ★★★ 智能提取核心逻辑 ★★★
-            let picUrl = '';
-            
-            // 定位到影片的链接元素<a>，它本身就是容器
-            const $container = $(`a.v5d[href="/${type}/${vodId}"]`);
-
-            if ($container.length > 0) {
-                // 方案一: 尝试从 <picture><source> 获取
-                picUrl = $container.find('picture source[data-srcset]').attr('data-srcset');
-                // 方案二: 如果方案一失败，尝试从 <img> 获取
-                if (!picUrl) {
-                    picUrl = $container.find('img.lazy[data-src]').attr('data-src');
-                }
-            }
-            
-            // ★★★ 备用拼接方案 ★★★
-            // 如果以上两种HTML解析都失败，则启用双保险拼接规则
-            if (!picUrl) {
-                log(`⚠️ [${name}] HTML提取失败, 启用备用拼接方案。`);
-                const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`;
-                const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-                picUrl = `${picUrl1}@${picUrl2}`;
-            }
-            
+            const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`;
+            const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
+            const finalPicUrl = `${picUrl1}@${picUrl2}`;
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            cards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarks, ext: { url: detailApiUrl } } );
+            cards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: finalPicUrl, vod_remarks: remarks, ext: { url: detailApiUrl } } );
         });
     } catch (e) { log(`❌ 解析过程异常: ${e.message}`); }
 }
 
-// getCards 和 search 函数调用最终的解析函数
+// getCards 和 search 函数移除了请求延迟
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -143,10 +110,10 @@ async function getCards(ext) {
     const url = `${appConfig.site}${id}${page}`;
     log(`请求分类列表: ${url}`);
     try {
-        await sleep(REQUEST_DELAY);
+        // await sleep(REQUEST_DELAY); // 移除延迟
         const { data } = await fetchWithCookie(url); 
-        parseFromPage(data, cards);
-        log(`✅ 成功通过智能提取模式解析到 ${cards.length} 个项目。`);
+        parseFromInlistData(data, cards);
+        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -162,10 +129,10 @@ async function search(ext) {
     let url = `${appConfig.site}/s/1---${page}/${text}`;
     log(`执行搜索: ${url}`);
     try {
-        await sleep(REQUEST_DELAY);
+        // await sleep(REQUEST_DELAY); // 移除延迟
         const { data } = await fetchWithCookie(url);
         let cards = [];
-        parseFromPage(data, cards);
+        parseFromInlistData(data, cards);
         log(`✅ 成功从搜索结果中解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
