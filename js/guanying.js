@@ -1,27 +1,27 @@
 /**
- * 观影网脚本 - v18.0 (最终统一逻辑版)
+ * 观影网脚本 - v19.0 (数据源重构版)
  *
  * --- 核心思想 ---
- * 经过深入分析，确认了问题的根源在于 s.tutu.pm 图床资源不完整，
- * 以及 _obj.inlist 数据的局限性。本版本采用终极解决方案，统一所有逻辑。
+ * 经过分析确认，观影网已改为通过JavaScript对象 `_obj.inlist` 动态渲染页面。
+ * 旧的HTML解析方式 (`$('.v5d')`) 已完全失效。
+ * 本版本放弃HTML解析，直接从页面脚本中提取 `_obj.inlist` JSON数据，从根源上解决问题。
  *
  * --- 更新日志 ---
- *  - v18.0 (AI重构):
- *    - [重大重构] `getCards` 函数彻底放弃解析 `_obj.inlist`，因为它会导致部分海报丢失。
- *    - [逻辑统一] `getCards` 和 `search` 现在采用完全相同的、最可靠的逻辑：
- *      直接解析HTML页面中的影片卡片元素(.v5d)，确保数据完整性。
- *    - [双保险海报] 所有海报获取均采用“首选(data-srcset) + 备用(拼接)”的双重保险策略，
- *      确保在任何情况下都能最大可能地显示海报。
- *    - 此版本旨在一次性、一劳永逸地解决所有已知问题。
+ *  - v19.0 (AI重构):
+ *    - [重大重构] `getCards` 和 `search` 函数放弃Cheerio的HTML解析。
+ *    - [全新逻辑] 通过正则表达式直接从返回的HTML中捕获 `_obj.inlist` 的JSON字符串。
+ *    - [数据提取] 直接从解析后的 `_obj.inlist` 对象中提取影片标题、ID等信息。
+ *    - [海报修复] 放弃失效的 s.tutu.pm 图床，采用观影网官方的、可靠的海报拼接规则。
+ *    - [稳定性] 新逻辑不再受前端HTML结构变化影响，只要数据源 `_obj.inlist` 存在就有效。
  */
 
 // ================== 配置区 ==================
-const cheerio = createCheerio();
+const cheerio = createCheerio(); // 虽然主要逻辑不用，但可能某些地方仍需保留
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 18.0, // 全新版本号
+    ver: 19.0, // 全新版本号
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -33,12 +33,12 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v18_cookie_cache'; // 更新缓存键
+const COOKIE_CACHE_KEY = 'gying_v19_cookie_cache'; // 更新缓存键
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg   ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -80,41 +80,58 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终统一逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【全新数据源逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// 统一的影片卡片解析函数
-function parseMovieCards($, cards) {
-    $('.v5d').each((_, element) => {
-        const $element = $(element);
-        const name = $element.find('b').text().trim();
-        const remarks = $element.find('p').text().trim();
-        const path = $element.find('a').attr('href');
-        
-        if (!path) return;
-        const match = path.match(/\/([a-z]+)\/(\w+)/);
-        if (!match) return;
+// 新的核心解析函数
+function parseDataFromInlist(html, cards) {
+    // 1. 使用正则表达式从整个HTML文本中捕获 _obj.inlist 的内容
+    const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
+    if (!match || !match[1]) {
+        log("❌ 在页面中未找到 _obj.inlist 数据对象。");
+        return;
+    }
 
-        const type = match[1];
-        const vodId = match[2];
+    try {
+        // 2. 将捕获到的字符串解析为JSON对象
+        const inlist = JSON.parse(match[1]);
         
-        // 双保险海报获取逻辑
-        let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-        if (!picUrl) {
-            picUrl = `https://s.tutu.pm/img/${type}/${vodId}.webp`;
+        // 3. 检查必要的数据数组是否存在
+        if (!inlist.t || !inlist.i || !inlist.ty) {
+            log("❌ _obj.inlist 数据结构不完整。");
+            return;
         }
-        
-        const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-        
-        cards.push({
-            vod_id: detailApiUrl,
-            vod_name: name,
-            vod_pic: picUrl,
-            vod_remarks: remarks,
-            ext: { url: detailApiUrl },
-        } );
-    });
+
+        const type = inlist.ty; // 获取影片类型，如 'mv', 'tv'
+
+        // 4. 遍历数据并组装成卡片
+        inlist.t.forEach((title, index) => {
+            const vodId = inlist.i[index];
+            if (!vodId) return; // 如果没有ID，跳过
+
+            const name = title;
+            // 备注信息：尝试从 'q' 数组获取，如果没有则为空
+            const remarks = inlist.q && inlist.q[index] ? inlist.q[index].join(' ') : '';
+            
+            // ★★★ 修复后的海报URL拼接规则 ★★★
+            const picUrl = `${appConfig.site}img/${type}/${vodId}.webp`;
+            
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: picUrl,
+                vod_remarks: remarks,
+                ext: { url: detailApiUrl },
+            });
+        });
+
+    } catch (e) {
+        log(`❌ 解析 _obj.inlist JSON失败: ${e.message}`);
+    }
 }
+
 
 // 重构后的 getCards 函数
 async function getCards(ext) {
@@ -125,9 +142,8 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
     try {
         const { data } = await fetchWithCookie(url); 
-        const $ = cheerio.load(data);
-        parseMovieCards($, cards); // 调用统一的解析函数
-        log(`✅ 成功通过DOM解析到 ${cards.length} 个项目。`);
+        parseDataFromInlist(data, cards); // 调用新的解析函数
+        log(`✅ 成功通过数据源解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -145,9 +161,8 @@ async function search(ext) {
     log(`执行搜索: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
-        const $ = cheerio.load(data);
         let cards = [];
-        parseMovieCards($, cards); // 调用统一的解析函数
+        parseDataFromInlist(data, cards); // 调用新的解析函数
         log(`✅ 成功从搜索结果中解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
