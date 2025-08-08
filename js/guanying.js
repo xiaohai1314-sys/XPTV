@@ -1,14 +1,14 @@
 /**
- * 观影网脚本 - v17.4 (拆除闸门版)
+ * 观影网脚本 - v17.5 (通信兼容最终版)
  *
  * --- 核心思想 ---
- * 遵从用户指示，解决问题的关键在于移除脚本中过于严格的“闸门检查”。
- * 此前版本在找不到特定JS变量时会主动抛出错误，导致执行中断并显示失败提示。
+ * 修复了V17.4及之前版本中，因对后端Cookie服务连接失败的处理方式过于激进
+ * (在catch后重新throw错误)，导致整个脚本执行链崩溃的问题。
  *
- * 本版本彻底移除了 getCards 函数中所有主动 `throw new Error` 的检查点。
- * 即使网站结构发生微小变化导致数据解析失败，脚本也不会再主动报错，
- * 而是会静默处理，返回一个空列表，从而避免了因严格检查导致的执行失败。
- * 这使得脚本的容错能力和健壮性大大增强。
+ * 本版本将 ensureGlobalCookie 函数的错误处理机制完全恢复至与稳定可用的
+ * V17.0版本一致的模式。即：当连接后端失败时，只记录日志和弹出提示，
+ * 不再向上抛出错误，避免了整个应用的崩溃，显著提高了脚本的健壮性。
+ * 同时，保留了V17.4中对 getCards 函数的“闸门拆除”改造。
  */
 
 // ================== 配置区 ==================
@@ -18,7 +18,7 @@ const BACKEND_URL = 'http://192.168.10.111:5000/getCookie';
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: "17.4", // 版本号明确为“拆除闸门版”
+    ver: "17.5", // 版本号明确为“通信兼容最终版”
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -32,15 +32,18 @@ let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 
 // ================== 核心函数 ==================
-function log(msg  ) { try { $log(`[观影网 V17.4] ${msg}`); } catch (_) { console.log(`[观影网 V17.4] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V17.5] ${msg}`); } catch (_) { console.log(`[观影网 V17.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【ensureGlobalCookie - 已修复通信错误处理】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) { log("✅ 从本地缓存中恢复了Cookie！"); GLOBAL_COOKIE = cachedCookie; return GLOBAL_COOKIE; }
     } catch (e) { log(`⚠️ 读取本地缓存失败: ${e.message}`); }
+    
     log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
@@ -51,16 +54,22 @@ async function ensureGlobalCookie() {
             try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
             return GLOBAL_COOKIE;
         }
-        // 这里保留错误抛出，因为网络和后端问题是必须让用户知道的硬性故障
-        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
+        // 如果后端返回的不是success，只记录日志即可，不抛出错误
+        log(`❌ 从后端获取Cookie失败: ${result.message || '未知错误'}`);
+        $utils.toastError(`获取Cookie失败: ${result.message || '未知错误'}`, 4000);
+
     } catch (e) {
+        // 【关键修复】与V17.0保持一致，只记录日志和提示，不再向上抛出错误 `throw e;`
         log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
-        throw e;
     }
+    // 如果所有尝试都失败，返回null或undefined，让后续逻辑去处理
+    return null; 
 }
+
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
+    // 如果cookie获取失败，后续请求观影网时cookie就是null，这符合预期
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
@@ -68,9 +77,8 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【getCards 核心函数 - 已拆除闸门】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【getCards 核心函数 - 保留已拆除闸门版本】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
-
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -86,11 +94,9 @@ async function getCards(ext) {
             return $(script).html().includes('_obj.header');
         }).html();
 
-        // 【已拆除闸门】即使找不到script，也不再报错，而是让后续逻辑自然失败
         if (scriptContent) {
             const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
             
-            // 【已拆除闸门】即使匹配不到inlist，也不再报错
             if (inlistMatch && inlistMatch[1]) {
                 try {
                     const inlistData = JSON.parse(inlistMatch[1]);
@@ -108,7 +114,6 @@ async function getCards(ext) {
                         log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
                     }
                 } catch (parseError) {
-                    // 如果JSON解析失败，记录日志但不抛出错误中断执行
                     log(`❌ 解析inlist数据时发生错误: ${parseError.message}`);
                 }
             } else {
@@ -118,11 +123,9 @@ async function getCards(ext) {
             log("⚠️ 未能找到包含'_obj.header'的关键script标签，静默处理。");
         }
         
-        // 无论中间发生什么，最终都成功返回一个列表（可能是空的）
         return jsonify({ list: cards });
 
     } catch (e) {
-        // 这个catch现在只捕获网络请求等更严重的、非逻辑检查的错误
         log(`❌ 获取卡片列表时发生严重异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
@@ -130,7 +133,6 @@ async function getCards(ext) {
 }
 
 // ================== 其他函数保持原封不动 ==================
-
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
