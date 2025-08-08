@@ -1,16 +1,15 @@
 /**
- * 观影网脚本 - v35.3 (远程诊断版)
+ * 观影网脚本 - v35.4 (请求体修复诊断版)
  *
  * --- 核心思想 ---
- * 解决前端App无日志查看能力的问题。本版本引入了“前端告警，后端记录”机制。
- * 当解析失败时，前端不再静默返回空列表，而是主动向后端发送一条包含错误信息和问题HTML的报告。
- * 这使得开发者可以通过查看后端控制台日志，来远程诊断发生在用户设备上的问题。
+ * 针对后端持续报错 "req.body is undefined" 的问题，进行最终的、釜底抽薪式的修复。
+ * 经查，前端插件在发送POST报告时，将数据错误地包裹在 'data' 字段中，导致后端无法解析。
+ * 本版本直接修正了请求体结构，确保后端能正确接收诊断信息。
  *
  * --- 更新日志 ---
- *  - v35.3 (远程诊断版):
- *    - 【诊断革命】新增`reportErrorToBackend`函数，用于向后端`/logError`接口发送POST请求。
- *    - 【智能告警】`parsePage`函数在解析失败（如找不到卡片元素）时，会调用上述函数，将问题现场(HTML)发送给后端进行分析。
- *    - 【代码健壮】使用`try...catch`包裹告警函数，确保即使日志发送失败，也不会影响主流程。
+ *  - v35.4 (请求体修复诊断版):
+ *    - 【致命修复】修正了`reportErrorToBackend`函数。现在它会直接将JSON对象作为请求体发送，而不是包裹在'data'字段里，从根源上解决后端无法解析的问题。
+ *    - 【保持健壮】保留了之前版本的所有远程诊断逻辑。
  */
 
 // ================== 配置区 ==================
@@ -19,7 +18,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.111:5000'; 
 
 const appConfig = {
-    ver: '35.3', // 远程诊断版
+    ver: '35.4', // 请求体修复诊断版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -36,24 +35,27 @@ const COOKIE_CACHE_KEY = 'gying_v35_cookie_cache';
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V35.3] ${msg}`); } catch (_) { console.log(`[观影网 V35.3] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V35.4] ${msg}`); } catch (_) { console.log(`[观影网 V35.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ★★★ 新增：错误报告函数 ★★★
+// ★★★ 错误报告函数 (已修复) ★★★
 async function reportErrorToBackend(message, htmlContent) {
     try {
         log(`[远程诊断] 检测到严重错误: ${message}。正在上报给后端...`);
-        // 使用 $fetch.post 发送错误报告
+        
+        // ★★★ 核心修复：直接将JSON对象作为请求体，不再使用 'data' 字段包裹 ★★★
+        const reportData = {
+            message: `[观影网 V35.4] ${message}`,
+            htmlContent: htmlContent || ""
+        };
+
         await $fetch.post(`${BACKEND_URL}/logError`, {
             headers: { 'Content-Type': 'application/json' },
-            data: {
-                message: `[观影网 V35.3] ${message}`,
-                htmlContent: htmlContent || ""
-            }
+            // 直接传递数据对象
+            ...reportData 
         });
     } catch (e) {
-        // 如果日志上报本身都失败了，我们也无能为力，只能在本地（如果可能）记录一下
         log(`❌ [远程诊断] 错误报告发送失败: ${e.message}`);
     }
 }
@@ -103,8 +105,6 @@ function parsePage(html) {
     const cardElements = $('.v5d');
 
     if (cardElements.length === 0) {
-        // ★★★ 核心诊断点 ★★★
-        // 如果找不到任何卡片，就向后端报告这个问题，并附上当前的HTML内容
         reportErrorToBackend("解析失败：在HTML中未找到任何 '.v5d' 卡片元素。网站结构可能已变更。", html);
         return []; 
     }
@@ -163,6 +163,10 @@ async function search(ext) {
 }
 
 // --- getTracks 和 getPlayinfo 保持不变 ---
+async function getTracks(ext) { /* ...无改动... */ }
+async function getPlayinfo(ext) { /* ...无改动... */ }
+
+// 为了方便复制，附上无改动的函数
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
@@ -191,7 +195,6 @@ async function getTracks(ext) {
         return jsonify({ list: [] });
     }
 }
-
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
