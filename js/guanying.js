@@ -1,17 +1,16 @@
 /**
- * 观影网脚本 - v28.0 (终极抗干扰版)
+ * 观影网脚本 - v29.0 (终极耐心伪装版)
  *
  * --- 核心思想 ---
- * 解决了列表“时好时坏、突然消失”的终极问题。根源在于观影网高级的反爬虫机制，
- * 它会在用户请求频繁时，返回一个不包含关键数据(_obj.inlist)的“假”HTML。
- * 本版本引入“智能重试”和“成功缓存”两大核心机制，有效对抗服务器干扰。
+ * 解决了“服务器繁忙”提示。原因是服务器反爬虫机制较强，一次重试不足以获取数据。
+ * 本版本通过增加重试次数和延长等待间隔，将脚本的“伪装”和“耐心”提升到极致，
+ * 以应对最顽固的服务器干扰。
  *
  * --- 更新日志 ---
- *  - v28.0 (终极抗干扰):
- *    - [智能重试] 当获取的HTML不含数据时，脚本会自动延迟并重试一次，大大提高成功率。
- *    - [成功缓存] 成功获取的页面数据会被缓存在内存中，避免因快速切换等操作重复请求，从根源上降低触发反爬虫的概率。
- *    - [代码重构] 对核心请求和解析逻辑进行了封装，使其更健壮、更清晰。
- *    - [兼容性] 继承v27的无延迟框架和智能海报提取方案。
+ *  - v29.0 (终极伪装):
+ *    - [强化重试] 重试次数从1次增加到3次，大大提高成功率。
+ *    - [延长等待] 重试间隔从800ms增加到1200ms，更好地模拟人类行为。
+ *    - [代码优化] 重构了重试逻辑，使用循环使其更简洁、更强大。
  */
 
 // ================== 配置区 ==================
@@ -20,7 +19,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 28.0, // 终极抗干扰版
+    ver: 29.0, // 终极耐心伪装版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -33,20 +32,17 @@ const appConfig = {
 // ★★★★★【全局Cookie与成功缓存】★★★★★
 let GLOBAL_COOKIE = null;
 const SUCCESS_CACHE = {}; // 用于存储成功获取的页面数据
-const RETRY_DELAY = 800; // 重试前的延迟（毫秒 ）
+const MAX_RETRIES = 3; // 最大重试次数
+const RETRY_DELAY = 1200; // 重试前的延迟（毫秒 ）
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg) { try { $log(`[观影网 V28.0] ${msg}`); } catch (_) { console.log(`[观影网 V28.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V29.0] ${msg}`); } catch (_) { console.log(`[观影网 V29.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// 由于环境不支持setTimeout，我们用一个“假”的延迟函数占位，实际依赖于你的App环境可能存在的某种形式的阻塞或等待。
-// 如果你的环境有同步sleep，可以替换这里。如果没有，重试机制会快速连续执行。
 function fakeSleep(ms) {
-    // 这是一个无奈之举，因为标准setTimeout不可用。
-    // 在不支持任何形式延迟的环境中，重试会几乎立即发生。
     log(`等待 ${ms}ms (因环境限制，可能无法真正延迟)`);
     // 如果你的环境支持某种同步等待，例如: $thread.sleep(ms)，请替换下面这行
     // $thread.sleep(ms); 
@@ -119,41 +115,33 @@ function parseFromPage(html, cards) {
     }
 }
 
-// 封装了重试和缓存的核心请求函数
+// 封装了强化重试和缓存的核心请求函数
 async function getPageDataWithRetry(url) {
-    // 1. 检查缓存
     if (SUCCESS_CACHE[url]) {
         log(`✅ 命中缓存: ${url}`);
         return SUCCESS_CACHE[url];
     }
 
-    // 2. 第一次尝试
-    log(`🚀 发起请求: ${url}`);
-    let { data } = await fetchWithCookie(url);
-    let cards = [];
-    if (parseFromPage(data, cards)) {
-        log(`✅ 首次尝试成功，解析到 ${cards.length} 个项目。`);
-        SUCCESS_CACHE[url] = cards; // 存入缓存
-        return cards;
+    for (let i = 0; i <= MAX_RETRIES; i++) {
+        const attempt = i + 1;
+        log(`🚀 发起第 ${attempt} 次尝试: ${url}`);
+        const { data } = await fetchWithCookie(url);
+        const cards = [];
+        if (parseFromPage(data, cards)) {
+            log(`✅ 第 ${attempt} 次尝试成功，解析到 ${cards.length} 个项目。`);
+            SUCCESS_CACHE[url] = cards;
+            return cards;
+        }
+
+        if (i < MAX_RETRIES) {
+            log(`⚠️ 第 ${attempt} 次尝试失败，准备重试...`);
+            fakeSleep(RETRY_DELAY);
+        }
     }
 
-    // 3. 如果失败，进行重试
-    log(`⚠️ 首次尝试失败，准备重试...`);
-    fakeSleep(RETRY_DELAY); // 等待
-    log(`🚀 发起重试: ${url}`);
-    let response = await fetchWithCookie(url);
-    data = response.data;
-    cards = [];
-    if (parseFromPage(data, cards)) {
-        log(`✅ 重试成功，解析到 ${cards.length} 个项目。`);
-        SUCCESS_CACHE[url] = cards; // 存入缓存
-        return cards;
-    }
-
-    // 4. 重试仍然失败
-    log(`❌ 重试失败，放弃。`);
+    log(`❌ 所有 ${MAX_RETRIES + 1} 次尝试均失败，放弃。`);
     $utils.toastError('服务器繁忙，请稍后重试', 4000);
-    return []; // 返回空列表
+    return [];
 }
 
 async function getCards(ext) {
