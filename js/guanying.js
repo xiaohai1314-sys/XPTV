@@ -10,7 +10,7 @@
 
 // ================== 配置区 ==================
 const BACKEND_API_URL = 'http://192.168.10.111:5000/api/movies'; 
-const COOKIE_BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; // 为fetchWithCookie定义Cookie后端地址
+const COOKIE_BACKEND_URL = 'http://192.168.1.7:5000/getCookie'; // 为fetchWithCookie定义Cookie后端地址
 
 const appConfig = {
     ver: "45.1", // 网盘提取修复版
