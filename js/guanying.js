@@ -1,14 +1,14 @@
 /**
- * 观影网脚本 - v17.5 (通信兼容最终版)
+ * 观影网脚本 - v18.0 (全新解析引擎版)
  *
  * --- 核心思想 ---
- * 修复了V17.4及之前版本中，因对后端Cookie服务连接失败的处理方式过于激进
- * (在catch后重新throw错误)，导致整个脚本执行链崩溃的问题。
+ * 解决了V17.5版本能正常通信但无法获取列表的问题。根本原因在于，观影网
+ * 的页面结构已发生变更，不再使用 `_obj.inlist` 这个JS变量来承载列表数据。
  *
- * 本版本将 ensureGlobalCookie 函数的错误处理机制完全恢复至与稳定可用的
- * V17.0版本一致的模式。即：当连接后端失败时，只记录日志和弹出提示，
- * 不再向上抛出错误，避免了整个应用的崩溃，显著提高了脚本的健壮性。
- * 同时，保留了V17.4中对 getCards 函数的“闸门拆除”改造。
+ * 本版本对 getCards 函数的解析引擎进行了彻底重构，废弃了过时的JS变量
+ * 提取方案，改为采用与 search 函数类似的、更稳定健壮的HTML标签直接解析
+ * 方案。通过遍历页面中的 `.v5d` 元素来获取影片信息，从而适应网站的
+ * 最新结构，恢复列表的正常加载。
  */
 
 // ================== 配置区 ==================
@@ -18,7 +18,7 @@ const BACKEND_URL = 'http://192.168.10.111:5000/getCookie';
 const FALLBACK_PIC = 'https://img.zcool.cn/community/01a24459a334e0a801211d81792403.png';
 
 const appConfig = {
-    ver: "17.5", // 版本号明确为“通信兼容最终版”
+    ver: "18.0", // 版本号明确为“全新解析引擎版”
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -31,19 +31,16 @@ const appConfig = {
 let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 
-// ================== 核心函数 ==================
-function log(msg  ) { try { $log(`[观影网 V17.5] ${msg}`); } catch (_) { console.log(`[观影网 V17.5] ${msg}`); } }
+// ================== 核心函数(保持V17.5的稳定状态 ) ==================
+function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【ensureGlobalCookie - 已修复通信错误处理】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) { log("✅ 从本地缓存中恢复了Cookie！"); GLOBAL_COOKIE = cachedCookie; return GLOBAL_COOKIE; }
     } catch (e) { log(`⚠️ 读取本地缓存失败: ${e.message}`); }
-    
     log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
@@ -54,22 +51,16 @@ async function ensureGlobalCookie() {
             try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
             return GLOBAL_COOKIE;
         }
-        // 如果后端返回的不是success，只记录日志即可，不抛出错误
         log(`❌ 从后端获取Cookie失败: ${result.message || '未知错误'}`);
         $utils.toastError(`获取Cookie失败: ${result.message || '未知错误'}`, 4000);
-
     } catch (e) {
-        // 【关键修复】与V17.0保持一致，只记录日志和提示，不再向上抛出错误 `throw e;`
         log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
     }
-    // 如果所有尝试都失败，返回null或undefined，让后续逻辑去处理
     return null; 
 }
-
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
-    // 如果cookie获取失败，后续请求观影网时cookie就是null，这符合预期
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
@@ -77,7 +68,7 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【getCards 核心函数 - 保留已拆除闸门版本】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【getCards 核心函数 - 全新HTML解析引擎】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 async function getCards(ext) {
     ext = argsify(ext);
@@ -87,42 +78,48 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
 
     try {
-        const { data } = await fetchWithCookie(url); 
+        const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
 
-        const scriptContent = $('script').filter((_, script) => {
-            return $(script).html().includes('_obj.header');
-        }).html();
-
-        if (scriptContent) {
-            const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        // 【全新解析逻辑】像 search 函数一样，直接遍历页面上的 .v5d 元素
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
             
-            if (inlistMatch && inlistMatch[1]) {
-                try {
-                    const inlistData = JSON.parse(inlistMatch[1]);
-                    if (inlistData && inlistData.i) {
-                        inlistData.i.forEach((item, index) => {
-                            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-                            cards.push({
-                                vod_id: detailApiUrl,
-                                vod_name: inlistData.t[index],
-                                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
-                                vod_remarks: inlistData.g[index],
-                                ext: { url: detailApiUrl },
-                            } );
-                        });
-                        log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
-                    }
-                } catch (parseError) {
-                    log(`❌ 解析inlist数据时发生错误: ${parseError.message}`);
-                }
-            } else {
-                log("⚠️ 在script中未能匹配到'_obj.inlist'数据，静默处理。");
+            // 尝试从 <picture> 的 <source> 标签获取图片，这是更现代的网页做法
+            let imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+            // 如果找不到，尝试从 <img> 标签的 data-src 获取，作为备用
+            if (!imgUrl) {
+                imgUrl = $element.find('img').attr('data-src');
             }
+
+            const additionalInfo = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
+
+            if (!path || !name) return; // 如果没有链接或标题，则跳过
+
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return; // 如果链接格式不符，则跳过
+
+            const type = match[1];
+            const vodId = match[2];
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: imgUrl || FALLBACK_PIC, // 使用找到的图片，或备用图
+                vod_remarks: additionalInfo,
+                ext: { url: detailApiUrl },
+            });
+        });
+
+        if (cards.length > 0) {
+            log(`✅ 成功通过HTML解析引擎获取到 ${cards.length} 个项目。`);
         } else {
-            log("⚠️ 未能找到包含'_obj.header'的关键script标签，静默处理。");
+            log("⚠️ 未能在页面中解析到任何影片项目，请检查网站结构或Cookie是否有效。");
         }
-        
+
         return jsonify({ list: cards });
 
     } catch (e) {
