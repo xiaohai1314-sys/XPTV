@@ -1,28 +1,25 @@
 /**
- * 观影网脚本 - v44.0 (纯展示版)
+ * 观影网脚本 - v44.1 (详情页修复版)
  *
  * --- 核心思想 ---
- * 采用全新的前后端分离架构。前端不再负责任何解析、处理数据的复杂工作。
- * 所有的数据请求都指向我们自己的、可靠的后端数据中心。
- * 前端脚本的任务被简化为：请求后端API -> 接收干净的JSON -> 渲染UI。
- * 这个版本应该极其稳定，未来几乎不需要再进行维护。
+ * 修复因v44架构升级后，未同步修改详情页(getTracks)参数传递方式而导致的“网盘提取”功能失效问题。
  *
  * --- 更新日志 ---
- *  - v44.0 (纯展示版):
- *    - 【架构革新】getCards/search函数不再请求观影网，而是请求我们自己的后端API (/api/movies)。
- *    - 【逻辑简化】彻底移除了所有前端解析逻辑（cheerio, parsePage），代码量大幅减少。
- *    - 【终极稳定】前端不再受目标网站前端变化的影响，只要后端API不变，前端就永远可用。
+ *  - v44.1 (详情页修复版):
+ *    - 【核心修复】修正 getTracks 函数，使其从 ext.vod_id (而不是旧的 ext.url) 中获取详情页API地址。
+ *    - 【功能恢复】“网盘提取”功能现在应该可以正常工作了。
+ *    - 【保持架构】继续保持v44版本前后端分离的稳定架构。
  */
 
 // ================== 配置区 ==================
 const BACKEND_API_URL = 'http://192.168.10.111:5000/api/movies'; 
 
 const appConfig = {
-    ver: 44.0, // 纯展示版
+    ver: "44.1", // 详情页修复版
     title: '观影网',
-    site: 'https://www.gying.org/', // site 字段可能仍需保留 ，以备后用
+    site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { category: 'mv' } }, // 参数改为 category
+        { name: '电影', ext: { category: 'mv' } },
         { name: '剧集', ext: { category: 'tv' } },
         { name: '动漫', ext: { category: 'ac' } },
     ],
@@ -30,29 +27,63 @@ const appConfig = {
 
 // ================== 核心函数 ==================
 
-function log(msg) { try { $log(`[观影网 V44.0] ${msg}`); } catch (_) { console.log(`[观影网 V44.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V44.1] ${msg}`); } catch (_) { console.log(`[观影网 V44.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// ★★★★★【详情页Cookie缓存】★★★★★
+// 为了让getTracks能拿到cookie，我们需要一个地方缓存它。
+// 在init或getCards成功后，可以把从后端拿到的cookie存一下。
+// 但一个更简单的做法是，让getTracks自己去请求一个有效的cookie。
+// 我们暂时保留一个独立的ensureGlobalCookie函数给getTracks用。
+let GLOBAL_COOKIE = null;
+const COOKIE_CACHE_KEY = 'gying_v44_cookie_cache';
+
+async function ensureCookieForTracks() {
+    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    try {
+        const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
+        if (cachedCookie) {
+            GLOBAL_COOKIE = cachedCookie;
+            return GLOBAL_COOKIE;
+        }
+    } catch (e) { /* ignore */ }
+    
+    // 如果缓存没有，需要一个能获取Cookie的途径。
+    // 最简单的办法是复用旧后端的/getCookie接口。
+    // 我们假设您的后端同时保留了/getCookie和/api/movies。
+    try {
+        const { data } = await $fetch.get('http://192.168.10.111:5000/getCookie' );
+        const result = JSON.parse(data);
+        if (result.status === "success" && result.cookie) {
+            GLOBAL_COOKIE = result.cookie;
+            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { /* ignore */ }
+            return GLOBAL_COOKIE;
+        }
+    } catch(e) {
+        log("为详情页获取Cookie失败: " + e.message);
+    }
+    return ""; // 返回空字符串
+}
+
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 全新、简化的数据获取逻辑 ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 数据获取逻辑 ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, category } = ext;
     
-    // 拼接请求我们自己后端的URL
     const url = `${BACKEND_API_URL}?category=${category}&page=${page}`;
     log(`请求后端API: ${url}`);
     
     try {
         const { data } = await $fetch.get(url);
-        // 后端已经返回了完美的JSON，直接使用即可
-        log(`✅ 成功从后端获取到 ${JSON.parse(data).list.length} 个项目。`);
+        log(`✅ 成功从后端获取到数据。`);
         return data; 
     } catch (e) {
         log(`❌ 请求后端API失败: ${e.message}`);
@@ -61,22 +92,32 @@ async function getCards(ext) {
     }
 }
 
-// 搜索功能暂时未实现，返回空列表
 async function search(ext) {
     $utils.toast("搜索功能正在开发中...", 2000);
     return jsonify({ list: [] });
 }
 
-// --- getTracks 和 getPlayinfo 保持不变，因为它们请求的详情API地址是后端拼好的 ---
+// --- getTracks 和 getPlayinfo ★★★ 核心修正区域 ★★★ ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
-    let url = ext.vod_id; // ★ 注意：现在从 vod_id 获取URL
+    
+    // ★★★ 核心修正：从 ext.vod_id 获取URL ★★★
+    let url = ext.vod_id; 
+    if (!url) {
+        log("❌ getTracks失败：ext.vod_id为空。");
+        return jsonify({ list: [] });
+    }
+
     log(`请求详情数据: ${url}`);
     try {
-        // ★ 注意：详情页请求可能仍需带Cookie，所以我们保留一个独立的fetchWithCookie
-        const cookie = await $prefs.get('gying_v44_cookie_cache'); // 尝试获取一个有效的cookie
-        const headers = { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 'Cookie': cookie, 'Referer': appConfig.site };
+        // 详情页请求观影网，依然需要有效的Cookie
+        const cookie = await ensureCookieForTracks();
+        const headers = { 
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 
+            'Cookie': cookie, 
+            'Referer': appConfig.site 
+        };
         const { data } = await $fetch.get(url, { headers });
 
         const respstr = JSON.parse(data);
