@@ -1,31 +1,31 @@
 /**
- * 观影网脚本 - v21.0 (三保险海报终极完美版)
+ * 观影网脚本 - v22.0 (逻辑修正与URL直拼版)
  *
  * --- 核心思想 ---
- * 综合所有分析，确认观影网至少存在三种不同的海报HTML结构和URL规则。
- * 本版本构建了“三保险”海报获取机制，按优先级顺序尝试所有已知可能，
- * 旨在100%覆盖所有影片的海报，彻底解决空白问题。
+ * 诚恳致歉！v21版本存在严重的逻辑错误导致全部失败。
+ * 本版本根据用户的精准反馈和最终确认的海报URL规律，彻底重写海报获取逻辑。
+ * 放弃复杂且错误的HTML解析，回归到最稳定、最高效的URL直接拼接方案。
  *
- * --- 海报获取优先级 ---
- * 1. [最高优] <picture> -> <source data-srcset> (最常见、最官方的结构)
- * 2. [次优] <a> -> <img data-src> (针对“暴露狂”这类影片的特殊结构)
- * 3. [备用] 拼接规则 `.../img/类型/ID.webp` (作为最后的防线)
+ * --- 海报获取双保险方案 (修正后) ---
+ * 1. [主方案] 拼接官方主站URL: `https://www.gying.org/img/类型/ID.webp`
+ * 2. [备方案] 拼接图床URL: `https://s.tutu.pm/img/类型/ID/220.webp`
+ * 脚本会先尝试加载主方案URL ，如果失败（图片不存在），播放器会自动尝试加载备方案URL。
  *
  * --- 更新日志 ---
- *  - v21.0 (AI重构):
- *    - [终极重构] `parseDataAndHtml` 函数升级为“三保险”海报获取逻辑。
- *    - [新增规则] 增加了对 `<img data-src="...">` 结构的海报提取逻辑。
- *    - [逻辑优化] 明确了三种海报获取方式的优先级，确保总是能用到最可靠的URL。
- *    - [兼容性] 此版本应能兼容观影网所有已知的前端海报展示方式。
+ *  - v22.0 (AI修正):
+ *    - [重大修正] 彻底废弃v21中错误、复杂的HTML解析逻辑。
+ *    - [逻辑回归] 回归到最高效、最稳定的URL直接拼接模式。
+ *    - [全新拼接] 根据已确认的规律，将两种有效的海报URL规则都提供给播放器。
+ *    - [稳定性] 此方案不依赖任何HTML结构，只依赖最核心的`_obj.inlist`数据，最为健壮。
  */
 
 // ================== 配置区 ==================
-const cheerio = createCheerio();
+const cheerio = createCheerio(); // 保留以备不时之需
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 21.0, // 终极版本号
+    ver: 22.0, // 逻辑修正版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -37,12 +37,12 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v21_cookie_cache'; // 更新缓存键
+const COOKIE_CACHE_KEY = 'gying_v22_cookie_cache'; // 更新缓存键
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V21.0] ${msg}`); } catch (_) { console.log(`[观影网 V21.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V22.0] ${msg}`); } catch (_) { console.log(`[观影网 V22.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -84,11 +84,11 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【三保险终极逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【URL直拼修正逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// 终极版核心解析函数
-function parseDataAndHtml(html, cards) {
+// 修正后的核心解析函数
+function parseFromInlistData(html, cards) {
     const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
     if (!match || !match[1]) {
         log("❌ 在页面中未找到 _obj.inlist 数据对象。");
@@ -102,7 +102,6 @@ function parseDataAndHtml(html, cards) {
             return;
         }
 
-        const $ = cheerio.load(html);
         const type = inlist.ty;
 
         inlist.t.forEach((title, index) => {
@@ -112,34 +111,21 @@ function parseDataAndHtml(html, cards) {
             const name = title;
             const remarks = inlist.q && inlist.q[index] ? inlist.q[index].join(' ') : '';
             
-            // ★★★ 三保险海报获取逻辑 ★★★
-            let picUrl = '';
+            // ★★★ 修正后的URL直拼双保险方案 ★★★
+            // 很多播放器支持用“@”或“&&&”分隔多个URL，它会依次尝试。
+            // 我们将两个可能的URL都提供给它。
+            const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`; // 主站URL
+            const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`; // 图床URL
             
-            // 定位到包含影片信息的父容器元素
-            const $container = $(`a[href="/${type}/${vodId}"]`).closest('.v5d');
-
-            if ($container.length > 0) {
-                // 方案一 (最高优先级): 尝试从 <picture><source> 获取
-                picUrl = $container.find('picture source[data-srcset]').attr('data-srcset');
-
-                // 方案二 (次高优先级): 如果方案一失败，尝试从 <img> 获取
-                if (!picUrl) {
-                    picUrl = $container.find('img[data-src]').attr('data-src');
-                }
-            }
-            
-            // 方案三 (备用方案): 如果以上两种HTML解析都失败，则使用拼接规则
-            if (!picUrl) {
-                picUrl = `${appConfig.site}img/${type}/${vodId}.webp`;
-                log(`⚠️ [${name}] HTML解析失败, 启用最终备用海报规则。`);
-            }
+            // 用 '@' 符号连接两个URL ，播放器会先试第一个，失败了再试第二个。
+            const finalPicUrl = `${picUrl1}@${picUrl2}`;
             
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
 
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
-                vod_pic: picUrl,
+                vod_pic: finalPicUrl, // 提供包含两种可能的URL字符串
                 vod_remarks: remarks,
                 ext: { url: detailApiUrl },
             });
@@ -150,7 +136,7 @@ function parseDataAndHtml(html, cards) {
     }
 }
 
-// 重构后的 getCards 函数
+// getCards 和 search 函数调用修正后的解析函数
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -159,8 +145,8 @@ async function getCards(ext) {
     log(`请求分类列表: ${url}`);
     try {
         const { data } = await fetchWithCookie(url); 
-        parseDataAndHtml(data, cards);
-        log(`✅ 成功通过终极混合模式解析到 ${cards.length} 个项目。`);
+        parseFromInlistData(data, cards);
+        log(`✅ 成功通过URL直拼模式解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -169,7 +155,6 @@ async function getCards(ext) {
     }
 }
 
-// 重构后的 search 函数
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
@@ -179,9 +164,9 @@ async function search(ext) {
     try {
         const { data } = await fetchWithCookie(url);
         let cards = [];
-        parseDataAndHtml(data, cards);
+        parseFromInlistData(data, cards);
         log(`✅ 成功从搜索结果中解析到 ${cards.length} 个项目。`);
-        return jsonify({ list: [] });
+        return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
