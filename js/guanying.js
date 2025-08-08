@@ -1,24 +1,26 @@
 /**
- * 观影网脚本 - v35.4 (请求体修复诊断版)
+ * 观影网脚本 - v37.0 (JS解析版)
  *
  * --- 核心思想 ---
- * 针对后端持续报错 "req.body is undefined" 的问题，进行最终的、釜底抽薪式的修复。
- * 经查，前端插件在发送POST报告时，将数据错误地包裹在 'data' 字段中，导致后端无法解析。
- * 本版本直接修正了请求体结构，确保后端能正确接收诊断信息。
+ * 基于用户提供的真实网页源代码，确认了网站列表页是通过JavaScript动态生成。
+ * 传统的HTML解析方式因此失效。本版本革命性地放弃HTML解析，转而直接从页面内联的
+ * <script>标签中提取并解析包含所有列表数据的JavaScript对象（_obj.inlist）。
+ * 这种方法精准、高效，且能完全避免因网站HTML结构变更导致的解析失败。
  *
  * --- 更新日志 ---
- *  - v35.4 (请求体修复诊断版):
- *    - 【致命修复】修正了`reportErrorToBackend`函数。现在它会直接将JSON对象作为请求体发送，而不是包裹在'data'字段里，从根源上解决后端无法解析的问题。
- *    - 【保持健壮】保留了之前版本的所有远程诊断逻辑。
+ *  - v37.0 (JS解析版):
+ *    - 【核心重构】`parsePage`函数完全重写，不再使用Cheerio解析HTML元素。
+ *    - 【精准提取】通过正则表达式从<script>标签中定位并提取`_obj.inlist`的JSON字符串。
+ *    - 【数据解析】直接将提取到的JSON字符串转换为JavaScript对象，并遍历其中的数据数组来构建卡片列表。
+ *    - 【稳定可靠】此方法直达数据源，不再受制于动态变化的HTML class name，是目前最稳定可靠的方案。
  */
 
 // ================== 配置区 ==================
-const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000'; 
 
 const appConfig = {
-    ver: '35.4', // 请求体修复诊断版
+    ver: '37.0', // JS解析版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -30,35 +32,14 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v35_cookie_cache';
+const COOKIE_CACHE_KEY = 'gying_v37_cookie_cache';
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V35.4] ${msg}`); } catch (_) { console.log(`[观影网 V35.4] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V37.0] ${msg}`); } catch (_) { console.log(`[观影网 V37.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-
-// ★★★ 错误报告函数 (已修复) ★★★
-async function reportErrorToBackend(message, htmlContent) {
-    try {
-        log(`[远程诊断] 检测到严重错误: ${message}。正在上报给后端...`);
-        
-        // ★★★ 核心修复：直接将JSON对象作为请求体，不再使用 'data' 字段包裹 ★★★
-        const reportData = {
-            message: `[观影网 V35.4] ${message}`,
-            htmlContent: htmlContent || ""
-        };
-
-        await $fetch.post(`${BACKEND_URL}/logError`, {
-            headers: { 'Content-Type': 'application/json' },
-            // 直接传递数据对象
-            ...reportData 
-        });
-    } catch (e) {
-        log(`❌ [远程诊断] 错误报告发送失败: ${e.message}`);
-    }
-}
 
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
@@ -91,59 +72,70 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终的健壮解析逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【全新JS解析逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-function parsePage(html) {
-    if (!html || html.length < 200) {
-        reportErrorToBackend("传入的HTML无效或过短", `HTML长度: ${html ? html.length : 'null'}`);
-        return [];
-    }
-
-    const $ = cheerio.load(html);
+function parsePage(html, pageType) {
     const cards = [];
-    const cardElements = $('.v5d');
+    try {
+        // 1. 使用正则表达式从整个HTML文本中匹配 `_obj.inlist={...};` 这部分内容
+        const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!match || !match[1]) {
+            throw new Error("在HTML中未找到 _obj.inlist 数据对象。");
+        }
+        
+        // 2. 将匹配到的字符串解析为JSON对象
+        const inlistData = JSON.parse(match[1]);
 
-    if (cardElements.length === 0) {
-        reportErrorToBackend("解析失败：在HTML中未找到任何 '.v5d' 卡片元素。网站结构可能已变更。", html);
-        return []; 
+        // 3. 检查数据结构是否符合预期
+        if (!inlistData || !inlistData.t || !inlistData.i) {
+            throw new Error("解析出的 _obj.inlist 对象格式不正确。");
+        }
+
+        log(`✅ 成功提取并解析 _obj.inlist，共包含 ${inlistData.t.length} 个项目。`);
+
+        // 4. 遍历数据数组，构建卡片列表
+        for (let i = 0; i < inlistData.t.length; i++) {
+            const name = inlistData.t[i];
+            const vodId = inlistData.i[i];
+            
+            // 备注信息由年份和评分组成
+            const year = (inlistData.a[i] && inlistData.a[i][0]) ? inlistData.a[i][0] : '';
+            const score = inlistData.d[i] ? `评分:${inlistData.d[i]}` : '';
+            const remarks = [year, score].filter(Boolean).join(' | ');
+
+            cards.push({
+                vod_id: `${appConfig.site}res/downurl/${pageType}/${vodId}`,
+                vod_name: name,
+                vod_pic: `${BACKEND_URL}/getPoster?type=${pageType}&vodId=${vodId}`, // 直接使用后端代理获取海报
+                vod_remarks: remarks,
+                ext: { url: `${appConfig.site}res/downurl/${pageType}/${vodId}` },
+            });
+        }
+    } catch (e) {
+        log(`❌ 解析JS数据时发生错误: ${e.message}`);
+        // 如果解析失败，返回一个错误提示卡片
+        return [{
+            vod_id: 'error_card',
+            vod_name: '列表加载失败',
+            vod_pic: 'https://img.zcool.cn/community/01a79355434ab70000019ae97c8252.jpg@1280w_1l_2o_100sh.jpg',
+            vod_remarks: `解析脚本错误: ${e.message}`,
+        }];
     }
-
-    cardElements.each((_, element) => {
-        const $element = $(element);
-        const name = $element.find('b').text().trim();
-        const path = $element.find('a').attr('href');
-        if (!name || !path) return;
-
-        const match = path.match(/\/([a-z]+)\/(\w+)/);
-        if (!match) return;
-        const type = match[1];
-        const vodId = match[2];
-
-        let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-        if (!picUrl) picUrl = $element.find('img.lazy[data-src]').attr('data-src');
-        if (!picUrl) picUrl = `${BACKEND_URL}/getPoster?type=${type}&vodId=${vodId}`;
-
-        cards.push({
-            vod_id: `${appConfig.site}res/downurl/${type}/${vodId}`,
-            vod_name: name,
-            vod_pic: picUrl,
-            vod_remarks: $element.find('p').text().trim(),
-            ext: { url: `${appConfig.site}res/downurl/${type}/${vodId}` },
-        });
-    });
+    
     return cards;
 }
 
-async function getCards(ext) {
+async function getCards(ext ) {
     ext = argsify(ext);
+    const pageType = ext.id.split('?')[0]; // 从 'mv?page=' 中提取出 'mv'
     const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
     try {
         const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data);
+        const cards = parsePage(data, pageType);
         return jsonify({ list: cards });
     } catch (e) {
-        reportErrorToBackend(`getCards函数发生网络或上层异常: ${e.message}`, `请求的URL: ${url}`);
+        log(`❌ getCards函数发生网络异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
@@ -154,17 +146,19 @@ async function search(ext) {
     const url = `${appConfig.site}/s/1---${ext.page || 1}/${encodeURIComponent(ext.text)}`;
     try {
         const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data);
+        // 注意：搜索结果页的类型可能是混合的，这里我们暂时假定它返回的ID可以直接用
+        // 搜索页的解析可能需要单独适配，但我们先用列表页的逻辑
+        const cards = parsePage(data, 'mv'); // 搜索页默认类型为'mv'，可能需要调整
         return jsonify({ list: cards });
     } catch (e) {
-        reportErrorToBackend(`search函数发生网络或上层异常: ${e.message}`, `请求的URL: ${url}`);
+        log(`❌ search函数发生网络异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
 // --- getTracks 和 getPlayinfo 保持不变 ---
-async function getTracks(ext) { /* ...无改动... */ }
-async function getPlayinfo(ext) { /* ...无改动... */ }
+async function getTracks(ext) { /* ...代码省略，与之前版本相同... */ }
+async function getPlayinfo(ext) { /* ...代码省略，与之前版本相同... */ }
 
 // 为了方便复制，附上无改动的函数
 async function getTracks(ext) {
@@ -191,7 +185,6 @@ async function getTracks(ext) {
         }
         return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
-        reportErrorToBackend(`getTracks函数发生异常: ${e.message}`, `请求的URL: ${url}`);
         return jsonify({ list: [] });
     }
 }
