@@ -1,225 +1,84 @@
 /**
- * 观影网脚本 - v43.0 (数据合并最终版)
+ * 观影网脚本 - v44.0 (纯展示版)
  *
  * --- 核心思想 ---
- * 最终确认：页面返回的是一个包含多种数据格式的“混合体”，且页面JS会在短时间内“自毁”内容。
- * v42的“择一返回”逻辑会导致数据不全。
- * 
- * 本最终版采用“数据合并”策略：
- * 1. 不再择一返回，而是同时执行所有已知的解析路径（_obj.inlist, <li>, .v5d）。
- * 2. 将从所有路径中搜刮到的数据，全部汇集到一个总的数组中。
- * 3. 对汇总后的数据进行去重，确保每个影片只出现一次。
- * 这种“三路并进，统一汇总”的方案，旨在页面自毁前，将其所有角落的数据搜刮干净，从根本上解决“不全”和“变空”的问题。
+ * 采用全新的前后端分离架构。前端不再负责任何解析、处理数据的复杂工作。
+ * 所有的数据请求都指向我们自己的、可靠的后端数据中心。
+ * 前端脚本的任务被简化为：请求后端API -> 接收干净的JSON -> 渲染UI。
+ * 这个版本应该极其稳定，未来几乎不需要再进行维护。
  *
  * --- 更新日志 ---
- *  - v43.0 (数据合并最终版):
- *    - 【核心重构】parsePage函数采用“数据合并”逻辑，同时执行所有解析路径。
- *    - 【数据汇总】将从不同路径解析到的结果全部添加到一个主数组中。
- *    - 【智能去重】在最后返回结果前，根据影片ID进行去重，保证列表干净、不重复。
- *    - 【终极形态】这应该是能应对该网站复杂、善变前端的最终解决方案。
+ *  - v44.0 (纯展示版):
+ *    - 【架构革新】getCards/search函数不再请求观影网，而是请求我们自己的后端API (/api/movies)。
+ *    - 【逻辑简化】彻底移除了所有前端解析逻辑（cheerio, parsePage），代码量大幅减少。
+ *    - 【终极稳定】前端不再受目标网站前端变化的影响，只要后端API不变，前端就永远可用。
  */
 
 // ================== 配置区 ==================
-const cheerio = createCheerio();
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
+const BACKEND_API_URL = 'http://192.168.10.111:5000/api/movies'; 
 
 const appConfig = {
-    ver: 43.0, // 数据合并最终版
+    ver: 44.0, // 纯展示版
     title: '观影网',
-    site: 'https://www.gying.org/',
+    site: 'https://www.gying.org/', // site 字段可能仍需保留 ，以备后用
     tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
-        { name: '剧集', ext: { id: 'tv?page=' } },
-        { name: '动漫', ext: { id: 'ac?page=' } },
+        { name: '电影', ext: { category: 'mv' } }, // 参数改为 category
+        { name: '剧集', ext: { category: 'tv' } },
+        { name: '动漫', ext: { category: 'ac' } },
     ],
 };
 
-// ★★★★★【全局Cookie缓存】★★★★★
-let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v43_cookie_cache';
-// ★★★★★★★★★★★★★★★★★★★★★★★
+// ================== 核心函数 ==================
 
-// ================== 核心函数 (通信部分原封不动 ) ==================
-
-function log(msg) { try { $log(`[观影网 V43.0] ${msg}`); } catch (_) { console.log(`[观影网 V43.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V44.0] ${msg}`); } catch (_) { console.log(`[观影网 V44.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-
-async function ensureGlobalCookie() {
-    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
-    try {
-        const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
-        if (cachedCookie) {
-            log("✅ 从本地缓存中恢复了Cookie！");
-            GLOBAL_COOKIE = cachedCookie;
-            return GLOBAL_COOKIE;
-        }
-    } catch (e) { log(`⚠️ 读取本地缓存失败 (可能是冷启动): ${e.message}`); }
-    log("缓存未命中，正在从后端获取...");
-    try {
-        const response = await $fetch.get(BACKEND_URL);
-        const result = JSON.parse(response.data);
-        if (result.status === "success" && result.cookie) {
-            GLOBAL_COOKIE = result.cookie;
-            log("✅ 成功从后端获取并缓存了全局Cookie！");
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
-            return GLOBAL_COOKIE;
-        }
-        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
-    } catch (e) {
-        log(`❌ 网络请求后端失败: ${e.message}`);
-        $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
-        throw e;
-    }
-}
-
-async function fetchWithCookie(url, options = {}) {
-    const cookie = await ensureGlobalCookie();
-    const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
-    return $fetch.get(url, { ...options, headers });
-}
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 终极解析函数 ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 全新、简化的数据获取逻辑 ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
-
-function parsePage(html) {
-    let finalCards = [];
-
-    // --- 解析路径1：搜刮 _obj.inlist 数据 ---
-    try {
-        const scriptContentMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (scriptContentMatch && scriptContentMatch[1]) {
-            const inlistData = JSON.parse(scriptContentMatch[1]);
-            if (inlistData.t && inlistData.i) {
-                const vodType = inlistData.ty;
-                inlistData.t.forEach((name, index) => {
-                    const vodId = inlistData.i[index];
-                    if (!vodId) return;
-                    const detailApiUrl = `${appConfig.site}res/downurl/${vodType}/${vodId}`;
-                    const picUrl = `${appConfig.site}img/${vodType}/${vodId}.webp@https://s.tutu.pm/img/${vodType}/${vodId}/220.webp@https://s.tutu.pm/img/${vodType}/${vodId}.webp`;
-                    const remarks = inlistData.q && inlistData.q[index] ? inlistData.q[index].join(' ' ) : '';
-                    finalCards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarks, ext: { url: detailApiUrl } });
-                });
-                log(`路径1 (_obj.inlist) 搜刮到 ${finalCards.length} 个项目。`);
-            }
-        }
-    } catch (e) { log(`路径1解析异常: ${e.message}`); }
-
-    // --- 解析路径2：搜刮 HTML <li> 元素数据 ---
-    try {
-        const $ = cheerio.load(html);
-        let count = 0;
-        $('ul.content-list > li').each((_, element) => {
-            const $li = $(element);
-            const $anchor = $li.find('a').first();
-            const path = $anchor.attr('href');
-            const name = $anchor.attr('title');
-            const $image = $li.find('img.lazy');
-            const picUrl = $image.attr('data-src');
-            const remarksText = $li.find('.li-bottom').text().trim();
-            if (!path || !name || !picUrl) return;
-            const match = path.match(/\/([a-z]+)\/(\w+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            finalCards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarksText, ext: { url: detailApiUrl } });
-            count++;
-        });
-        log(`路径2 (HTML <li>) 搜刮到 ${count} 个项目。`);
-    } catch (e) { log(`路径2解析异常: ${e.message}`); }
-
-    // --- 解析路径3：搜刮 .v5d 元素数据 (兼容旧版) ---
-    try {
-        const $ = cheerio.load(html);
-        let count = 0;
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const remarks = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-            const match = path.match(/\/([a-z]+)\/(\w+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
-            let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset') || $element.find('img.lazy[data-src]').attr('data-src');
-            if (!picUrl) {
-                picUrl = `${appConfig.site}img/${type}/${vodId}.webp@https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-            }
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            finalCards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarks, ext: { url: detailApiUrl } } );
-            count++;
-        });
-        log(`路径3 (.v5d) 搜刮到 ${count} 个项目。`);
-    } catch (e) { log(`路径3解析异常: ${e.message}`); }
-
-    // --- 最后去重 ---
-    if (finalCards.length === 0) {
-        log("❌ 所有路径均未搜刮到任何数据。");
-        return [];
-    }
-    
-    const uniqueCards = [];
-    const seenIds = new Set();
-    for (const card of finalCards) {
-        if (!seenIds.has(card.vod_id)) {
-            seenIds.add(card.vod_id);
-            uniqueCards.push(card);
-        }
-    }
-    
-    log(`✅ 数据汇总完成，共 ${finalCards.length} 个项目，去重后剩 ${uniqueCards.length} 个。`);
-    return uniqueCards;
-}
-
 
 async function getCards(ext) {
     ext = argsify(ext);
-    const { page = 1, id } = ext;
-    const url = `${appConfig.site}${id}${page}`;
-    log(`请求分类列表: ${url}`);
+    const { page = 1, category } = ext;
+    
+    // 拼接请求我们自己后端的URL
+    const url = `${BACKEND_API_URL}?category=${category}&page=${page}`;
+    log(`请求后端API: ${url}`);
+    
     try {
-        const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data);
-        return jsonify({ list: cards });
+        const { data } = await $fetch.get(url);
+        // 后端已经返回了完美的JSON，直接使用即可
+        log(`✅ 成功从后端获取到 ${JSON.parse(data).list.length} 个项目。`);
+        return data; 
     } catch (e) {
-        log(`❌ 获取卡片列表异常: ${e.message}`);
-        // 在这种复杂情况下，即使出错也可能需要一个空的toast
-        // $utils.toastError(`加载失败: ${e.message}`, 4000);
+        log(`❌ 请求后端API失败: ${e.message}`);
+        $utils.toastError(`加载失败: 无法连接数据中心`, 4000);
         return jsonify({ list: [] });
     }
 }
 
+// 搜索功能暂时未实现，返回空列表
 async function search(ext) {
-    ext = argsify(ext);
-    const text = encodeURIComponent(ext.text);
-    const page = ext.page || 1;
-    const url = `${appConfig.site}/s/1---${page}/${text}`;
-    log(`请求搜索页: ${url}`);
-    try {
-        const { data } = await fetchWithCookie(url);
-        const cards = parsePage(data);
-        return jsonify({ list: cards });
-    } catch (e) {
-        log(`❌ 搜索异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
+    $utils.toast("搜索功能正在开发中...", 2000);
+    return jsonify({ list: [] });
 }
 
-// --- getTracks 和 getPlayinfo 保持不变 ---
+// --- getTracks 和 getPlayinfo 保持不变，因为它们请求的详情API地址是后端拼好的 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
-    let url = ext.url; 
+    let url = ext.vod_id; // ★ 注意：现在从 vod_id 获取URL
     log(`请求详情数据: ${url}`);
     try {
-        const { data } = await fetchWithCookie(url);
+        // ★ 注意：详情页请求可能仍需带Cookie，所以我们保留一个独立的fetchWithCookie
+        const cookie = await $prefs.get('gying_v44_cookie_cache'); // 尝试获取一个有效的cookie
+        const headers = { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 'Cookie': cookie, 'Referer': appConfig.site };
+        const { data } = await $fetch.get(url, { headers });
+
         const respstr = JSON.parse(data);
         if (respstr.hasOwnProperty('panlist')) {
             const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
