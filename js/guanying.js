@@ -13,7 +13,7 @@ const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
 // 【Cookie修正】直接使用您提供的有效Cookie
-const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
+const HARDCODED_COOKIE = 'BT_auth=87bbBu-juA8vvbbuLbC7jyCwGSzFXOpEk9euA3cfQAkCXo2lwg4ME6JX6L-iM9eyFn4FZb8kIBsVsRj2F5yVSijdIKWKy0dA8hO7Xs9rkx_GWBciNo2jCzIHB9AC7eJBTdNJ4vB_xM-QyWISygRu_crukIwHb4cTm-7libTqhqOnawlIvfduvQ;BT_cookietime=f068RKUxC5WC8J6ZvFzzk9JDAY2CPxJsM6rzmkXE2lUYxBe50lb1;browser_verified=b142dc23ed95f767248f452739a94198;PHPSESSID=vmlvdb709uclkpqqf3l3v0s8cs;';
 
 const appConfig = {
     ver: 19.0, // 版本号更新为最终修正版
@@ -26,7 +26,7 @@ const appConfig = {
     ],
 };
 
-// ================== 核心函数 (简化登录逻辑 ) ==================
+// ================== 核心函数 (简化登录逻辑  ) ==================
 
 function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
@@ -81,7 +81,7 @@ async function getCards(ext) {
                 vod_remarks: inlistData.g[index] || '',
                 ext: { url: detailApiUrl },
             };
-        } );
+        }  );
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -149,7 +149,7 @@ async function search(ext) {
             // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
             // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
             let finalImgUrl = imgUrl || '';
-            if (finalImgUrl.endsWith('.webp' )) {
+            if (finalImgUrl.endsWith('.webp'  )) {
                 finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
             }
 
