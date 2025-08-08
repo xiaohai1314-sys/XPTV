@@ -1,25 +1,24 @@
 /**
- * 观影网脚本 - v17.4 (智能融合最终版)
+ * 观影网脚本 - v17.0 (海报修正版)
  *
  * --- 核心思想 ---
- * 以V17.0为基础，打造一个能智能适应网站变化的健壮脚本。
- *
+ * 完全基于可正常工作的V17.0版本，仅修正一个已知问题。
+ * 
  * --- 更新日志 ---
- *  - v17.4 (由AI优化):
- *    - [智能getCards] `getCards`函数采用混合模式：
- *      1. **优先尝试**V17.0的核心方法，解析`<script>`中的`_obj.inlist`变量，高效、准确。
- *      2. **如果失败**，则自动无缝切换到备用方案，通过解析HTML DOM元素获取数据。
- *      这完美解决了因网站返回不同页面而导致的“加载失败”问题。
- *    - [保持优化] `search`函数保留了对海报URL获取的优化，确保搜索结果海报的稳定性。
+ *  - v17.0.1 (由AI修正):
+ *    - [唯一修正] 优化`search`函数中的海报获取逻辑。
+ *      - 优先尝试原方法获取海报URL。
+ *      - 如果失败（针对“Hercules Returns”这类特殊情况），则通过解析链接拼接出正确的备用海报URL。
+ *    - 其他所有代码均与您可用的V17.0版本保持100%一致，确保不再引入新的错误。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (与V17.0完全一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 17.4, // 版本号更新
+    ver: 17.0, // 保持主版本号不变
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -31,17 +30,19 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
+const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache'; // 使用新的缓存键
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
-// ================== 核心函数 ==================
+// ================== 核心函数 (与V17.0完全一致 ) ==================
 
-function log(msg   ) { try { $log(`[观影网 V17.4] ${msg}`); } catch (_) { console.log(`[观影网 V17.4] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V17.0] ${msg}`); } catch (_) { console.log(`[观影网 V17.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
 async function ensureGlobalCookie() {
-    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    if (GLOBAL_COOKIE) {
+        return GLOBAL_COOKIE;
+    }
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) {
@@ -49,16 +50,21 @@ async function ensureGlobalCookie() {
             GLOBAL_COOKIE = cachedCookie;
             return GLOBAL_COOKIE;
         }
-    } catch (e) { log(`⚠️ 读取本地缓存失败: ${e.message}`); }
-    
-    log("缓存未命中，正在从后端获取...");
+    } catch (e) {
+        log(`⚠️ 读取本地缓存失败 (可能是冷启动时 $prefs 未就绪): ${e.message}`);
+    }
+    log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
             log("✅ 成功从后端获取并缓存了全局Cookie！");
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
+            try {
+                $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
+            } catch (e) {
+                log(`⚠️ 写入本地缓存失败 (可能是 $prefs 未就绪): ${e.message}`);
+            }
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
@@ -75,12 +81,13 @@ async function fetchWithCookie(url, options = {}) {
     return $fetch.get(url, { ...options, headers });
 }
 
-async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify(appConfig); }
+async function init(ext) {
+    return jsonify({});
+}
 
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【智能融合的函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
+async function getConfig() {
+    return jsonify(appConfig);
+}
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -88,69 +95,30 @@ async function getCards(ext) {
     let { page = 1, id } = ext;
     const url = `${appConfig.site}${id}${page}`;
     log(`请求分类列表: ${url}`);
-
     try {
         const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
-
-        // --- 方案一：优先尝试V17.0的script解析法 ---
-        log("优先尝试 [方案一]: 解析script中的_obj.inlist...");
         const scriptContent = $('script').filter((_, script) => {
-            return $(script).html().includes('_obj.inlist');
+            return $(script).html().includes('_obj.header');
         }).html();
-
-        let inlistMatch;
-        if (scriptContent) {
-            inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
+        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
+        const inlistData = JSON.parse(inlistMatch[1]);
+        if (inlistData && inlistData.i) {
+            inlistData.i.forEach((item, index) => {
+                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+                cards.push({
+                    vod_id: detailApiUrl,
+                    vod_name: inlistData.t[index],
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
+                    vod_remarks: inlistData.g[index],
+                    ext: { url: detailApiUrl },
+                }   );
+            });
+            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
         }
-
-        if (inlistMatch && inlistMatch[1]) {
-            const inlistData = JSON.parse(inlistMatch[1]);
-            if (inlistData && inlistData.i) {
-                inlistData.i.forEach((item, index) => {
-                    const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-                    cards.push({
-                        vod_id: detailApiUrl,
-                        vod_name: inlistData.t[index],
-                        vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
-                        vod_remarks: inlistData.g[index],
-                        ext: { url: detailApiUrl },
-                    } );
-                });
-                log(`✅ [方案一] 成功！从JS变量中解析到 ${cards.length} 个项目。`);
-                return jsonify({ list: cards });
-            }
-        }
-
-        // --- 方案二：如果方案一失败，则自动启用DOM解析法 ---
-        log("⚠️ [方案一] 失败，自动切换到 [方案二]: 直接解析HTML元素...");
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const remarks = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-            const match = path.match(/\/([a-z]+)\/(\w+)/);
-            if (!match) return;
-            const type = match[1], vodId = match[2];
-            cards.push({
-                vod_id: `${appConfig.site}res/downurl/${type}/${vodId}`,
-                vod_name: name,
-                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}.webp`,
-                vod_remarks: remarks,
-                ext: { url: `${appConfig.site}res/downurl/${type}/${vodId}` },
-            } );
-        });
-
-        if (cards.length > 0) {
-            log(`✅ [方案二] 成功！通过DOM解析到 ${cards.length} 个项目。`);
-        } else {
-            log("❌ [方案二] 也失败了。页面上既没有_obj.inlist，也没有.v5d元素。请检查Cookie或网站结构。");
-            $utils.toastError("加载失败，请检查Cookie或更新脚本", 4000);
-        }
-        
         return jsonify({ list: cards });
-
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
@@ -158,47 +126,6 @@ async function getCards(ext) {
     }
 }
 
-async function search(ext) {
-    ext = argsify(ext);
-    let text = encodeURIComponent(ext.text);
-    let page = ext.page || 1;
-    let url = `${appConfig.site}/s/1---${page}/${text}`;
-    log(`执行搜索: ${url}`);
-    try {
-        const { data } = await fetchWithCookie(url);
-        const $ = cheerio.load(data);
-        let cards = [];
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const additionalInfo = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-            let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-            if (!picUrl) {
-                const match = path.match(/\/([a-z]+)\/(\w+)/);
-                if (match) picUrl = `https://s.tutu.pm/img/${match[1]}/${match[2]}.webp`;
-            }
-            const match = path.match(/\/([a-z]+ )\/(\w+)/);
-            if (!match) return;
-            const type = match[1], vodId = match[2];
-            cards.push({
-                vod_id: `${appConfig.site}res/downurl/${type}/${vodId}`,
-                vod_name: name,
-                vod_pic: picUrl || '',
-                vod_remarks: additionalInfo,
-                ext: { url: `${appConfig.site}res/downurl/${type}/${vodId}` },
-            });
-        });
-        log(`✅ 成功从搜索结果中解析到 ${cards.length} 个项目。`);
-        return jsonify({ list: cards });
-    } catch (e) {
-        log(`❌ 搜索异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-// --- 其他函数保持不变 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
@@ -228,6 +155,59 @@ async function getTracks(ext) {
         return jsonify({ list: [] });
     }
 }
+
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【唯一修正的函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+async function search(ext) {
+    ext = argsify(ext);
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
+    try {
+        const { data } = await fetchWithCookie(url);
+        const $ = cheerio.load(data);
+        let cards = [];
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            // 【修正点】将原imgUrl的获取逻辑与备用逻辑结合
+            let imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+            const additionalInfo = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
+            if (!path) return;
+            const match = path.match(/\/([a-z]+)\/(\w+)/); // 使用\w+以兼容字母ID
+            if (!match) return;
+
+            // 【修正点】如果imgUrl获取失败，则启用备用方案
+            if (!imgUrl) {
+                const type = match[1];
+                const vodId = match[2];
+                imgUrl = `https://s.tutu.pm/img/${type}/${vodId}.webp`;
+            }
+
+            const type = match[1];
+            const vodId = match[2];
+            // 【严格保持原样】确保detailApiUrl是完整的URL
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: imgUrl || '', // 使用修正后的imgUrl
+                vod_remarks: additionalInfo,
+                ext: { url: detailApiUrl },
+            } );
+        });
+        return jsonify({ list: cards });
+    } catch (e) {
+        log(`❌ 搜索异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
+// =======================================================================
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【唯一修正的函数】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+// =======================================================================
 
 async function getPlayinfo(ext) {
     ext = argsify(ext);
