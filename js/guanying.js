@@ -1,25 +1,19 @@
 /**
- * 观影网脚本 - v29.0 (终极耐心伪装版)
+ * 观影网脚本 - v17.0 (时序兼容最终版)
  *
  * --- 核心思想 ---
- * 解决了“服务器繁忙”提示。原因是服务器反爬虫机制较强，一次重试不足以获取数据。
- * 本版本通过增加重试次数和延长等待间隔，将脚本的“伪装”和“耐心”提升到极致，
- * 以应对最顽固的服务器干扰。
- *
- * --- 更新日志 ---
- *  - v29.0 (终极伪装):
- *    - [强化重试] 重试次数从1次增加到3次，大大提高成功率。
- *    - [延长等待] 重试间隔从800ms增加到1200ms，更好地模拟人类行为。
- *    - [代码优化] 重构了重试逻辑，使用循环使其更简洁、更强大。
+ * 解决了在App冷启动时，因脚本“抢跑”导致`$prefs`变量尚未准备就绪而崩溃的问题。
+ * 通过为所有`$prefs`调用增加`try...catch`保护，实现了对App加载时序的完美兼容。
+ * 这是结合了之前所有修复的、最稳定、最健壮的最终版本。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (与V16.0完全一致) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 29.0, // 终极耐心伪装版
+    ver: 17.0,
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -29,149 +23,124 @@ const appConfig = {
     ],
 };
 
-// ★★★★★【全局Cookie与成功缓存】★★★★★
+// ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const SUCCESS_CACHE = {}; // 用于存储成功获取的页面数据
-const MAX_RETRIES = 3; // 最大重试次数
-const RETRY_DELAY = 1200; // 重试前的延迟（毫秒 ）
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★
+const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache'; // 使用新的缓存键
+// ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg) { try { $log(`[观影网 V29.0] ${msg}`); } catch (_) { console.log(`[观影网 V29.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V17.0] ${msg}`); } catch (_) { console.log(`[观影网 V17.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-function fakeSleep(ms) {
-    log(`等待 ${ms}ms (因环境限制，可能无法真正延迟)`);
-    // 如果你的环境支持某种同步等待，例如: $thread.sleep(ms)，请替换下面这行
-    // $thread.sleep(ms); 
-}
-
+// --- 【唯一修改点】ensureGlobalCookie (时序兼容版) ---
 async function ensureGlobalCookie() {
-    if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
+    if (GLOBAL_COOKIE) {
+        return GLOBAL_COOKIE;
+    }
+
+    // 【关键修复】为 $prefs 调用增加 try...catch 保护
     try {
-        const { data } = await $fetch.get(BACKEND_URL);
-        const result = JSON.parse(data);
-        if (result.status === "success" && result.cookie) {
-            GLOBAL_COOKIE = result.cookie;
+        const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
+        if (cachedCookie) {
+            log("✅ 从本地缓存中恢复了Cookie！");
+            GLOBAL_COOKIE = cachedCookie;
             return GLOBAL_COOKIE;
         }
-        throw new Error(result.message || '未知错误');
     } catch (e) {
-        log(`❌ 获取Cookie失败: ${e.message}`);
-        $utils.toastError(`Cookie后端连接失败`, 4000);
+        log(`⚠️ 读取本地缓存失败 (可能是冷启动时 $prefs 未就绪): ${e.message}`);
+    }
+    
+    log("缓存未命中或不可用，正在从后端获取...");
+    try {
+        const response = await $fetch.get(BACKEND_URL);
+        const result = JSON.parse(response.data);
+        if (result.status === "success" && result.cookie) {
+            GLOBAL_COOKIE = result.cookie;
+            log("✅ 成功从后端获取并缓存了全局Cookie！");
+            
+            // 【关键修复】为 $prefs 调用增加 try...catch 保护
+            try {
+                $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
+            } catch (e) {
+                log(`⚠️ 写入本地缓存失败 (可能是 $prefs 未就绪): ${e.message}`);
+            }
+            return GLOBAL_COOKIE;
+        }
+        throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
+    } catch (e) {
+        log(`❌ 网络请求后端失败: ${e.message}`);
+        $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
         throw e;
     }
 }
 
+// --- fetchWithCookie (与V16.0完全一致) ---
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
 
-async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify(appConfig); }
-
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【终极抗干扰逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
-
-function parseFromPage(html, cards) {
-    const match = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-    if (!match || !match[1]) {
-        log("❌ 在页面中未找到 _obj.inlist 数据对象。");
-        return false; // 返回false表示解析失败
-    }
-    try {
-        const inlist = JSON.parse(match[1]);
-        if (!inlist.t || !inlist.i || !inlist.ty) { return false; }
-        const $ = cheerio.load(html);
-        const type = inlist.ty;
-        inlist.t.forEach((title, index) => {
-            const vodId = inlist.i[index];
-            if (!vodId) return;
-            const name = title;
-            const remarks = inlist.q && inlist.q[index] ? inlist.q[index].join(' ') : '';
-            let picUrl = '';
-            const $container = $(`a.v5d[href="/${type}/${vodId}"]`);
-            if ($container.length > 0) {
-                picUrl = $container.find('picture source[data-srcset]').attr('data-srcset');
-                if (!picUrl) { picUrl = $container.find('img.lazy[data-src]').attr('data-src'); }
-            }
-            if (!picUrl) {
-                const picUrl1 = `${appConfig.site}img/${type}/${vodId}.webp`;
-                const picUrl2 = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-                picUrl = `${picUrl1}@${picUrl2}`;
-            }
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            cards.push({ vod_id: detailApiUrl, vod_name: name, vod_pic: picUrl, vod_remarks: remarks, ext: { url: detailApiUrl } } );
-        });
-        return true; // 返回true表示解析成功
-    } catch (e) {
-        log(`❌ 解析过程异常: ${e.message}`);
-        return false;
-    }
+// --- init (与V16.0完全一致) ---
+async function init(ext) {
+    return jsonify({});
 }
 
-// 封装了强化重试和缓存的核心请求函数
-async function getPageDataWithRetry(url) {
-    if (SUCCESS_CACHE[url]) {
-        log(`✅ 命中缓存: ${url}`);
-        return SUCCESS_CACHE[url];
-    }
-
-    for (let i = 0; i <= MAX_RETRIES; i++) {
-        const attempt = i + 1;
-        log(`🚀 发起第 ${attempt} 次尝试: ${url}`);
-        const { data } = await fetchWithCookie(url);
-        const cards = [];
-        if (parseFromPage(data, cards)) {
-            log(`✅ 第 ${attempt} 次尝试成功，解析到 ${cards.length} 个项目。`);
-            SUCCESS_CACHE[url] = cards;
-            return cards;
-        }
-
-        if (i < MAX_RETRIES) {
-            log(`⚠️ 第 ${attempt} 次尝试失败，准备重试...`);
-            fakeSleep(RETRY_DELAY);
-        }
-    }
-
-    log(`❌ 所有 ${MAX_RETRIES + 1} 次尝试均失败，放弃。`);
-    $utils.toastError('服务器繁忙，请稍后重试', 4000);
-    return [];
+// --- getConfig (与V16.0完全一致) ---
+async function getConfig() {
+    return jsonify(appConfig);
 }
+
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【100%原封不动的V16.0核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
 
 async function getCards(ext) {
     ext = argsify(ext);
-    const { page = 1, id } = ext;
+    let cards = [];
+    let { page = 1, id } = ext;
     const url = `${appConfig.site}${id}${page}`;
+    log(`请求分类列表: ${url}`);
+
     try {
-        const cards = await getPageDataWithRetry(url);
+        const { data } = await fetchWithCookie(url); 
+        const $ = cheerio.load(data);
+
+        const scriptContent = $('script').filter((_, script) => {
+            return $(script).html().includes('_obj.header');
+        }).html();
+
+        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
+
+        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
+
+        const inlistData = JSON.parse(inlistMatch[1]);
+        if (inlistData && inlistData.i) {
+            inlistData.i.forEach((item, index) => {
+                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+                cards.push({
+                    vod_id: detailApiUrl,
+                    vod_name: inlistData.t[index],
+                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
+                    vod_remarks: inlistData.g[index],
+                    ext: { url: detailApiUrl },
+                }  );
+            });
+            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
+        }
+        
         return jsonify({ list: cards });
+
     } catch (e) {
-        log(`❌ getCards 顶层异常: ${e.message}`);
+        log(`❌ 获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-async function search(ext) {
-    ext = argsify(ext);
-    const text = encodeURIComponent(ext.text);
-    const page = ext.page || 1;
-    const url = `${appConfig.site}/s/1---${page}/${text}`;
-    try {
-        const cards = await getPageDataWithRetry(url);
-        return jsonify({ list: cards });
-    } catch (e) {
-        log(`❌ search 顶层异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-// --- getTracks 和 getPlayinfo 保持不变 ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
@@ -198,6 +167,43 @@ async function getTracks(ext) {
         return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
+
+async function search(ext) {
+    ext = argsify(ext);
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
+    try {
+        const { data } = await fetchWithCookie(url);
+        const $ = cheerio.load(data);
+        let cards = [];
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+            const additionalInfo = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
+            if (!path) return;
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: imgUrl || '',
+                vod_remarks: additionalInfo,
+                ext: { url: detailApiUrl },
+            });
+        });
+        return jsonify({ list: cards });
+    } catch (e) {
+        log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
