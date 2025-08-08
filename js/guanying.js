@@ -1,24 +1,24 @@
 /**
- * 观影网脚本 - v17.0 (时序兼容最终版)
+ * 观影网脚本 - v17.2 (最终修复版)
  *
  * --- 核心思想 ---
  * 解决了在App冷启动时，因脚本“抢跑”导致`$prefs`变量尚未准备就绪而崩溃的问题。
  * 通过为所有`$prefs`调用增加`try...catch`保护，实现了对App加载时序的完美兼容。
- * 这是结合了之前所有修复的、最稳定、最健壮的最终版本。
- * 
+ *
  * --- 更新日志 ---
- *  - v17.1 (由AI优化): 增强了`search`函数的健壮性。
- *    - 优先使用原始方法获取海报。
- *    - 当原始方法失败时，自动启用备用方案，通过解析链接拼接海报URL，确保海报在所有情况下都能正确显示。
+ *  - v17.2 (由AI优化):
+ *    - [重大修复] 重构 `getCards` 函数。由于网站不再使用 `_obj.inlist` 变量，
+ *      旧的解析方式已失效。新版直接解析HTML DOM元素，修复了“加载失败”的错误。
+ *    - [保持优化] `search` 函数保留了之前的健壮性优化，确保海报在所有情况下都能正确显示。
  */
 
-// ================== 配置区 (与V16.0完全一致) ==================
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.111:5000/getCookie'; 
 
 const appConfig = {
-    ver: 17.1, // 版本号微调以示区别
+    ver: 17.2, // 版本号更新
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -30,22 +30,19 @@ const appConfig = {
 
 // ★★★★★【全局Cookie缓存】★★★★★
 let GLOBAL_COOKIE = null;
-const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache'; // 使用新的缓存键
+const COOKIE_CACHE_KEY = 'gying_v17_cookie_cache';
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
 // ================== 核心函数 ==================
 
-function log(msg   ) { try { $log(`[观影网 V17.1] ${msg}`); } catch (_) { console.log(`[观影网 V17.1] ${msg}`); } }
+function log(msg   ) { try { $log(`[观影网 V17.2] ${msg}`); } catch (_) { console.log(`[观影网 V17.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 【唯一修改点】ensureGlobalCookie (时序兼容版) ---
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) {
         return GLOBAL_COOKIE;
     }
-
-    // 【关键修复】为 $prefs 调用增加 try...catch 保护
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
         if (cachedCookie) {
@@ -56,7 +53,6 @@ async function ensureGlobalCookie() {
     } catch (e) {
         log(`⚠️ 读取本地缓存失败 (可能是冷启动时 $prefs 未就绪): ${e.message}`);
     }
-    
     log("缓存未命中或不可用，正在从后端获取...");
     try {
         const response = await $fetch.get(BACKEND_URL);
@@ -64,8 +60,6 @@ async function ensureGlobalCookie() {
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
             log("✅ 成功从后端获取并缓存了全局Cookie！");
-            
-            // 【关键修复】为 $prefs 调用增加 try...catch 保护
             try {
                 $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); 
             } catch (e) {
@@ -81,24 +75,24 @@ async function ensureGlobalCookie() {
     }
 }
 
-// --- fetchWithCookie (与V16.0完全一致) ---
 async function fetchWithCookie(url, options = {}) {
     const cookie = await ensureGlobalCookie();
     const headers = { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site, ...options.headers };
     return $fetch.get(url, { ...options, headers });
 }
 
-// --- init (与V16.0完全一致) ---
 async function init(ext) {
     return jsonify({});
 }
 
-// --- getConfig (与V16.0完全一致) ---
 async function getConfig() {
     return jsonify(appConfig);
 }
 
-// --- getCards (与V16.0完全一致) ---
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【重大修复的函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
@@ -110,28 +104,38 @@ async function getCards(ext) {
         const { data } = await fetchWithCookie(url); 
         const $ = cheerio.load(data);
 
-        const scriptContent = $('script').filter((_, script) => {
-            return $(script).html().includes('_obj.header');
-        }).html();
+        // 【重大修复】放弃解析 _obj.inlist，改为直接解析HTML的DOM元素
+        log("采用新的DOM解析模式获取分类列表...");
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            const remarks = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
 
-        if (!scriptContent) throw new Error("未能找到包含'_obj.header'的关键script标签。");
+            if (!path) return;
 
-        const inlistMatch = scriptContent.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) throw new Error("在script标签中未能匹配到'_obj.inlist'数据。");
+            const match = path.match(/\/([a-z]+)\/(\w+)/);
+            if (!match || match.length < 3) return;
 
-        const inlistData = JSON.parse(inlistMatch[1]);
-        if (inlistData && inlistData.i) {
-            inlistData.i.forEach((item, index) => {
-                const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-                cards.push({
-                    vod_id: detailApiUrl,
-                    vod_name: inlistData.t[index],
-                    vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}.webp`,
-                    vod_remarks: inlistData.g[index],
-                    ext: { url: detailApiUrl },
-                }   );
-            });
-            log(`✅ 成功从JS变量中解析到 ${cards.length} 个项目。`);
+            const type = match[1];
+            const vodId = match[2];
+            
+            const picUrl = `https://s.tutu.pm/img/${type}/${vodId}.webp`;
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: picUrl,
+                vod_remarks: remarks,
+                ext: { url: detailApiUrl },
+            } );
+        });
+        
+        if (cards.length === 0) {
+            log("⚠️ DOM解析完成，但未找到任何影片项目。可能页面结构已改变或当前页无内容。");
+        } else {
+            log(`✅ 成功通过DOM解析到 ${cards.length} 个项目。`);
         }
         
         return jsonify({ list: cards });
@@ -143,7 +147,7 @@ async function getCards(ext) {
     }
 }
 
-// --- getTracks (与V16.0完全一致) ---
+// --- getTracks (原封不动) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
@@ -174,10 +178,7 @@ async function getTracks(ext) {
     }
 }
 
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【唯一修改的函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
-
+// --- search (保留之前的优化) ---
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
@@ -195,29 +196,26 @@ async function search(ext) {
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
 
-            if (!path) return; // 如果没有链接，则跳过
+            if (!path) return;
 
-            // 【关键优化】增加备用逻辑来确保海报URL的获取
             let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
 
-            // 如果主要方法获取不到 picUrl，则启用备用方案
             if (!picUrl) {
                 log(`⚠️ 未能从 data-srcset 获取图片，为“${name}”启用备用方案。`);
-                const match = path.match(/\/([a-z]+)\/(\w+)/); // 使用 \w+ 匹配ID，兼容字母和数字
+                const match = path.match(/\/([a-z]+)\/(\w+)/);
                 if (match && match.length >= 3) {
                     const type = match[1];
                     const vodId = match[2];
-                    // 手动拼接标准的图片URL
                     picUrl = `https://s.tutu.pm/img/${type}/${vodId}.webp`;
                     log(`✅ 备用方案成功 ，拼接URL: ${picUrl}`);
                 } else {
                     log(`❌ 备用方案失败，无法从路径“${path}”解析ID。`);
-                    picUrl = ''; // 确保为空字符串
+                    picUrl = '';
                 }
             }
 
             const match = path.match(/\/([a-z]+)\/(\w+)/);
-            if (!match) return; // 如果路径无效，则无法生成详情页，直接跳过
+            if (!match) return;
 
             const type = match[1];
             const vodId = match[2];
@@ -226,7 +224,7 @@ async function search(ext) {
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
-                vod_pic: picUrl, // 使用获取到或拼接出的URL
+                vod_pic: picUrl,
                 vod_remarks: additionalInfo,
                 ext: { url: detailApiUrl },
             });
@@ -241,10 +239,7 @@ async function search(ext) {
     }
 }
 
-// =======================================================================
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲【唯一修改的函数】▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-// =======================================================================
-
+// --- getPlayinfo (原封不动) ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
