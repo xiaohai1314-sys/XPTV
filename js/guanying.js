@@ -1,29 +1,25 @@
 /**
- * 观影网脚本 - v35.1 (海报代理修复版)
+ * 观影网脚本 - v35.3 (远程诊断版)
  *
  * --- 核心思想 ---
- * 本版本基于v35.0的健壮解析逻辑，精准修复了海报代理URL的生成错误。
- * 此前版本将代理参数作为路径(Path)拼接，导致后端无法识别。
- * 此修复将参数改为正确的查询参数(Query Parameters)格式，确保后端海报代理服务能被正确调用。
+ * 解决前端App无日志查看能力的问题。本版本引入了“前端告警，后端记录”机制。
+ * 当解析失败时，前端不再静默返回空列表，而是主动向后端发送一条包含错误信息和问题HTML的报告。
+ * 这使得开发者可以通过查看后端控制台日志，来远程诊断发生在用户设备上的问题。
  *
  * --- 更新日志 ---
- *  - v35.1 (海报代理修复):
- *    - 【核心修复】修正了`parsePage`函数中备用海报URL的拼接逻辑。现在会生成 `.../getPoster?type=xx&vodId=xx` 格式的正确URL，以匹配后端接口。
- *    - 【功能完整】保留了v35.0的所有优点，包括移除无用检查和基于.v5d元素的稳定解析。
- *  - v35.0 (无用检查移除):
- *    - 【核心修复】彻底移除了在getCards/search函数中对scriptContent是否存在的检查，因为它已不适用于新的解析模式。
- *    - 【健壮性】现在，即使服务器返回不完整的HTML，脚本也不会崩溃，最多是临时显示空列表。
- *    - 【功能完整】保留了v31版本最完善的、基于HTML元素(.v5d)的解析逻辑和智能海报方案。
+ *  - v35.3 (远程诊断版):
+ *    - 【诊断革命】新增`reportErrorToBackend`函数，用于向后端`/logError`接口发送POST请求。
+ *    - 【智能告警】`parsePage`函数在解析失败（如找不到卡片元素）时，会调用上述函数，将问题现场(HTML)发送给后端进行分析。
+ *    - 【代码健壮】使用`try...catch`包裹告警函数，确保即使日志发送失败，也不会影响主流程。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-// ★★★ 请确保这里的IP和端口与你的后端服务一致 ★★★
 const BACKEND_URL = 'http://192.168.10.111:5000'; 
 
 const appConfig = {
-    ver: '35.1', // 海报代理修复版
+    ver: '35.3', // 远程诊断版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -38,35 +34,46 @@ let GLOBAL_COOKIE = null;
 const COOKIE_CACHE_KEY = 'gying_v35_cookie_cache';
 // ★★★★★★★★★★★★★★★★★★★★★★★
 
-// ================== 核心函数 (回归v31的稳定逻辑  ) ==================
+// ================== 核心函数 ==================
 
-function log(msg) { try { $log(`[观影网 V35.1] ${msg}`); } catch (_) { console.log(`[观影网 V35.1] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V35.3] ${msg}`); } catch (_) { console.log(`[观影网 V35.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// ★★★ 新增：错误报告函数 ★★★
+async function reportErrorToBackend(message, htmlContent) {
+    try {
+        log(`[远程诊断] 检测到严重错误: ${message}。正在上报给后端...`);
+        // 使用 $fetch.post 发送错误报告
+        await $fetch.post(`${BACKEND_URL}/logError`, {
+            headers: { 'Content-Type': 'application/json' },
+            data: {
+                message: `[观影网 V35.3] ${message}`,
+                htmlContent: htmlContent || ""
+            }
+        });
+    } catch (e) {
+        // 如果日志上报本身都失败了，我们也无能为力，只能在本地（如果可能）记录一下
+        log(`❌ [远程诊断] 错误报告发送失败: ${e.message}`);
+    }
+}
 
 async function ensureGlobalCookie() {
     if (GLOBAL_COOKIE) return GLOBAL_COOKIE;
     try {
         const cachedCookie = $prefs.get(COOKIE_CACHE_KEY);
-        if (cachedCookie) {
-            log("✅ 从本地缓存中恢复了Cookie！");
-            GLOBAL_COOKIE = cachedCookie;
-            return GLOBAL_COOKIE;
-        }
-    } catch (e) { log(`⚠️ 读取本地缓存失败 (可能是冷启动): ${e.message}`); }
-    log("缓存未命中，正在从后端获取...");
+        if (cachedCookie) { GLOBAL_COOKIE = cachedCookie; return GLOBAL_COOKIE; }
+    } catch (e) {}
     try {
-        const response = await $fetch.get(`${BACKEND_URL}/getCookie`); // 从后端获取Cookie
+        const response = await $fetch.get(`${BACKEND_URL}/getCookie`);
         const result = JSON.parse(response.data);
         if (result.status === "success" && result.cookie) {
             GLOBAL_COOKIE = result.cookie;
-            log("✅ 成功从后端获取并缓存了全局Cookie！");
-            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) { log(`⚠️ 写入本地缓存失败: ${e.message}`); }
+            try { $prefs.set(COOKIE_CACHE_KEY, GLOBAL_COOKIE); } catch (e) {}
             return GLOBAL_COOKIE;
         }
         throw new Error(`从后端获取Cookie失败: ${result.message || '未知错误'}`);
     } catch (e) {
-        log(`❌ 网络请求后端失败: ${e.message}`);
         $utils.toastError(`无法连接Cookie后端: ${e.message}`, 5000);
         throw e;
     }
@@ -82,66 +89,61 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终的健壮逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终的健壮解析逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// 统一的、带有完美海报方案的解析函数
 function parsePage(html) {
+    if (!html || html.length < 200) {
+        reportErrorToBackend("传入的HTML无效或过短", `HTML长度: ${html ? html.length : 'null'}`);
+        return [];
+    }
+
     const $ = cheerio.load(html);
     const cards = [];
-    // 直接解析.v5d元素，这是最可靠的方式
-    $('.v5d').each((_, element) => {
+    const cardElements = $('.v5d');
+
+    if (cardElements.length === 0) {
+        // ★★★ 核心诊断点 ★★★
+        // 如果找不到任何卡片，就向后端报告这个问题，并附上当前的HTML内容
+        reportErrorToBackend("解析失败：在HTML中未找到任何 '.v5d' 卡片元素。网站结构可能已变更。", html);
+        return []; 
+    }
+
+    cardElements.each((_, element) => {
         const $element = $(element);
         const name = $element.find('b').text().trim();
-        const remarks = $element.find('p').text().trim();
         const path = $element.find('a').attr('href');
-        if (!path) return;
+        if (!name || !path) return;
 
         const match = path.match(/\/([a-z]+)\/(\w+)/);
         if (!match) return;
         const type = match[1];
         const vodId = match[2];
 
-        // 智能提取海报
         let picUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-        if (!picUrl) {
-            picUrl = $element.find('img.lazy[data-src]').attr('data-src');
-        }
-        
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // ★★★ 核心修复：如果无法直接提取到海报，则拼接一个指向后端代理的、带有正确查询参数的URL ★★★
-        if (!picUrl) {
-            picUrl = `${BACKEND_URL}/getPoster?type=${type}&vodId=${vodId}`;
-        }
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        if (!picUrl) picUrl = $element.find('img.lazy[data-src]').attr('data-src');
+        if (!picUrl) picUrl = `${BACKEND_URL}/getPoster?type=${type}&vodId=${vodId}`;
 
-        const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
         cards.push({
-            vod_id: detailApiUrl,
+            vod_id: `${appConfig.site}res/downurl/${type}/${vodId}`,
             vod_name: name,
             vod_pic: picUrl,
-            vod_remarks: remarks,
-            ext: { url: detailApiUrl },
-        } );
+            vod_remarks: $element.find('p').text().trim(),
+            ext: { url: `${appConfig.site}res/downurl/${type}/${vodId}` },
+        });
     });
     return cards;
 }
 
-
 async function getCards(ext) {
     ext = argsify(ext);
-    const { page = 1, id } = ext;
-    const url = `${appConfig.site}${id}${page}`;
-    log(`请求分类列表: ${url}`);
+    const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
     try {
         const { data } = await fetchWithCookie(url);
-        // ★★★ 核心修改：不再需要任何script检查，直接解析 ★★★
         const cards = parsePage(data);
-        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
-        log(`❌ 获取卡片列表异常: ${e.message}`);
-        // 这里只在网络请求本身失败时才会触发，而不是因为解析失败
+        reportErrorToBackend(`getCards函数发生网络或上层异常: ${e.message}`, `请求的URL: ${url}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
@@ -149,18 +151,13 @@ async function getCards(ext) {
 
 async function search(ext) {
     ext = argsify(ext);
-    const text = encodeURIComponent(ext.text);
-    const page = ext.page || 1;
-    const url = `${appConfig.site}/s/1---${page}/${text}`;
-    log(`请求搜索页: ${url}`);
+    const url = `${appConfig.site}/s/1---${ext.page || 1}/${encodeURIComponent(ext.text)}`;
     try {
         const { data } = await fetchWithCookie(url);
-        // ★★★ 核心修改：不再需要任何script检查，直接解析 ★★★
         const cards = parsePage(data);
-        log(`✅ 成功解析到 ${cards.length} 个项目。`);
         return jsonify({ list: cards });
     } catch (e) {
-        log(`❌ 搜索异常: ${e.message}`);
+        reportErrorToBackend(`search函数发生网络或上层异常: ${e.message}`, `请求的URL: ${url}`);
         return jsonify({ list: [] });
     }
 }
@@ -170,7 +167,6 @@ async function getTracks(ext) {
     ext = argsify(ext);
     let tracks = [];
     let url = ext.url; 
-    log(`请求详情数据: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
         const respstr = JSON.parse(data);
@@ -191,7 +187,7 @@ async function getTracks(ext) {
         }
         return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
-        log(`❌ 获取详情数据异常: ${e.message}`);
+        reportErrorToBackend(`getTracks函数发生异常: ${e.message}`, `请求的URL: ${url}`);
         return jsonify({ list: [] });
     }
 }
