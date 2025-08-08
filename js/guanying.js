@@ -1,25 +1,20 @@
 /**
- * 观影网脚本 - v47.0 (隔离与重生版)
- *
- * --- 核心思想 ---
- * 彻底废弃v45.1中引发“Cookie风暴”的、错误的全局fetchWithCookie设计。
- * 回归最简单、最可靠的架构：getCards和getTracks的功能完全隔离，
- * getTracks在需要时独立获取Cookie，互不干扰，从根本上杜绝后台资源耗尽和APP假死问题。
+ * 观影网脚本 - v49.1 (完整缓存最终版)
  *
  * --- 更新日志 ---
- *  - v47.0 (隔离与重生版):
- *    - 【彻底移除】删除了所有全局的Cookie缓存变量和错误的fetchWithCookie函数。
- *    - 【功能隔离】getCards只负责请求列表API，不触碰任何Cookie逻辑。
- *    - 【独立工作】getTracks在被调用时，才独立、一次性地去请求Cookie，并用于当次的详情页访问。
- *    - 【拨乱反正】这是对之前所有错误设计的一次彻底清算，旨在实现一个真正稳定、可靠的系统。
+ *  - v49.1:
+ *    - 【代码完整】根据您的要求，提供了未经任何省略的完整脚本文件。
+ *    - 【缓存回归】在 getTracks 函数中，重新引入了一个安全的、局部的Cookie缓存机制。
+ *    - 【安全设计】此缓存机制完全独立，只在进入详情页时触发，确保不会影响列表页的性能和APP的响应能力。
+ *    - 【最终匹配】此版本前端与 v14.0 版本的后端完全匹配，构成了最终的、功能与性能兼顾的解决方案。
  */
 
 // ================== 配置区 ==================
-const LIST_API_URL = 'http://192.168.1.4:5000/api/movies'; 
+const LIST_API_URL = 'http://192.168.1.4:5000/api/data'; 
 const COOKIE_API_URL = 'http://192.168.1.4:5000/getCookie';
 
 const appConfig = {
-    ver: "47.0 (隔离重生 )",
+    ver: "49.1 (完整缓存 )",
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -31,7 +26,7 @@ const appConfig = {
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V47.0] ${msg}`); } catch (_) { console.log(`[观影网 V47.0] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V49.1] ${msg}`); } catch (_) { console.log(`[观影网 V49.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -67,8 +62,12 @@ async function search(ext) {
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 详情获取 (独立版) ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【★ 详情获取 (带安全缓存) ★】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
+
+// 用于详情页的、安全的、局部的Cookie缓存
+let GLOBAL_TRACKS_COOKIE = null;
+const TRACKS_COOKIE_CACHE_KEY = 'gying_v49_tracks_cookie_cache';
 
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -79,29 +78,46 @@ async function getTracks(ext) {
 
     log(`准备请求详情数据: ${detailApiUrl}`);
     try {
-        // 1. 独立、一次性地获取Cookie
-        log("正在为详情页独立获取Cookie...");
-        let cookie = "";
-        try {
-            const { data: cookieData } = await $fetch.get(COOKIE_API_URL);
-            const result = JSON.parse(cookieData);
-            if (result.status === "success" && result.cookie) {
-                cookie = result.cookie;
-                log("✅ 成功获取到当次有效的Cookie。");
+        // 1. 优先从内存中获取Cookie
+        if (!GLOBAL_TRACKS_COOKIE) {
+            // 2. 内存中没有，则尝试从持久化缓存中获取
+            try {
+                const cachedCookie = $prefs.get(TRACKS_COOKIE_CACHE_KEY);
+                if (cachedCookie) {
+                    GLOBAL_TRACKS_COOKIE = cachedCookie;
+                    log("✅ [详情页] 从持久化缓存中恢复了Cookie。");
+                }
+            } catch (e) {
+                log("⚠️ [详情页] 读取持久化缓存失败 (可能是首次运行)。");
             }
-        } catch (cookieError) {
-            log(`⚠️ 获取Cookie失败: ${cookieError.message}，将尝试无Cookie访问...`);
         }
 
-        // 2. 使用获取到的Cookie，请求详情API
+        // 3. 如果两种缓存都没有，才发起网络请求
+        if (!GLOBAL_TRACKS_COOKIE) {
+            log(" [详情页] 所有缓存未命中，正在从后端获取新Cookie...");
+            try {
+                const { data: cookieData } = await $fetch.get(COOKIE_API_URL);
+                const result = JSON.parse(cookieData);
+                if (result.status === "success" && result.cookie) {
+                    GLOBAL_TRACKS_COOKIE = result.cookie;
+                    log("✅ [详情页] 成功获取到新Cookie。");
+                    // 将新Cookie存入持久化缓存
+                    $prefs.set(TRACKS_COOKIE_CACHE_KEY, GLOBAL_TRACKS_COOKIE);
+                }
+            } catch (cookieError) {
+                log(`⚠️ [详情页] 获取Cookie失败: ${cookieError.message}，将尝试无Cookie访问...`);
+            }
+        }
+
+        // 4. 使用最终获取到的Cookie，请求详情API
         const headers = { 
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)', 
-            'Cookie': cookie, 
+            'Cookie': GLOBAL_TRACKS_COOKIE || "", // 确保即使获取失败，也传递一个空字符串
             'Referer': appConfig.site 
         };
         const { data } = await $fetch.get(detailApiUrl, { headers });
 
-        // 3. 解析网盘资源
+        // 5. 解析网盘资源
         const respstr = JSON.parse(data);
         if (respstr.hasOwnProperty('panlist')) {
             const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
