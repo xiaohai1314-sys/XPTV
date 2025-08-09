@@ -1,14 +1,15 @@
 /**
- * XPTV App 插件前端代码 (v9.0 - 像素级模仿最终版)
+ * XPTV App 插件前端代码 (v11.0 - 终极融合最终版)
  * 
  * 功能:
  * - 与 v18.0 版本后端完美配合。
- * - 核心: 完全复刻“海绵小站”前端的解包逻辑，将后端数据包精准拆分为 pan 和 ext.pwd。
- * - 目标: 解决App播放器需要分离的链接和密码才能正常工作的问题。
+ * - 核心: 融合了所有成功经验，采取“组合URL+提供豁免符”的最终策略。
+ * - 组合URL: 在前端将后端数据组合成夸克能识别的、带 ?pwd= 参数的标准URL。
+ * - 提供豁免符: 同时提供 ext: { pwd: '' }，明确告知App无需再处理密码，直接使用pan字段的URL。
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.7:3000/api'; // 请务必替换为你的后端服务实际地址
 // --- 配置区 ---
 
 function log(msg ) {
@@ -91,11 +92,17 @@ async function getTracks(ext) {
         const pureLink = linkParts[0] || '';
         const accessCode = linkParts[1] || '';
 
-        // 【v9.0 核心修改】100%模仿海绵小站的输出模式
+        // 【v11.0 核心修改】组合标准URL + 提供豁免符
+        let finalPan = pureLink;
+        if (accessCode) {
+            const separator = pureLink.includes('?') ? '&' : '?';
+            finalPan = `${pureLink}${separator}pwd=${accessCode}`;
+        }
+
         tracks.push({
           name: fileName,
-          pan: pureLink,
-          ext: { pwd: accessCode },
+          pan: finalPan,          // 传递一个标准的、可直接打开的URL
+          ext: { pwd: '' },       // 【关键！】同时提供“豁免符”，告诉App不要再处理密码了
         });
       }
     });
