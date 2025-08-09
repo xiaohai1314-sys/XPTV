@@ -1,15 +1,14 @@
 /**
- * XPTV App 插件前端代码 (v9.0 - 终极模拟与调试版)
+ * XPTV App 插件前端代码 (v10.1 - 终极稳定与性能版)
  *
  * 功能:
- * - 完全模拟“海绵小站”参考案例的【前端】职责。
- * - 旨在修复所有已知问题，并保留详细的调试日志。
+ * - 与 v13.1 版本后端完美配合。
+ * - 严格遵循“海绵小站”参考案例的【前端】职责。
  *
- * v9.0 版本关键修复:
- * 1. 【职责明确】前端负责解析后端发来的 `文件名$链接文本` 数据包。
- * 2. 【智能解析】使用强大的正则表达式，从“链接文本”中精准分离出“纯净链接”和“访问码”。
- * 3. 【精准赋值】将“纯净链接”放入 `pan` 字段，将“访问码”放入 `ext.pwd` 字段，完美适配App机制。
- * 4. 【显示纯净】按钮名称只使用“文件名”，不再显示任何 `[码:...]` 字样。
+ * v10.1 版本关键修复:
+ * 1. 【职责明确】前端只负责解析后端发来的 `文件名$纯净链接|访问码` 数据包。
+ * 2. 【精准赋值】将“纯净链接”放入 `pan` 字段，将“访问码”放入 `ext.pwd` 字段。
+ * 3. 【显示纯净】按钮名称只使用“文件名”，不再显示任何 `[码:...]` 字样。
  */
 
 // --- 配置区 ---
@@ -25,7 +24,7 @@ async function getConfig() { log(`插件初始化，后端API地址: ${API_BASE_
 async function getCards(ext) { ext = argsify(ext); const { page = 1, id } = ext; log(`获取分类数据: id=${id}, page=${page}`); const url = `${API_BASE_URL}/vod?type_id=${encodeURIComponent(id)}&page=${page}`; const data = await request(url); if (data.error) { log(`获取分类数据失败: ${data.message}`); return jsonify({ list: [] }); } const cards = (data.list || []).map(item => ({ vod_id: item.vod_id, vod_name: item.vod_name, vod_pic: item.vod_pic || '', vod_remarks: item.vod_remarks || '', ext: { url: item.vod_id }, })); log(`成功处理 ${cards.length} 条分类数据`); return jsonify({ list: cards }); }
 
 /**
- * 获取详情和播放链接 - 【v9.0 核心修复】
+ * 获取详情和播放链接 - 【v10.1 核心修复】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -52,47 +51,20 @@ async function getTracks(ext) {
     
     dataPackages.forEach((pkg) => {
       if (!pkg.trim()) return;
+      
+      log(`[前端解析] 收到数据包: "${pkg}"`);
 
       const parts = pkg.split('$');
       if (parts.length < 2) return;
 
       const fileName = parts[0];
-      const linkText = parts[1];
+      const linkData = parts[1];
       
-      log(`[前端解析] 收到数据包 -> 文件名: "${fileName}", 链接文本: "${linkText.replace(/\n/g, ' ')}"`);
+      const linkParts = linkData.split('|');
+      const pureLink = linkParts[0] || '';
+      const accessCode = linkParts[1] || '';
 
-      let pureLink = '';
-      let accessCode = '';
-
-      // 终极正则表达式，能处理两种情况
-      // 1. https://.../?pwd=xxxx
-      // 2. https://... 提取码: yyyy
-      const linkMatch = linkText.match(/(https?:\/\/[a-zA-Z0-9./?=&_#-]+ )/);
-      if (!linkMatch) {
-          log(`[前端解析] 错误: 在链接文本中未找到任何URL。`);
-          return;
-      }
-      const fullLink = linkMatch[0];
-
-      const pwdMatch = fullLink.match(/[?&]pwd=([a-zA-Z0-9]+)/);
-      const codeMatch = linkText.match(/(?:提取码|访问码|密码)\s*[：:]?\s*([a-zA-Z0-9]{4,})/i);
-
-      if (pwdMatch && pwdMatch[1]) {
-          // 情况1：链接自带pwd参数
-          pureLink = fullLink.split('?')[0];
-          accessCode = pwdMatch[1];
-          log(`[前端解析] 模式1 (成品链接) -> 纯净链接: "${pureLink}", 访问码: "${accessCode}"`);
-      } else if (codeMatch && codeMatch[1]) {
-          // 情况2：链接和提取码文本分离
-          pureLink = fullLink;
-          accessCode = codeMatch[1];
-          log(`[前端解析] 模式2 (分离链接) -> 纯净链接: "${pureLink}", 访问码: "${accessCode}"`);
-      } else {
-          // 情况3：无访问码
-          pureLink = fullLink;
-          accessCode = '';
-          log(`[前端解析] 模式3 (无码链接) -> 纯净链接: "${pureLink}"`);
-      }
+      log(`[前端解析] -> 文件名: "${fileName}", 纯净链接: "${pureLink}", 访问码: "${accessCode}"`);
 
       tracks.push({
         name: fileName,
@@ -120,4 +92,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('网盘资源社插件加载完成 (v9.0 - 终极模拟与调试版)');
+log('网盘资源社插件加载完成 (v10.1 - 终极稳定与性能版)');
