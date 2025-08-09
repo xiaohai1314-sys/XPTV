@@ -1,10 +1,10 @@
 /**
- * 观影网脚本 - v19.1 (URL标准化修正版)
+ * 观影网脚本 - v19.1 (搜索修正版)
  *
  * --- 核心修正 ---
- * 1.  【URL标准化】: 修正了 appConfig.site 的定义，移除了末尾的斜杠，确保拼接生成的URL（如搜索URL）使用标准的单斜杠，避免出现 "//"。
- * 2.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
- * 3.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
+ * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
+ * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
+ * 3.  【搜索功能修正】: 重写 `search` 函数，使其能够解析新版搜索页面返回的 JavaScript 数据对象 (`_obj.search`)，而不是依赖于旧的 HTML 元素解析，从根本上解决了搜索功能失效的问题。
  * 4.  保留了之前版本中对数据解析的稳定逻辑。
  * 5.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
  */
@@ -17,14 +17,13 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 19.1, // 版本号更新
+    ver: 19.1, // 版本号更新为搜索修正版
     title: '观影网',
-    // 【URL标准化修正】移除 site 末尾的斜杠，避免拼接时产生 "//"
-    site: 'https://www.gying.org', 
+    site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: '/mv?page=' } }, // 路径前增加斜杠以配合site的修改
-        { name: '剧集', ext: { id: '/tv?page=' } }, // 路径前增加斜杠以配合site的修改
-        { name: '动漫', ext: { id: '/ac?page=' } }, // 路径前增加斜杠以配合site的修改
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
     ],
 };
 
@@ -41,7 +40,7 @@ async function fetchWithCookie(url, options = {}) {
     const headers = { 
         'User-Agent': UA, 
         'Cookie': HARDCODED_COOKIE, 
-        'Referer': appConfig.site + '/', // Referer需要根路径
+        'Referer': appConfig.site, 
         ...options.headers 
     };
     return $fetch.get(url, { ...options, headers });
@@ -74,7 +73,7 @@ async function getCards(ext) {
             return jsonify({ list: [] });
         }
         const cards = inlistData.i.map((item, index) => {
-            const detailApiUrl = `${appConfig.site}/res/downurl/${inlistData.ty}/${item}`;
+            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
             return {
                 vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
@@ -122,54 +121,54 @@ async function getTracks(ext) {
 }
 
 /**
- * 执行搜索
+ * 执行搜索 (已修正)
  */
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
     let page = ext.page || 1;
-    // 此处拼接现在会生成标准的单斜杠URL
     let url = `${appConfig.site}/s/1---${page}/${text}`;
     log(`执行搜索: ${url}`);
     try {
-        const { data } = await fetchWithCookie(url);
-        const $ = cheerio.load(data);
-        let cards = [];
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-            const additionalInfo = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-            const match = path.match(/\/([a-z]+)\/(\d+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
-            const detailApiUrl = `${appConfig.site}/res/downurl/${type}/${vodId}`;
-            
-            // 【海报URL修正】搜索结果的海报地址也需要修正
-            // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
-            // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
-            let finalImgUrl = imgUrl || '';
-            if (finalImgUrl.endsWith('.webp'  )) {
-                finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
-            }
+        const { data: htmlText } = await fetchWithCookie(url);
 
-            cards.push({
+        // 使用正则表达式从返回的HTML中匹配并提取 _obj.search 数据块
+        const match = htmlText.match(/_obj\.search\s*=\s*({.*?});/);
+        if (!match || !match[1]) {
+            throw new Error("未能从HTML响应中匹配到 '_obj.search' 数据。");
+        }
+
+        // 将匹配到的字符串解析为JSON对象
+        const searchData = JSON.parse(match[1]);
+        if (!searchData || !searchData.i || searchData.i.length === 0) {
+            log("搜索结果为空或数据格式不正确。");
+            return jsonify({ list: [] });
+        }
+
+        // 遍历解析后的数据，重组成卡片列表
+        const cards = searchData.i.map((id, index) => {
+            const type = searchData.d[index]; // 获取类型 (mv, tv, etc.)
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${id}`;
+            
+            return {
                 vod_id: detailApiUrl,
-                vod_name: name,
-                vod_pic: finalImgUrl,
-                vod_remarks: additionalInfo,
+                vod_name: searchData.title[index], // 从 title 数组获取标题
+                // 【海报URL修正】根据新规则拼接海报地址
+                vod_pic: `https://s.tutu.pm/img/${type}/${id}/220.webp`,
+                vod_remarks: searchData.info[index] || '', // 从 info 数组获取简介
                 ext: { url: detailApiUrl },
-            });
-        });
+            };
+        } );
+
         return jsonify({ list: cards });
+
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
+        $utils.toastError(`搜索失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
+
 
 /**
  * 获取播放链接
