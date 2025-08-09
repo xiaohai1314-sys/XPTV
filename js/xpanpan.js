@@ -1,21 +1,22 @@
 /**
- * XPTV App 插件前端代码 (最终修复版 v4)
+ * XPTV App 插件前端代码 (v5 - 精准识别版)
  * 
  * 功能:
- * - 与后端API交互，获取网盘资源社的内容
- * - 支持分类浏览、搜索、详情查看
- * - 智能识别网盘类型并显示提取码
+ * - 与后端API交互，获取网盘资源社的内容。
+ * - 支持分类浏览、搜索、详情查看。
+ * - 精准识别后端返回的网盘类型（夸克、阿里、UC）并显示提取码。
  * 
- * v4 版本关键修复与优化:
- * 1. 【继承v3】包含v3版本所有修复和优化。
- * 2. 【功能增强】增加对百度、迅雷、UC、天翼云盘的识别支持，确保所有链接都能正确显示。
+ * v5 版本关键优化:
+ * 1. 【精准识别】getTracks 函数中的网盘识别逻辑更新，与后端返回的链接类型严格对应。
+ * 2. 【代码简化】移除了对百度、迅雷等App不支持的网盘的识别代码，使逻辑更清晰。
+ * 3. 【体验优化】当链接中包含由后端拼接好的提取码时，能在资源名称中清晰地展示出来。
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.3:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务必替换为你的后端服务实际地址
 // --- 配置区 ---
 
-// XPTV App 环境函数 (如果在真实环境中，这些函数由App提供)
+// XPTV App 环境函数 (如果在真实环境中 ，这些函数由App提供)
 function log(msg) {
   try { 
     $log(`[网盘资源社插件] ${msg}`); 
@@ -27,6 +28,7 @@ function log(msg) {
 async function request(url) {
   log(`发起请求: ${url}`);
   try {
+    // 假设 $fetch 和 $log 是由 XPTV App 环境提供的
     const response = await $fetch.get(url, {
       headers: { 'Accept': 'application/json' },
       timeout: 30000,
@@ -96,7 +98,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取详情和播放链接 - 【v4 核心修复】
+ * 获取详情和播放链接 - 【v5 核心优化】
  */
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -123,45 +125,36 @@ async function getTracks(ext) {
     
     playUrls.forEach((playUrl, index) => {
       if (playUrl.trim()) {
-        let panName = `网盘 ${index + 1}`;
+        let panName = `网盘 ${index + 1}`; // 默认名称
         let cleanUrl = playUrl.trim();
         let passCode = '';
 
-        const passCodeMatch = playUrl.match(/^(.*?)\s*\(提取码:\s*([a-zA-Z0-9]+)\)$/);
-        
-        if (passCodeMatch && passCodeMatch[1] && passCodeMatch[2]) {
-          cleanUrl = passCodeMatch[1].trim();
-          passCode = passCodeMatch[2];
+        // 【v5 核心优化】尝试从后端拼接好的链接中解析出提取码
+        // 这个正则能匹配 ?pwd=xxxx 或 &pwd=xxxx
+        const passCodeMatch = cleanUrl.match(/[?&]pwd=([a-zA-Z0-9]+)/);
+        if (passCodeMatch && passCodeMatch[1]) {
+          passCode = passCodeMatch[1];
         }
         
-        // --- 【v4 核心修改】---
-        // 根据纯净链接识别网盘类型，增加对所有网盘的支持
-        if (cleanUrl.includes('quark')) {
+        // --- 【v5 核心优化】---
+        // 根据链接关键词精准识别App支持的网盘类型
+        if (cleanUrl.includes('quark.cn')) {
             panName = `夸克网盘 ${index + 1}`;
-        } else if (cleanUrl.includes('baidu')) {
-            panName = `百度网盘 ${index + 1}`;
-        } else if (cleanUrl.includes('alipan')) {
+        } else if (cleanUrl.includes('aliyundrive.com') || cleanUrl.includes('alipan.com')) {
             panName = `阿里云盘 ${index + 1}`;
-        } else if (cleanUrl.includes('xunlei')) {
-            panName = `迅雷网盘 ${index + 1}`;
         } else if (cleanUrl.includes('uc.cn')) {
             panName = `UC网盘 ${index + 1}`;
-        } else if (cleanUrl.includes('cloud.189.cn')) { // <-- 新增天翼云盘
-            panName = `天翼云盘 ${index + 1}`;
-        } else if (cleanUrl.includes('115')) {
-            panName = `115网盘 ${index + 1}`;
-        } else if (cleanUrl.includes('lanzou')) {
-            panName = `蓝奏云 ${index + 1}`;
         }
         // --- 【修改结束】---
         
         if (passCode) {
-          panName += ` [码:${passCode}] (请手动输入)`;
+          // 如果有提取码，附加到名称上，给用户清晰的提示
+          panName += ` [码:${passCode}]`;
         }
         
         tracks.push({
           name: panName,
-          pan: cleanUrl,
+          pan: cleanUrl, // 直接使用后端返回的、可能已经拼接好的链接
           ext: {},
         });
         
@@ -209,6 +202,7 @@ async function search(ext) {
 }
 
 // --- 兼容旧版 XPTV App 接口 ---
+// 假设 jsonify, argsify, $fetch, $log 是由App环境提供的
 async function init() { return getConfig(); }
 async function home() { 
   const c = await getConfig(); 
@@ -222,6 +216,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('网盘资源社插件加载完成 (v4 修复版)');
-
-
+log('网盘资源社插件加载完成 (v5 - 精准识别版)');
