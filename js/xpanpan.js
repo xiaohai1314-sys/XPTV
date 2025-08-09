@@ -1,14 +1,14 @@
 /**
- * XPTV App 插件前端代码 (v7.0 - 最终生产版)
+ * XPTV App 插件前端代码 (v8.0 - 最终生产版)
  * 
  * 功能:
  * - 与 v18.0 版本后端完美配合。
- * - 核心: 在前端完成链接和密码的最终组合，生成带 ?pwd= 参数的URL。
- * - 职责: 适配App播放器无法自动处理分离式密码的问题，提供即用型链接。
+ * - 核心: 在前端完成链接和密码的最终组合，生成App能识别的特定文本格式。
+ * - 格式: 精确模仿海绵小站纯前端版的输出，生成 `链接（访问码：密码）` 格式的字符串。
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.7:3000/api'; // 请务必替换为你的后端服务实际地址
 // --- 配置区 ---
 
 function log(msg ) {
@@ -91,16 +91,15 @@ async function getTracks(ext) {
         const pureLink = linkParts[0] || '';
         const accessCode = linkParts[1] || '';
 
-        // 【v7.0 核心修改】在前端进行最终的URL组合
-        let finalUrl = pureLink;
+        // 【v8.0 核心修改】精确模仿海绵小站纯前端的输出格式
+        let finalPan = pureLink;
         if (accessCode) {
-            const separator = pureLink.includes('?') ? '&' : '?';
-            finalUrl = `${pureLink}${separator}pwd=${accessCode}`;
+            finalPan = `${pureLink}（访问码：${accessCode}）`;
         }
 
         tracks.push({
           name: fileName,
-          pan: finalUrl, // 将组合好的、带pwd参数的完整URL传给App
+          pan: finalPan, // 将【特定格式】的字符串传给pan
           ext: {},       // ext字段保持为空
         });
       }
