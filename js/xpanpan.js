@@ -8,7 +8,7 @@
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.7:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务必替换为你的后端服务实际地址
 // --- 配置区 ---
 
 function log(msg ) {
