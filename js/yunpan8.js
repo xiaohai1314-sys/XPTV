@@ -6,11 +6,13 @@
  * - 修复了 getTracks 函数中 setTimeout 不存在的致命错误。
  * - 保留了您指示的核心修改：将文件名硬编码为"网盘"。
  * - Cookie 仍为您提供的最新值。
+ * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及谐音字等。
+ * - 【优化】移除了可能导致错误的易混淆字母转换，增强了稳定性。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X    ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -19,7 +21,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg ) { 
+function log(msg  ) { 
     try { 
         $log(`[海绵小站 最终修复版] ${msg}`); 
     } catch (_) { 
@@ -114,7 +116,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
+    if (path.startsWith('http'  )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -133,7 +135,6 @@ async function getCards(ext) {
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
             vod_pic: getCorrectPicUrl(picPath),
-            // 【已修复】增加了 .text()
             vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
             ext: { url: $(item).find(".subject a")?.attr("href") || "" }
         });
@@ -146,7 +147,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版】 getTracks 函数 ===================
+// =================== 【最终修复版 + 最终优化版访问码转换】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -166,7 +167,6 @@ async function getTracks(ext) {
             const replied = await reply(detailUrl);
             if (replied) {
                 log("回帖成功，重新获取页面内容...");
-                // 【已修复】替换了 setTimeout
                 await $utils.sleep(1000); 
                 const retryResponse = await fetchWithCookie(detailUrl);
                 data = retryResponse.data;
@@ -183,7 +183,7 @@ async function getTracks(ext) {
 
         // --- 步骤一：采集所有链接地址 ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex  ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
         // --- 步骤二：采集所有访问码 ---
@@ -196,22 +196,54 @@ async function getTracks(ext) {
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http' )) {
+            if (code.length < 15 && !code.includes('http'  )) {
                  codePool.push(code);
             }
         }
         codePool = [...new Set(codePool)];
-        log(`采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
+        log(`采集到 ${codePool.length} 个原始访问码: ${JSON.stringify(codePool)}`);
+
+        // ★★★ 【新增功能】 最终优化版访问码转换 ★★★
+        const finalNumMap = {
+            // 1. 中文数字 (大小写及谐音)
+            '零': '0', '〇': '0',
+            '一': '1', '壹': '1', '依': '1',
+            '二': '2', '贰': '2',
+            '三': '3', '叁': '3',
+            '四': '4', '肆': '4',
+            '五': '5', '伍': '5',
+            '六': '6', '陆': '6',
+            '七': '7', '柒': '7',
+            '八': '8', '捌': '8',
+            '九': '9', '玖': '9', '久': '9', '酒': '9',
+            // 2. 罗马数字
+            'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
+            // 3. 带圈数字
+            '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
+            // 4. 全角数字
+            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+        };
+        const convertedCodePool = codePool.map(code => {
+            let convertedCode = '';
+            for (const char of code) {
+                convertedCode += finalNumMap[char] || char;
+            }
+            if (code !== convertedCode) {
+                log(`访问码转换: "${code}" -> "${convertedCode}"`);
+            }
+            return convertedCode;
+        });
+        codePool = convertedCodePool;
+        log(`转换后 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         // --- 步骤三：循环处理，分配并生成结果 ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
                 
-                // ★★★ 【核心修正】 ★★★
                 const fileName = "网盘";
                 log(`文件名被统一设置为: ${fileName}`);
 
-                // 分配访问码
                 const code = codePool[index] || '';
                 let finalPan;
                 if (code) {
@@ -259,7 +291,6 @@ async function search(ext) {
             vod_id: $(item).find(".subject a")?.attr("href") || "",
             vod_name: $(item).find(".subject a")?.text().trim() || "",
             vod_pic: getCorrectPicUrl(picPath),
-            // 【已修复】增加了 .text()
             vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
             ext: { url: $(item).find(".subject a")?.attr("href") || "" }
         });
