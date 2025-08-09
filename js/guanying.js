@@ -1,46 +1,47 @@
 /**
- * 观影网脚本 - v19.0 (双斜杠修正版)
+ * 观影网脚本 - v19.1 (URL标准化修正版)
  *
  * --- 核心修正 ---
- * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
- * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
- * 3.  保留了之前版本中对数据解析的稳定逻辑。
- * 4.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
- * 5.  【v19.0.1】根据用户指令，仅修复 search 函数中 URL 拼接产生的双斜杠问题。
+ * 1.  【URL标准化】: 修正了 appConfig.site 的定义，移除了末尾的斜杠，确保拼接生成的URL（如搜索URL）使用标准的单斜杠，避免出现 "//"。
+ * 2.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
+ * 3.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
+ * 4.  保留了之前版本中对数据解析的稳定逻辑。
+ * 5.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
  */
 
-// ================== 配置区 (原封不动) ==================
+// ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
-// 【Cookie修正】直接使用您提供的有效Cookie (原封不动)
+// 【Cookie修正】直接使用您提供的有效Cookie
 const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: '19.0.1', // 版本号更新为双斜杠修正版
+    ver: 19.1, // 版本号更新
     title: '观影网',
-    site: 'https://www.gying.org/',
+    // 【URL标准化修正】移除 site 末尾的斜杠，避免拼接时产生 "//"
+    site: 'https://www.gying.org', 
     tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
-        { name: '剧集', ext: { id: 'tv?page=' } },
-        { name: '动漫', ext: { id: 'ac?page=' } },
+        { name: '电影', ext: { id: '/mv?page=' } }, // 路径前增加斜杠以配合site的修改
+        { name: '剧集', ext: { id: '/tv?page=' } }, // 路径前增加斜杠以配合site的修改
+        { name: '动漫', ext: { id: '/ac?page=' } }, // 路径前增加斜杠以配合site的修改
     ],
 };
 
-// ================== 核心函数 (原封不动 ) ==================
+// ================== 核心函数 (简化登录逻辑  ) ==================
 
-function log(msg) { try { $log(`[观影网 V19.0.1] ${msg}`); } catch (_) { console.log(`[观影网 V19.0.1] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V19.1] ${msg}`); } catch (_) { console.log(`[观影网 V19.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
 /**
- * 使用固定的Cookie发起网络请求 (原封不动)
+ * 使用固定的Cookie发起网络请求
  */
 async function fetchWithCookie(url, options = {}) {
     const headers = { 
         'User-Agent': UA, 
         'Cookie': HARDCODED_COOKIE, 
-        'Referer': appConfig.site, 
+        'Referer': appConfig.site + '/', // Referer需要根路径
         ...options.headers 
     };
     return $fetch.get(url, { ...options, headers });
@@ -50,11 +51,11 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数 - 已修正】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 /**
- * 获取分类页面的卡片列表 (原封不动)
+ * 获取分类页面的卡片列表
  */
 async function getCards(ext) {
     ext = argsify(ext);
@@ -73,10 +74,11 @@ async function getCards(ext) {
             return jsonify({ list: [] });
         }
         const cards = inlistData.i.map((item, index) => {
-            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+            const detailApiUrl = `${appConfig.site}/res/downurl/${inlistData.ty}/${item}`;
             return {
                 vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
+                // 【海报URL修正】正确拼接海报地址，增加 /220 后缀
                 vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
                 vod_remarks: inlistData.g[index] || '',
                 ext: { url: detailApiUrl },
@@ -91,7 +93,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取播放轨道列表 (原封不动)
+ * 获取播放轨道列表
  */
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -120,13 +122,14 @@ async function getTracks(ext) {
 }
 
 /**
- * 执行搜索 (【唯一修改点】)
+ * 执行搜索
  */
 async function search(ext) {
     ext = argsify(ext);
     let text = encodeURIComponent(ext.text);
     let page = ext.page || 1;
-    let url = `${appConfig.site}s/1---${page}/${text}`;
+    // 此处拼接现在会生成标准的单斜杠URL
+    let url = `${appConfig.site}/s/1---${page}/${text}`;
     log(`执行搜索: ${url}`);
     try {
         const { data } = await fetchWithCookie(url);
@@ -139,14 +142,17 @@ async function search(ext) {
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
             if (!path) return;
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+            const detailApiUrl = `${appConfig.site}/res/downurl/${type}/${vodId}`;
             
-            // 【关键修正】确保从 path 中提取的相对路径能被正确拼接
-            // 原始 path 可能是 /mv/xxxx，也可能是 /tv/xxxx
-            // new URL() 是处理这种拼接最安全的方式，它能自动处理多余的斜杠
-            const detailApiUrl = new URL(path, appConfig.site).href;
-            
+            // 【海报URL修正】搜索结果的海报地址也需要修正
+            // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
+            // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
             let finalImgUrl = imgUrl || '';
-            if (finalImgUrl.endsWith('.webp' )) {
+            if (finalImgUrl.endsWith('.webp'  )) {
                 finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
             }
 
@@ -166,7 +172,7 @@ async function search(ext) {
 }
 
 /**
- * 获取播放链接 (原封不动)
+ * 获取播放链接
  */
 async function getPlayinfo(ext) {
     ext = argsify(ext);
