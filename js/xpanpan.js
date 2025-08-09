@@ -1,11 +1,10 @@
 /**
- * XPTV App 插件前端代码 (v5.0 - 生产最终版)
+ * XPTV App 插件前端代码 (v6.0 - 海绵模式最终版)
  * 
  * 功能:
- * - 与 v17.0 版本后端完美配合。
- * - 职责单一：只负责请求和展示后端处理好的标准化数据。
- * - 逻辑简化：getTracks函数不再进行任何密码分离，直接使用后端组合好的URL。
- * - 显示优化：按照指示，移除了文件名后拼接的[码:xxxx]无效显示。
+ * - 与 v18.0 版本后端完美配合。
+ * - 核心: 完全复刻“海绵小站”前端的解包逻辑。
+ * - 职责: 负责解析后端传来的“文件名$纯净链接|密码”数据包，并适配App接口。
  */
 
 // --- 配置区 ---
@@ -86,12 +85,16 @@ async function getTracks(ext) {
         if (parts.length < 2) return;
 
         const fileName = parts[0];
-        const standardUrl = parts[1]; // 这已经是后端组合好的、可以直接使用的URL
+        const dataPacket = parts[1]; // 拿到 "纯净链接|密码"
+
+        const linkParts = dataPacket.split('|');
+        const pureLink = linkParts[0] || '';
+        const accessCode = linkParts[1] || '';
 
         tracks.push({
           name: fileName,
-          pan: standardUrl, // 直接使用标准URL
-          ext: {},          // ext.pwd不再需要
+          pan: pureLink,
+          ext: { pwd: accessCode },
         });
       }
     });
