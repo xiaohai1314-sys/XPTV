@@ -7,7 +7,7 @@
  * - 保留了您指示的核心修改：将文件名硬编码为"网盘"。
  * - Cookie 仍为您提供的最新值。
  * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及谐音字等。
- * - 【优化】移除了可能导致错误的易混淆字母转换，增强了稳定性。
+ * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
  */
 
 // --- 配置区 ---
@@ -147,7 +147,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版 + 最终优化版访问码转换】 getTracks 函数 ===================
+// =================== 【最终修复版 + 兜底策略访问码提取】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -188,53 +188,60 @@ async function getTracks(ext) {
 
         // --- 步骤二：采集所有访问码 ---
         let codePool = [];
-        const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
-        let match;
-        while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-            codePool.push(match[1].trim());
-        }
+        
+        // 【保留策略1】优先使用最精确的DIV提取
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
+        let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
             if (code.length < 15 && !code.includes('http'  )) {
                  codePool.push(code);
             }
         }
-        codePool = [...new Set(codePool)];
-        log(`采集到 ${codePool.length} 个原始访问码: ${JSON.stringify(codePool)}`);
+        
+        // 【保留策略2】如果策略1失败，使用次精确的文本提取
+        if (codePool.length === 0) {
+            const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
+            while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
+                codePool.push(match[1].trim());
+            }
+        }
+        
+        // ★★★ 【新增兜底策略】 ★★★
+        // 仅当以上所有精确策略都失败后，才启用此策略
+        if (codePool.length === 0) {
+            log("标准提取失败，启用兜底策略处理复杂访问码...");
+            const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
+            while ((match = fallbackRegex.exec(mainMessageText)) !== null) {
+                // 捕获到的可能是包含描述的长字符串，如 "y②nk ②改成数字2"
+                let rawCode = match[1].trim(); 
+                log(`兜底策略捕获到原始字符串: "${rawCode}"`);
+                
+                // 使用我们强大的转换函数进行转换
+                const finalNumMap = {
+                    '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9',
+                    'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
+                    '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
+                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+                };
+                let convertedCode = '';
+                for (const char of rawCode) {
+                    convertedCode += finalNumMap[char] || char;
+                }
+                log(`转换后字符串: "${convertedCode}"`);
 
-        // ★★★ 【新增功能】 最终优化版访问码转换 ★★★
-        const finalNumMap = {
-            // 1. 中文数字 (大小写及谐音)
-            '零': '0', '〇': '0',
-            '一': '1', '壹': '1', '依': '1',
-            '二': '2', '贰': '2',
-            '三': '3', '叁': '3',
-            '四': '4', '肆': '4',
-            '五': '5', '伍': '5',
-            '六': '6', '陆': '6',
-            '七': '7', '柒': '7',
-            '八': '8', '捌': '8',
-            '九': '9', '玖': '9', '久': '9', '酒': '9',
-            // 2. 罗马数字
-            'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
-            // 3. 带圈数字
-            '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
-            // 4. 全角数字
-            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
-        };
-        const convertedCodePool = codePool.map(code => {
-            let convertedCode = '';
-            for (const char of code) {
-                convertedCode += finalNumMap[char] || char;
+                // 从转换后的结果中提取出干净的访问码 (通常是开头的字母和数字)
+                const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
+                if (cleanCodeMatch) {
+                    const finalCode = cleanCodeMatch[0];
+                    log(`精加工提取出最终访问码: "${finalCode}"`);
+                    codePool.push(finalCode);
+                }
             }
-            if (code !== convertedCode) {
-                log(`访问码转换: "${code}" -> "${convertedCode}"`);
-            }
-            return convertedCode;
-        });
-        codePool = convertedCodePool;
-        log(`转换后 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
+        }
+        
+        codePool = [...new Set(codePool)];
+        log(`最终采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         // --- 步骤三：循环处理，分配并生成结果 ---
