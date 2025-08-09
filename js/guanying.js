@@ -1,22 +1,25 @@
 /**
- * 观影网脚本 - v19.0.1 (双斜杠修正版)
+ * 观影网脚本 - v19.0 (双斜杠修正版)
  *
  * --- 核心修正 ---
- * 1.  【回归初心】: 严格基于用户稳定可用的 v19.0 版本，废弃所有之前的错误修改。
- * 2.  【定位并修复致命错误】: 根据用户精准指出，修正了 `search` 函数中拼接详情URL时产生的双斜杠 `//` 问题。这是导致搜索功能失效的根本原因。
- * 3.  【最小化改动】: 除修复双斜杠这一点外，脚本其余所有部分均与 v19.0 保持100%一致，确保最大稳定性。
+ * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
+ * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
+ * 3.  保留了之前版本中对数据解析的稳定逻辑。
+ * 4.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
+ * 5.  【v19.0.1】根据用户指令，仅修复 search 函数中 URL 拼接产生的双斜杠问题。
  */
 
-// ================== 配置区 (来自 v19.0) ==================
+// ================== 配置区 (原封不动) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
+// 【Cookie修正】直接使用您提供的有效Cookie (原封不动)
 const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
     ver: '19.0.1', // 版本号更新为双斜杠修正版
     title: '观影网',
-    site: 'https://www.gying.org/', // 结尾带 /
+    site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
         { name: '剧集', ext: { id: 'tv?page=' } },
@@ -24,12 +27,15 @@ const appConfig = {
     ],
 };
 
-// ================== 核心函数 (来自 v19.0 ) ==================
+// ================== 核心函数 (原封不动 ) ==================
 
 function log(msg) { try { $log(`[观影网 V19.0.1] ${msg}`); } catch (_) { console.log(`[观影网 V19.0.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
+/**
+ * 使用固定的Cookie发起网络请求 (原封不动)
+ */
 async function fetchWithCookie(url, options = {}) {
     const headers = { 
         'User-Agent': UA, 
@@ -48,7 +54,7 @@ async function getConfig() { return jsonify(appConfig); }
 // =======================================================================
 
 /**
- * 获取分类页面的卡片列表 (来自 v19.0, 保持不变)
+ * 获取分类页面的卡片列表 (原封不动)
  */
 async function getCards(ext) {
     ext = argsify(ext);
@@ -85,7 +91,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取播放轨道列表 (来自 v19.0, 保持不变)
+ * 获取播放轨道列表 (原封不动)
  */
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -114,7 +120,7 @@ async function getTracks(ext) {
 }
 
 /**
- * 执行搜索 (【唯一修正点】修复双斜杠问题)
+ * 执行搜索 (【唯一修改点】)
  */
 async function search(ext) {
     ext = argsify(ext);
@@ -133,9 +139,10 @@ async function search(ext) {
             const additionalInfo = $element.find('p').text().trim();
             const path = $element.find('a').attr('href');
             if (!path) return;
-
-            // 【关键修正】使用 new URL() 来规范化拼接，彻底避免双斜杠问题
-            // 它会自动处理 site 结尾的 / 和 path 开头的 /
+            
+            // 【关键修正】确保从 path 中提取的相对路径能被正确拼接
+            // 原始 path 可能是 /mv/xxxx，也可能是 /tv/xxxx
+            // new URL() 是处理这种拼接最安全的方式，它能自动处理多余的斜杠
             const detailApiUrl = new URL(path, appConfig.site).href;
             
             let finalImgUrl = imgUrl || '';
@@ -159,7 +166,7 @@ async function search(ext) {
 }
 
 /**
- * 获取播放链接 (来自 v19.0, 保持不变)
+ * 获取播放链接 (原封不动)
  */
 async function getPlayinfo(ext) {
     ext = argsify(ext);
