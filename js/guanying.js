@@ -1,192 +1,126 @@
-//方佬改进
-//2025-2-5由于网站dns劫持，修改
-const cheerio = createCheerio()
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
+/**
+ * 观影网脚本 - v18.0 (架构升级版)
+ *
+ * --- 核心思想 ---
+ * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
+ * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
+ * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
+ */
+
+// ================== 配置区 ==================
+// ★ 后端不再需要cheerio
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+// ★ 指向你的后端服务器地址
+const BACKEND_URL = 'http://192.168.1.4:5000'; 
 
 const appConfig = {
-	ver: 1,
-	title: '观影网',
-	site: 'https://www.gying.org/',
-	tabs: [
-		{
-			name: '电影',
-			ext: {
-				id: 'mv?page=',
-			},
-		},
-		{
-			name: '剧集',
-			ext: {
-				id: 'tv?page=',
-			},
-		},
-		{
-			name: '动漫',
-			ext: {
-				id: 'ac?page=',
-			},
-		}
-		
-	],
+    ver: 18.0,
+    title: '观影网 (后端版 )', // 标题变更以区分
+    site: 'https://www.gying.org/',
+    tabs: [
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
+    ],
+};
+
+// ★★★★★【Cookie相关逻辑已全部移除】★★★★★
+
+// ================== 核心函数 ==================
+
+function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+
+// ★ 【Cookie 和 fetchWithCookie 已被移除】
+
+// --- init (与V17.0完全一致) ---
+async function init(ext) {
+    return jsonify({});
 }
+
+// --- getConfig (与V17.0完全一致) ---
 async function getConfig() {
-	return jsonify(appConfig)
+    return jsonify(appConfig);
 }
 
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+// --- 【改造】getCards ---
 async function getCards(ext) {
-	ext = argsify(ext)
-	let cards = []
-	let { page = 1, id } = ext
-	const url =`${appConfig.site}${id}${page}`
-       //$utils.toastError(url);
-	const { data } = await $fetch.get(url, {
-    headers: {
-		"User-Agent": UA,
-  	  },
-});
-	const $ = cheerio.load(data)
-	
-	const t1 = $('p.error').text()
-	  if ($('p.error').length > 0) { 
-		$utils.openSafari(appConfig.site, UA);
-	  }
-	  
-	
-	const scriptContent = $('script').filter((_, script) => {
-			return $(script).html().includes('_obj.header');
-		}).html();
+    ext = argsify(ext);
+    const { page = 1, id } = ext;
+    // ★ 直接请求后端 /getCards 接口
+    const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
+    log(`请求后端获取卡片列表: ${url}`);
 
-		const jsonStart = scriptContent.indexOf('{');
-		const jsonEnd = scriptContent.lastIndexOf('}') + 1;
-		const jsonString = scriptContent.slice(jsonStart, jsonEnd);
-
-		const inlistMatch = jsonString.match(/_obj\.inlist=({.*});/);
-		if (!inlistMatch) {
-		$utils.toastError("未找到 _obj.inlist 数据");
-		} else {
-	
-		const inlistData = JSON.parse(inlistMatch[1]);
-	
-		inlistData["i"].forEach((item,index)=>{
-	  
-	  	cards.push({
-				  vod_id: item,
-				  vod_name: inlistData["t"][index],
-				  vod_pic: `https://s.tutu.pm/img/${inlistData["ty"]}/${item}.webp`,
-				  vod_remarks: inlistData["g"][index], 
-				  ext: {
-					  url: `${appConfig.site}res/downurl/${inlistData["ty"]}/${item}`,
-				  },
-			  })
-	})	
-}
-		return jsonify({
-		list: cards,
-	})
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
+        }
+        log(`✅ 成功从后端获取到 ${result.list.length} 个项目。`);
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 请求后端卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        return jsonify({ list: [] });
+    }
 }
 
+// --- 【改造】getTracks ---
 async function getTracks(ext) {
-	
-	ext = argsify(ext)
-    let tracks = []
-	let url = ext.url
-
-	const { data } = await $fetch.get(url, {
-		headers: {
-			'User-Agent': UA,
-		},
-	})
-	 const respstr =JSON.parse(data)
-
-	 if(respstr.hasOwnProperty('panlist')){
-   	 const regex = {
-	            '中英': /中英/g,
-	            '1080P': /1080P/g,
-	            '杜比': /杜比/g,
-	            '原盘': /原盘/g,
-	            '1080p': /1080p/g,
-	            '双语字幕': /双语字幕/g,
-       	 };
-     respstr.panlist.url.forEach((item, index) => {
-
-	    	 let name = ''
-           	 for (const keyword in regex) {
-                	const matches = respstr.panlist.name[index].match(regex[keyword]);
-                	if(matches){
-               
-               		 name = `${name}${matches[0]}`
-               	 	}
-             
-           	 }
-//${respstr.panlist.tname[respstr.panlist.type[index]]}
-			tracks.push({
-				name:name,
-				pan: item,
-				ext: {
-					url: '',
-				},
-			})
-		})
-   }else if(respstr.hasOwnProperty('file')){
-
-   $utils.toastError('网盘验证掉签请前往主站完成验证数字')
-   }else{
-
-	$utils.toastError('没有网盘资源');
-	
-}
-   return jsonify({
-		list: [
-			{
-				title: '默认分组',
-				tracks,
-			},
-		],
-	})
+    ext = argsify(ext);
+    const detailUrl = ext.url; 
+    // ★ 直接请求后端 /getTracks 接口
+    const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
+    log(`请求后端获取详情数据: ${url}`);
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
+        }
+        if (result.message) {
+            $utils.toastError(result.message, 4000);
+        }
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 获取详情数据异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        return jsonify({ list: [] });
+    }
 }
 
-async function getPlayinfo(ext) {
-	ext = argsify(ext)
-	const url = ext.url
-   	  
-	return jsonify({ urls: [ext.url] })
-}
-
+// --- 【改造】search ---
 async function search(ext) {
-	ext = argsify(ext)
-	
+    ext = argsify(ext);
+    const text = ext.text;
+    const page = ext.page || 1;
+    // ★ 直接请求后端 /search 接口
+    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
+    log(`请求后端执行搜索: ${url}`);
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
+        }
+        log(`✅ 成功从后端获取到 ${result.list.length} 个搜索结果。`);
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 搜索异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        return jsonify({ list: [] });
+    }
+}
 
-	let text = encodeURIComponent(ext.text)
-	let page = ext.page || 1
-	let url = `${appConfig.site}/s/1---${page}/${text}`
-
-	const { data } = await $fetch.get(url, {
-	   headers: {
-	"User-Agent": UA,
-    	},
-	})
-
-	const $ = cheerio.load(data)
-let cards = []
-   $('.v5d').each((index, element) => {
-   const name = $(element).find('b').text().trim() || 'N/A';
-   const imgUrl = $(element).find('picture source[data-srcset]').attr('data-srcset') || 'N/A';
-  
-  	const additionalInfo = $(element).find('p').text().trim() || 'N/A';
-
-  	const pathMatch =  $(element).find('a').attr('href') || 'N/A'
-		cards.push({
-			vod_id: pathMatch,
-			vod_name: name,
-			vod_pic: imgUrl,
-			vod_remarks: additionalInfo,
-
-			ext: {
-				url: `${appConfig.site}/res/downurl${pathMatch}`,
-			},
-		})
-});
-	return jsonify({
-		list: cards,
-	})
+// --- 【原封不动】getPlayinfo ---
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const panLink = ext.pan;
+    return jsonify({ urls: [panLink] });
 }
