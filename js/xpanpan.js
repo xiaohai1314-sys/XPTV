@@ -1,10 +1,10 @@
 /**
- * XPTV App 插件前端代码 (v8.0 - 最终生产版)
+ * XPTV App 插件前端代码 (v9.0 - 像素级模仿最终版)
  * 
  * 功能:
  * - 与 v18.0 版本后端完美配合。
- * - 核心: 在前端完成链接和密码的最终组合，生成App能识别的特定文本格式。
- * - 格式: 精确模仿海绵小站纯前端版的输出，生成 `链接（访问码：密码）` 格式的字符串。
+ * - 核心: 完全复刻“海绵小站”前端的解包逻辑，将后端数据包精准拆分为 pan 和 ext.pwd。
+ * - 目标: 解决App播放器需要分离的链接和密码才能正常工作的问题。
  */
 
 // --- 配置区 ---
@@ -91,16 +91,11 @@ async function getTracks(ext) {
         const pureLink = linkParts[0] || '';
         const accessCode = linkParts[1] || '';
 
-        // 【v8.0 核心修改】精确模仿海绵小站纯前端的输出格式
-        let finalPan = pureLink;
-        if (accessCode) {
-            finalPan = `${pureLink}（访问码：${accessCode}）`;
-        }
-
+        // 【v9.0 核心修改】100%模仿海绵小站的输出模式
         tracks.push({
           name: fileName,
-          pan: finalPan, // 将【特定格式】的字符串传给pan
-          ext: {},       // ext字段保持为空
+          pan: pureLink,
+          ext: { pwd: accessCode },
         });
       }
     });
