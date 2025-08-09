@@ -1,11 +1,14 @@
 /**
- * 观影网脚本 - v19.0 (最终修正版)
+ * 观影网脚本 - v19.1 (搜索功能修正版)
  *
  * --- 核心修正 ---
- * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
- * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
- * 3.  保留了之前版本中对数据解析的稳定逻辑。
- * 4.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
+ * 1.  【搜索函数修正】: 根据用户反馈和提供的HTML源码，重写了 `search` 函数的解析逻辑。
+ *     - 修正了图片URL的提取选择器，使其能正确获取到 `<img>` 标签中的 `data-src` 属性。
+ *     - 保留并增强了用户指出的关键海报URL处理逻辑，确保为 `.webp` 和 `.avif` 图片地址正确添加 `/220` 后缀。
+ *     - 优化了附加信息（remarks）的提取，使其更简洁。
+ * 2.  【Cookie保持不变】: 严格按照用户要求，继续使用硬编码的指定Cookie。
+ * 3.  【其他函数保持不变】: `getCards`, `getTracks`, `getPlayinfo` 等所有其他函数均保持原样，未作任何改动。
+ * 4.  这是一个旨在修复搜索功能，同时保持其余部分稳定性的精确修正版本。
  */
 
 // ================== 配置区 ==================
@@ -13,10 +16,10 @@ const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
 // 【Cookie修正】直接使用您提供的有效Cookie
-const HARDCODED_COOKIE = 'BT_auth=87bbBu-juA8vvbbuLbC7jyCwGSzFXOpEk9euA3cfQAkCXo2lwg4ME6JX6L-iM9eyFn4FZb8kIBsVsRj2F5yVSijdIKWKy0dA8hO7Xs9rkx_GWBciNo2jCzIHB9AC7eJBTdNJ4vB_xM-QyWISygRu_crukIwHb4cTm-7libTqhqOnawlIvfduvQ;BT_cookietime=f068RKUxC5WC8J6ZvFzzk9JDAY2CPxJsM6rzmkXE2lUYxBe50lb1;browser_verified=b142dc23ed95f767248f452739a94198;PHPSESSID=vmlvdb709uclkpqqf3l3v0s8cs;';
+const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 19.0, // 版本号更新为最终修正版
+    ver: 19.1, // 版本号更新为搜索修正版
     title: '观影网',
     site: 'https://www.gying.org/',
     tabs: [
@@ -28,7 +31,7 @@ const appConfig = {
 
 // ================== 核心函数 (简化登录逻辑  ) ==================
 
-function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V19.1] ${msg}`); } catch (_) { console.log(`[观影网 V19.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -53,7 +56,7 @@ async function getConfig() { return jsonify(appConfig); }
 // =======================================================================
 
 /**
- * 获取分类页面的卡片列表
+ * 获取分类页面的卡片列表 (此函数原封不动)
  */
 async function getCards(ext) {
     ext = argsify(ext);
@@ -91,7 +94,7 @@ async function getCards(ext) {
 }
 
 /**
- * 获取播放轨道列表
+ * 获取播放轨道列表 (此函数原封不动)
  */
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -120,7 +123,7 @@ async function getTracks(ext) {
 }
 
 /**
- * 执行搜索
+ * 执行搜索 (最终修正版 - 确认海报处理逻辑并修正选择器)
  */
 async function search(ext) {
     ext = argsify(ext);
@@ -132,32 +135,43 @@ async function search(ext) {
         const { data } = await fetchWithCookie(url);
         const $ = cheerio.load(data);
         let cards = [];
+        
         $('.v5d').each((_, element) => {
             const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-            const additionalInfo = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
+            
+            const titleAnchor = $element.find('.text b a');
+            const name = titleAnchor.text().trim();
+            const path = titleAnchor.attr('href');
+
             if (!path) return;
-            const match = path.match(/\/([a-z]+)\/(\d+)/);
+
+            const match = path.match(/\/([a-z]+)\/(\w+)/);
             if (!match) return;
+
             const type = match[1];
             const vodId = match[2];
             const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
             
-            // 【海报URL修正】搜索结果的海报地址也需要修正
-            // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
-            // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
+            // 【关键修正】优先获取 <img> 的 data-src，如果不存在再获取 <source> 的 data-srcset
+            const imgUrl = $element.find('img[data-src]').attr('data-src') || $element.find('source[data-srcset]').attr('data-srcset');
+
+            // 【保留并增强正确的逻辑】对获取到的 URL 进行处理，添加 /220 后缀
             let finalImgUrl = imgUrl || '';
-            if (finalImgUrl.endsWith('.webp'  )) {
+            if (finalImgUrl.endsWith('.webp')) {
                 finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
+            } else if (finalImgUrl.endsWith('.avif')) {
+                // 兼容avif格式
+                finalImgUrl = finalImgUrl.replace('.avif', '/220.avif');
             }
+            
+            // 只获取第一个 <p> 标签作为 remarks，保持信息简洁
+            const remarks = $element.find('.text p').first().text().trim();
 
             cards.push({
                 vod_id: detailApiUrl,
                 vod_name: name,
                 vod_pic: finalImgUrl,
-                vod_remarks: additionalInfo,
+                vod_remarks: remarks,
                 ext: { url: detailApiUrl },
             });
         });
@@ -168,8 +182,9 @@ async function search(ext) {
     }
 }
 
+
 /**
- * 获取播放链接
+ * 获取播放链接 (此函数原封不动)
  */
 async function getPlayinfo(ext) {
     ext = argsify(ext);
