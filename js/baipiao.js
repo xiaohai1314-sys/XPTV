@@ -19,7 +19,7 @@ const EFFECTIVE_COOKIE = '_ok4_=NAeXbe+DhTpafaoTAXzum2H1tNveMtSDEyUgv84Ve0zQEvP3
 const appConfig = {
     ver: 1.0,
     title: '七味网(纯盘)',
-    site: 'https://www.qn63.com', // 基于HTML源码确定的域名
+    site: 'https://www.qwmkv.com', // 基于HTML源码确定的域名
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
