@@ -1,5 +1,5 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.6 (终极净化版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.5 (终极净化版)
  *
  * 版本说明:
  * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
@@ -39,7 +39,7 @@ async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
-    const url = `${appConfig.site}/list?id=${ext.id.id}&pageNum=${ext.page || 1}`;
+    const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
         // 1. 从后端获取数据对象
