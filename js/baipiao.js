@@ -1,15 +1,10 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.5 (终极净化版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.7 (远程日志诊断版)
  *
  * 版本说明:
- * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
- * 发送到本地运行的后端API，由后端负责处理所有验证和数据抓取。
- *
- * v4.0.5 更新日志:
- * - [重大修复] 解决了数据从后端返回后，因App环境兼容性问题导致无法渲染的根本原因。
- *   在 getCards 函数中增加了“数据净化”步骤：手动遍历从后端获取的列表，
- *   重新创建一个纯净、原生的JavaScript对象数组，确保App渲染引擎能正确识别。
- *   这完美复刻了 v3.0 纯前端脚本在内存中处理数据的成功模式。
+ * 这是一个用于诊断的特殊版本。它会在 getCards 函数执行的关键步骤，
+ * 通过 POST 请求将变量的状态和类型发送到后端的 /log 接口，
+ * 以便我们能在后端控制台观察到前端脚本的内部执行情况。
  */
 
 // ================== 配置区 ==================
@@ -28,9 +23,24 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg   ) { try { $log(`[七味网 v4.0] ${msg}`); } catch (_) { console.log(`[七味网 v4.0] ${msg}`); } }
+function log(msg   ) { try { $log(`[七味网 v4.0.7] ${msg}`); } catch (_) { console.log(`[七味网 v4.0.7] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// 【【【 新增：远程日志函数 】】】
+async function remoteLog(message) {
+    try {
+        // 使用 $fetch.post 发送日志，不关心返回值。
+        // 必须设置正确的 Content-Type 头，以便后端 express.json() 中间件能解析。
+        await $fetch.post(`${appConfig.site}/log`, {
+            headers: { 'Content-Type': 'application/json' },
+            json: { message: message }
+        });
+    } catch (e) {
+        // 远程日志失败，不影响主流程。可以在App的日志中看到这个错误。
+        log(`远程日志发送失败: ${e.message}`);
+    }
+}
 
 // ================== 核心实现 ==================
 
@@ -40,50 +50,47 @@ async function getConfig() { return jsonify(appConfig); }
 async function getCards(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
-    log(`请求后端API: ${url}`);
+    await remoteLog(`[1] 即将请求URL: ${url}`);
+    
     try {
-        // 1. 从后端获取数据对象 (可能是“不纯净”的)
+        // 执行网络请求
         const responseData = await $fetch.get(url);
-        if (!responseData || !responseData.list || responseData.list.length === 0) {
-            log('后端返回数据为空或格式不正确。');
-            return jsonify({ list: [] });
-        }
-
-        // 2. 【【【 终极修复：数据净化/重生 】】】
-        // 手动遍历收到的数据，创建一个全新的、纯净的数组和对象。
-        // 这100%模拟了 v3.0 脚本在内存中构造数据的行为。
-        const pureCards = [];
-        for (const item of responseData.list) {
-            pureCards.push({
-                vod_id: item.vod_id,
-                vod_name: item.vod_name,
-                vod_pic: item.vod_pic,
-                vod_remarks: item.vod_remarks,
-                ext: item.ext, // ext 字段由后端 v4.2 提供，直接复制即可
-            });
-        }
         
-        log(`✅ 数据已净化，构造了 ${pureCards.length} 个纯净的列表项。`);
+        // 记录收到的数据状态
+        await remoteLog({
+            step: '[2] $fetch.get 成功',
+            type: typeof responseData,
+            hasListProperty: responseData ? responseData.hasOwnProperty('list') : 'N/A',
+            listLength: responseData && responseData.list ? responseData.list.length : 'N/A',
+            firstItem: responseData && responseData.list && responseData.list.length > 0 ? responseData.list[0] : 'N/A'
+        });
 
-        // 3. 将纯净的数据对象传递给 jsonify
-        return jsonify({ list: pureCards });
+        // 执行 JSON 转换
+        const jsonString = jsonify(responseData);
+
+        // 记录转换后的字符串状态
+        await remoteLog({
+            step: '[3] jsonify 成功',
+            type: typeof jsonString,
+            contentSnippet: jsonString.substring(0, 200) + '...'
+        });
+
+        await remoteLog('[4] 即将返回最终的JSON字符串给App');
+        return jsonString;
 
     } catch (e) {
-        log(`❌ getCards 捕获到异常: ${e.message}`);
+        await remoteLog(`[E] getCards 捕获到异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// 其他函数保持 v4.0.4 的正确逻辑
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}/detail?urlPath=${ext.url}`;
-    log(`请求后端API: ${url}`);
     try {
         const { data } = await $fetch.get(url);
         return jsonify(data);
     } catch (e) {
-        log(`❌ 请求后端/detail接口异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
@@ -91,10 +98,8 @@ async function getTracks(ext) {
 async function search(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}/search?keyword=${encodeURIComponent(ext.text)}`;
-    log(`请求后端API: ${url}`);
     try {
         const responseData = await $fetch.get(url);
-        // 搜索功能由前端脚本自己添加 ext，保持 v4.0 的模式
         if (responseData && responseData.list) {
             responseData.list.forEach(item => {
                 item.ext = { url: item.vod_id };
@@ -102,7 +107,6 @@ async function search(ext) {
         }
         return jsonify(responseData);
     } catch (e) {
-        log(`❌ 请求后端/search接口异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
