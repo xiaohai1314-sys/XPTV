@@ -1,9 +1,8 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.1 (前后端协同最终版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.2 (最终修正版)
  *
  * 版本说明:
- * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
- * 发送到本地运行的后端API，并确保返回的数据格式完全符合App要求。
+ * 移除了导致 id=undefined 的错误代码行，确保App传递的分类ID被正确接收。
  */
 
 // ================== 配置区 ==================
@@ -11,7 +10,7 @@ const cheerio = createCheerio();
 
 // 【核心配置】请确保这里的IP地址和端口与您运行后端的电脑匹配
 const appConfig = {
-    ver: 4.1,
+    ver: 4.2,
     title: '七味网(我的专属源)',
     site: 'http://192.168.1.4:3000', // <-- 示例IP ，请替换为您电脑的局域网IP
     tabs: [
@@ -23,24 +22,24 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[七味网 v4.1] ${msg}`); } catch (_) { console.log(`[七味网 v4.1] ${msg}`); } }
+function log(msg ) { try { $log(`[七味网 v4.2] ${msg}`); } catch (_) { console.log(`[七味网 v4.2] ${msg}`); } }
+// 【重要】argsify 函数依然保留，因为它在 search 和 getTracks 中是必需的
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ================== 核心实现 (已全部简化) ==================
+// ================== 核心实现 ==================
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
-    ext = argsify(ext);
+    // 【【【 核心修正：删除了错误的 ext = argsify(ext); 这一行 】】】
+    // App直接传递过来的ext对象是正确的，我们直接使用即可。
     const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
         const { data } = await $fetch.get(url);
         
-        // 【【【 关键修正：为列表数据添加ext字段 】】】
-        // 确保App知道点击每个海报后该做什么
         if (data && data.list) {
             data.list.forEach(item => {
                 item.ext = { url: item.vod_id };
@@ -55,8 +54,8 @@ async function getCards(ext) {
 }
 
 async function getTracks(ext) {
+    // 在这里，argsify是必要的，因为ext是从字符串转换来的
     ext = argsify(ext);
-    // 【【【 关键修正：确保urlPath被正确编码 】】】
     const url = `${appConfig.site}/detail?urlPath=${encodeURIComponent(ext.url)}`;
     log(`请求后端API: ${url}`);
     try {
@@ -69,13 +68,13 @@ async function getTracks(ext) {
 }
 
 async function search(ext) {
+    // 在这里，argsify是必要的
     ext = argsify(ext);
     const url = `${appConfig.site}/search?keyword=${encodeURIComponent(ext.text)}`;
     log(`请求后端API: ${url}`);
     try {
         const { data } = await $fetch.get(url);
 
-        // 【【【 关键修正：为搜索结果添加ext字段 】】】
         if (data && data.list) {
             data.list.forEach(item => {
                 item.ext = { url: item.vod_id };
