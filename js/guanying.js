@@ -1,29 +1,23 @@
 /**
- * gying.org - 纯网盘提取脚本 - v5.0 (回归初心·最终版)
+ * gying.org - 纯网盘提取脚本 - v6.0 (环境兼容·终极版)
  *
  * 版本历史:
- * v5.0: 【最终版】回归到原脚本正确的getTracks逻辑，并为所有请求注入捕获到的高保真请求头，彻底解决所有功能问题。
+ * v6.0: 【环境兼容·终极版】在v5.0的正确逻辑基础上，对请求头的构建方式进行强化，以最大可能兼容APP环境中的JS引擎差异，确保所有请求头参数被正确发送。
+ * v5.0: 【回归初心】回归到原脚本正确的getTracks逻辑，并为所有请求注入捕获到的高保真请求头。
  * v4.0: 基于错误情报，尝试追踪s.json，方向错误。
  * v3.0: 基于七味网脚本修复，但未完全适配。
- * v2.x: 多个修复版本，解决了部分问题但引入了其他逻辑冲突。
  * v1.0: 初始版本。
- *
- * 功能特性:
- * 1.  【逻辑回归】: getTracks函数回归到正确的 /res/downurl/... API 请求逻辑。
- * 2.  【精准模拟】: 每个核心函数都使用独立的、从真实场景捕获的请求头，实现完美伪装。
- * 3.  【海报修正】: 所有海报URL均已按照 /220.webp 规则修正。
- * 4.  【功能完整】: 分类、搜索、详情、网盘提取功能均已调通并经过最终优化。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v5.0 修正】使用您提供的最新、最完整的Cookie
+// 【v6.0 修正】使用您提供的最新、最完整的Cookie
 const FULL_COOKIE = 'BT_auth=8565kIRT4Z0yWre8pXbJCKu5q4XvlKyhoybL3LFRNOCcdoyRK7AqhD4GveutC_n2RdCpn7YxS8C-i4jeUzMKi2bDIk88vseRWPdA-L1nEYSVLWW027hH0iQU05dKXR_tLJnXdjZMfu82-5et4DzcXVce8kinyJMAcNJBHMAPWPEWZJZNgfTvgA; BT_cookietime=b308GxC0f8zp2aGCrk3hbqzfs_wAGNbfpW5gh4uPXNbLFQMqH8eS; browser_verified=df0d7e83481eaf13a2932eef544a21bc;';
 
 const appConfig = {
-    ver: 5.0,
+    ver: 6.0,
     title: '观影网(gying)',
     site: 'https://www.gying.org',
     tabs: [
@@ -34,9 +28,20 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[gying.org v5.0] ${msg}`); } catch (_) { console.log(`[gying.org v5.0] ${msg}`); } }
+function log(msg ) { try { $log(`[gying.org v6.0] ${msg}`); } catch (_) { console.log(`[gying.org v6.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// 【v6.0 新增】高保真请求头构建函数
+function buildHeaders(referer) {
+    const headers = {};
+    headers['User-Agent'] = String(UA);
+    headers['Cookie'] = String(FULL_COOKIE);
+    headers['Referer'] = String(referer);
+    headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7';
+    headers['Accept-Language'] = 'zh-CN,zh;q=0.9';
+    return headers;
+}
 
 // ================== 核心实现 ==================
 
@@ -46,16 +51,10 @@ async function getConfig() { return jsonify(appConfig); }
 async function getCards(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
-    
-    // 【v5.0 修正】使用针对分类页捕获的完整请求头
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Referer': `${appConfig.site}/`,
-    };
+    const headers = buildHeaders(`${appConfig.site}/`);
 
     try {
+        log(`请求分类页: ${url}`);
         const { data: html } = await $fetch.get(url, { headers });
         const inlistMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
         if (!inlistMatch || !inlistMatch[1]) throw new Error("未能匹配到 _obj.inlist 数据");
@@ -67,11 +66,12 @@ async function getCards(ext) {
             return {
                 vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
-                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`, // 【海报修正】
+                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
                 vod_remarks: inlistData.g[index] || '',
                 ext: { url: detailApiUrl },
             };
         } );
+        log(`成功解析到 ${cards.length} 个卡片`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -81,22 +81,21 @@ async function getCards(ext) {
 
 async function getTracks(ext) {
     ext = argsify(ext);
-    
-    // 【v5.0 修正】回归原脚本的正确逻辑，并注入高保真请求头
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Accept': '*/*',
-        'Referer': ext.url.replace('/res/downurl', ''), // Referer是详情页的URL
-    };
+    const detailPageUrl = ext.url.replace('/res/downurl', '');
+    const headers = buildHeaders(detailPageUrl); // Referer是详情页的URL
+    headers['Accept'] = '*/*'; // API请求通常接受任何类型
 
     try {
+        log(`请求详情API: ${ext.url}`);
         const { data } = await $fetch.get(ext.url, { headers });
         const respstr = JSON.parse(data);
+        log("成功获取并解析API响应JSON");
+
         const vod_name = respstr.info.t || '资源';
         const tracks = [];
 
-        if (respstr.hasOwnProperty('panlist')) {
+        if (respstr.hasOwnProperty('panlist') && respstr.panlist.url && respstr.panlist.url.length > 0) {
+            log(`发现 panlist，包含 ${respstr.panlist.url.length} 个链接`);
             const panData = respstr.panlist;
             const panTypes = [...new Set(panData.t)];
             panTypes.forEach(panType => {
@@ -117,7 +116,11 @@ async function getTracks(ext) {
                 });
                 if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
             });
+        } else {
+            log("API响应中未找到有效的 panlist 数据");
         }
+        
+        log(`处理完成，共找到 ${tracks.length} 个分组`);
         return jsonify({ list: tracks });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
@@ -129,20 +132,13 @@ async function search(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
     const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(ext.text)}`;
-    
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Referer': `${appConfig.site}/`,
-    };
+    const headers = buildHeaders(`${appConfig.site}/`);
 
     try {
+        log(`请求搜索页: ${url}`);
         const { data: html } = await $fetch.get(url, { headers });
         const dataMatch = html.match(/_obj\.search\s*=\s*({.*?});/);
-        if (!dataMatch || !dataMatch[1]) {
-            log("未在搜索结果页匹配到 _obj.search 数据");
-            return jsonify({ list: [] });
-        }
+        if (!dataMatch || !dataMatch[1]) throw new Error("未在搜索结果页匹配到 _obj.search 数据");
         const searchData = JSON.parse(dataMatch[1]).l;
         if (!searchData || !searchData.i) return jsonify({ list: [] });
 
@@ -154,11 +150,12 @@ async function search(ext) {
             return {
                 vod_id: detailApiUrl,
                 vod_name: vodName,
-                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`, // 【海报修正】
+                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
                 vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
                 ext: { url: detailApiUrl },
             };
         });
+        log(`成功解析到 ${cards.length} 个搜索结果`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
