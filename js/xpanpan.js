@@ -1,15 +1,14 @@
 /**
- * XPTV App 插件前端代码 (v11.0 - 终极融合最终版)
+ * XPTV App 插件前端代码 (v11.1 - 终极自证调试版)
  * 
  * 功能:
- * - 与 v18.0 版本后端完美配合。
- * - 核心: 融合了所有成功经验，采取“组合URL+提供豁免符”的最终策略。
- * - 组合URL: 在前端将后端数据组合成夸克能识别的、带 ?pwd= 参数的标准URL。
- * - 提供豁免符: 同时提供 ext: { pwd: '' }，明确告知App无需再处理密码，直接使用pan字段的URL。
+ * - 核心修改: 在 getTracks 函数中，增加了一行 log 语句。
+ * - 目的: 在将数据发送给App播放器之前，将最终的、完整的 track 对象打印到日志中，
+ *         以便我们能100%确认前端的组合逻辑和输出格式是否完全正确。
  */
 
 // --- 配置区 ---
-const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务必替换为你的后端服务实际地址
+const API_BASE_URL = 'http://192.168.1.4:3000/api'; // 请务- 替换为你的后端服务实际地址
 // --- 配置区 ---
 
 function log(msg ) {
@@ -86,24 +85,30 @@ async function getTracks(ext) {
         if (parts.length < 2) return;
 
         const fileName = parts[0];
-        const dataPacket = parts[1]; // 拿到 "纯净链接|密码"
+        const dataPacket = parts[1];
 
         const linkParts = dataPacket.split('|');
         const pureLink = linkParts[0] || '';
         const accessCode = linkParts[1] || '';
 
-        // 【v11.0 核心修改】组合标准URL + 提供豁免符
         let finalPan = pureLink;
         if (accessCode) {
             const separator = pureLink.includes('?') ? '&' : '?';
             finalPan = `${pureLink}${separator}pwd=${accessCode}`;
         }
 
-        tracks.push({
+        const trackObject = {
           name: fileName,
-          pan: finalPan,          // 传递一个标准的、可直接打开的URL
-          ext: { pwd: '' },       // 【关键！】同时提供“豁免符”，告诉App不要再处理密码了
-        });
+          pan: finalPan,
+          ext: { pwd: '' },
+        };
+
+        // ★★★★★ 【v11.1 核心调试代码】 ★★★★★
+        // 在将数据推入数组前，将其完整地打印出来
+        log(`[前端自证] 准备推送给App的最终数据: ${JSON.stringify(trackObject)}`);
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+        tracks.push(trackObject);
       }
     });
   }
