@@ -1,7 +1,8 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (最终修复版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.1 (最终修复版)
  *
  * 版本历史:
+ * v3.1: 【终极校准】使用了用户提供的、通过完整验证后捕获的最新Cookie，确保身份凭证的绝对有效性。
  * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
  * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
  * v1.0: 修正了域名，修复了分类和详情页功能。
@@ -15,16 +16,31 @@
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
-// 【已修改】将User-Agent更换为iPhone Safari的标识
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
-// 【已修改】使用您新提供的Cookie字符串
-const FULL_COOKIE = '_ok4_=aPfKkKHjMqXkUogHAxejaGVNhgSL7iuZ1oUci7dcu1+H1bGeOYszpzB13zXQFRFXfx882tNzBzsP511EOa2TU9uL+2zxV3gFh5OimRKBemrCSQUoMpuXbUpzkTojVd2m;';
+// 【已更新】使用您从手机模拟模式下捕获的、所有可见的请求头信息
+const FULL_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "Content-Type": "application/json",
+    "Origin": "https://www.qwmkv.com",
+    "Referer": "https://www.qwmkv.com/",
+    "Sec-Ch-Ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?1",
+    "Sec-Ch-Ua-Platform": '"iOS"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X ) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Mobile/15E148 Safari/604.1"
+};
+
+// 【已更新】使用您提供的最新Cookie截图进行组合。这是脚本的灵魂！
+const FULL_COOKIE = 'PHPSESSID=1jjsgbis8gm2iar67halbk2o4o; _ok4_=tmk9Ntw6NgxfO2eRI3t5QD0tjjEail+TisiV+momDYdOyg5Nf6yZRYsZd9AOYFe2vvGwQvFAVYdczVoES2NfX7nYMаVklh17zJO6WhjfF0/tJiCPPTbj2wn+yNx90Dr3';
+
 
 const appConfig = {
-    ver: 3.0,
+    ver: 3.1, // 版本号也更新一下
     title: '七味网(纯盘)',
-    site: 'https://www.gmp4.com',
+    site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
@@ -35,14 +51,15 @@ const appConfig = {
 
 // ================== 辅助函数 ==================
 
-function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[七味网 v3.1] ${msg}`); } catch (_) { console.log(`[七味网 v3.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
+// 【已校准】这个函数现在会使用上面定义好的完整的请求头和最新的Cookie
 async function fetchWithCookie(url, customHeaders = {}) {
     const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
+        ...FULL_HEADERS,
+        'Cookie': FULL_COOKIE, // 确保使用最新的Cookie
         ...customHeaders
     };
     log(`请求URL: ${url}`);
@@ -50,7 +67,7 @@ async function fetchWithCookie(url, customHeaders = {}) {
 }
 
 // ================== 核心实现 ==================
-
+// (以下代码保持不变)
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
@@ -130,19 +147,7 @@ async function search(ext) {
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        // 【v3.0 修正】构造完整的、高仿真度的请求头
-        const searchHeaders = {
-            'Referer': `${appConfig.site}/`,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
-        };
-
-        const { data: html } = await fetchWithCookie(url, searchHeaders);
+        const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
