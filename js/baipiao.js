@@ -39,7 +39,7 @@ async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
-    const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
+    const url = `${appConfig.site}/list?id=${ext.id.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
         // 1. 从后端获取数据对象
