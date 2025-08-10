@@ -1,28 +1,23 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (最终修复版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.3 (融合修复版)
  *
  * 版本历史:
- * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
- * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
- * v1.0: 修正了域名，修复了分类和详情页功能。
- *
- * 功能特性:
- * 1.  【专注核心】: 仅提取网盘资源。
- * 2.  【高级反制】: 内置完整的Cookie和请求头，高度模拟真实用户行为。
- * 3.  【功能完整】: 分类、搜索、详情提取功能均已调通。
- * 4.  【智能命名】: 网盘链接以“影视标题 + 关键规格”命名。
+ * v3.3: 【终极融合】在确认基础凭证有效后，重新引入从浏览器捕获的、完整的请求头，以解决服务器返回空列表的问题。
+ * v3.2: 【返璞归真】移除了所有可能引起冲突的、非必要的请求头。
+ * v3.1: 【终极校准】使用了用户提供的、通过完整验证后捕获的最新Cookie。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
+
 // 【已校准】使用我们从手机模拟模式下获取的User-Agent
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Mobile/15E148 Safari/604.1';
 
 // 【已校准】使用您提供的、通过完整验证后的最新Cookie
-const FULL_COOKIE = 'PHPSESSID=1jjsgbis8gm2iar67halbk2o4o; _ok4_=tmk9Ntw6NgxfO2eRI3t5QD0tjjEail+TisiV+momDYdOyg5Nf6yZRYsZd9AOYFe2vvGwQvFAVYdczVoES2NfX7nYMаVklh17zJO6WhjfF0/tJiCPPTbj2wn+yNx90Dr3;';
+const FULL_COOKIE = 'PHPSESSID=1jjsgbis8gm2iar67halbk2o4o; _ok4_=tmk9Ntw6NgxfO2eRI3t5QD0tjjEail+TisiV+momDYdOyg5Nf6yZRYsZd9AOYFe2vvGwQvFAVYdczVoES2NfX7nYMаVklh17zJO6WhjfF0/tJiCPPTbj2wn+yNx90Dr3';
 
 const appConfig = {
-    ver: 3.0, // 保持原始版本号
+    ver: 3.3, // 版本号更新
     title: '七味网(纯盘)',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -35,15 +30,31 @@ const appConfig = {
 
 // ================== 辅助函数 ==================
 
-function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[七味网 v3.3] ${msg}`); } catch (_) { console.log(`[七味网 v3.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// 【函数已恢复至原始版本】
+// 【函数已修改】将完整的请求头重新加入，以获取动态内容
 async function fetchWithCookie(url, customHeaders = {}) {
     const headers = {
+        // 核心三件套
         'User-Agent': UA,
         'Cookie': FULL_COOKIE,
+        'Referer': appConfig.site + '/',
+
+        // 从浏览器开发者工具中捕获的、用于增强真实性的额外请求头
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'Sec-Ch-Ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?1',
+        'Sec-Ch-Ua-Platform': '"iOS"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+
+        // 允许外部调用时覆盖或添加头信息
         ...customHeaders
     };
     log(`请求URL: ${url}`);
@@ -51,11 +62,10 @@ async function fetchWithCookie(url, customHeaders = {}) {
 }
 
 // ================== 核心实现 ==================
-// 【函数已恢复至原始版本】
+// (以下代码保持不变，它们将自动使用上面配置好的、更完整的请求头)
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
-// 【函数已恢复至原始版本】
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
@@ -83,12 +93,11 @@ async function getCards(ext) {
     }
 }
 
-// 【函数已恢复至原始版本】
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
     try {
-        const { data: html } = await fetchWithCookie(url, { 'Referer': appConfig.site });
+        const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
@@ -127,26 +136,13 @@ async function getTracks(ext) {
     }
 }
 
-// 【函数已恢复至原始版本】
 async function search(ext) {
     ext = argsify(ext);
     const encodedText = encodeURIComponent(ext.text);
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        // 【v3.0 修正】构造完整的、高仿真度的请求头
-        const searchHeaders = {
-            'Referer': `${appConfig.site}/`,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
-        };
-
-        const { data: html } = await fetchWithCookie(url, searchHeaders);
+        const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
@@ -166,7 +162,6 @@ async function search(ext) {
     }
 }
 
-// 【函数已恢复至原始版本】
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
