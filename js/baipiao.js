@@ -19,7 +19,7 @@ const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Mobile/15E148 Safari/604.1';
 
 // 【已校准】使用您提供的、通过完整验证后的最新Cookie
-const FULL_COOKIE = 'PHPSESSID=1jjsgbis8gm2iar67halbk2o4o; _ok4_=tmk9Ntw6NgxfO2eRI3t5QD0tjjEail+TisiV+momDYdOyg5Nf6yZRYsZd9AOYFe2vvGwQvFAVYdczVoES2NfX7nYMаVklh17zJO6WhjfF0/tJiCPPTbj2wn+yNx90Dr3';
+const FULL_COOKIE = 'PHPSESSID=1jjsgbis8gm2iar67halbk2o4o; _ok4_=tmk9Ntw6NgxfO2eRI3t5QD0tjjEail+TisiV+momDYdOyg5Nf6yZRYsZd9AOYFe2vvGwQvFAVYdczVoES2NfX7nYMаVklh17zJO6WhjfF0/tJiCPPTbj2wn+yNx90Dr3;';
 
 const appConfig = {
     ver: 3.0, // 保持原始版本号
