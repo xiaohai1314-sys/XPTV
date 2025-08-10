@@ -1,8 +1,8 @@
 /**
- * gying.org - 纯网盘提取脚本 - v6.0 (环境兼容·终极版)
+ * gying.org - 纯网盘提取脚本 - v5.1 (网盘提取强化版)
  *
  * 版本历史:
- * v6.0: 【环境兼容·终极版】在v5.0的正确逻辑基础上，对请求头的构建方式进行强化，以最大可能兼容APP环境中的JS引擎差异，确保所有请求头参数被正确发送。
+ * v5.1: 【网盘提取强化】在v5.0的成功基础上，为getTracks函数引入了更强大的错误处理机制，能够明确提示用户Cookie失效需验证的情况。
  * v5.0: 【回归初心】回归到原脚本正确的getTracks逻辑，并为所有请求注入捕获到的高保真请求头。
  * v4.0: 基于错误情报，尝试追踪s.json，方向错误。
  * v3.0: 基于七味网脚本修复，但未完全适配。
@@ -13,11 +13,11 @@
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v6.0 修正】使用您提供的最新、最完整的Cookie
+// 【v5.1 提示】此Cookie是脚本运行的关键，如果失效，请在浏览器中访问gying.org完成验证后，将新的Cookie完整替换到此处。
 const FULL_COOKIE = 'BT_auth=8565kIRT4Z0yWre8pXbJCKu5q4XvlKyhoybL3LFRNOCcdoyRK7AqhD4GveutC_n2RdCpn7YxS8C-i4jeUzMKi2bDIk88vseRWPdA-L1nEYSVLWW027hH0iQU05dKXR_tLJnXdjZMfu82-5et4DzcXVce8kinyJMAcNJBHMAPWPEWZJZNgfTvgA; BT_cookietime=b308GxC0f8zp2aGCrk3hbqzfs_wAGNbfpW5gh4uPXNbLFQMqH8eS; browser_verified=df0d7e83481eaf13a2932eef544a21bc;';
 
 const appConfig = {
-    ver: 6.0,
+    ver: 5.1,
     title: '观影网(gying)',
     site: 'https://www.gying.org',
     tabs: [
@@ -28,11 +28,10 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[gying.org v6.0] ${msg}`); } catch (_) { console.log(`[gying.org v6.0] ${msg}`); } }
+function log(msg ) { try { $log(`[gying.org v5.1] ${msg}`); } catch (_) { console.log(`[gying.org v5.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// 【v6.0 新增】高保真请求头构建函数
 function buildHeaders(referer) {
     const headers = {};
     headers['User-Agent'] = String(UA);
@@ -54,7 +53,6 @@ async function getCards(ext) {
     const headers = buildHeaders(`${appConfig.site}/`);
 
     try {
-        log(`请求分类页: ${url}`);
         const { data: html } = await $fetch.get(url, { headers });
         const inlistMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
         if (!inlistMatch || !inlistMatch[1]) throw new Error("未能匹配到 _obj.inlist 数据");
@@ -71,7 +69,6 @@ async function getCards(ext) {
                 ext: { url: detailApiUrl },
             };
         } );
-        log(`成功解析到 ${cards.length} 个卡片`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -82,22 +79,20 @@ async function getCards(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     const detailPageUrl = ext.url.replace('/res/downurl', '');
-    const headers = buildHeaders(detailPageUrl); // Referer是详情页的URL
-    headers['Accept'] = '*/*'; // API请求通常接受任何类型
+    const headers = buildHeaders(detailPageUrl);
+    headers['Accept'] = '*/*';
 
     try {
-        log(`请求详情API: ${ext.url}`);
         const { data } = await $fetch.get(ext.url, { headers });
         const respstr = JSON.parse(data);
-        log("成功获取并解析API响应JSON");
-
-        const vod_name = respstr.info.t || '资源';
-        const tracks = [];
-
+        
+        // 【v5.1 核心修正】引入强大的错误处理逻辑
         if (respstr.hasOwnProperty('panlist') && respstr.panlist.url && respstr.panlist.url.length > 0) {
-            log(`发现 panlist，包含 ${respstr.panlist.url.length} 个链接`);
+            const vod_name = respstr.info.t || '资源';
+            const tracks = [];
             const panData = respstr.panlist;
             const panTypes = [...new Set(panData.t)];
+            
             panTypes.forEach(panType => {
                 const groupTracks = [];
                 panData.t.forEach((type, index) => {
@@ -116,14 +111,20 @@ async function getTracks(ext) {
                 });
                 if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
             });
+            
+            return jsonify({ list: tracks });
+
+        } else if (respstr.hasOwnProperty('file')) {
+            $utils.toastError('Cookie失效，请前往主站完成验证后更新脚本', 5000);
+            return jsonify({ list: [] });
         } else {
-            log("API响应中未找到有效的 panlist 数据");
+            $utils.toastError('没有找到可用的网盘资源', 4000);
+            return jsonify({ list: [] });
         }
-        
-        log(`处理完成，共找到 ${tracks.length} 个分组`);
-        return jsonify({ list: tracks });
+
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
+        $utils.toastError(`请求资源失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
@@ -135,7 +136,6 @@ async function search(ext) {
     const headers = buildHeaders(`${appConfig.site}/`);
 
     try {
-        log(`请求搜索页: ${url}`);
         const { data: html } = await $fetch.get(url, { headers });
         const dataMatch = html.match(/_obj\.search\s*=\s*({.*?});/);
         if (!dataMatch || !dataMatch[1]) throw new Error("未在搜索结果页匹配到 _obj.search 数据");
@@ -155,7 +155,6 @@ async function search(ext) {
                 ext: { url: detailApiUrl },
             };
         });
-        log(`成功解析到 ${cards.length} 个搜索结果`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
