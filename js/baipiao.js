@@ -1,5 +1,5 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.5 (终极净化版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.6 (终极净化版)
  *
  * 版本说明:
  * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
@@ -39,6 +39,7 @@ async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
+    // 恢复 URL 拼接为 ext.id，因为 ext.id 本身就是正确的字符串
     const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
@@ -49,22 +50,11 @@ async function getCards(ext) {
             return jsonify({ list: [] });
         }
 
-        // 2. 【【【 核心修复：数据净化/重生 】】】
-        const pureCards = [];
-        for (const item of responseData.list) {
-            pureCards.push({
-                vod_id: item.vod_id,
-                vod_name: item.vod_name,
-                vod_pic: item.vod_pic,
-                vod_remarks: item.vod_remarks,
-                ext: item.ext,
-            });
-        }
-        
-        log(`✅ 数据已净化，构造了 ${pureCards.length} 个纯净的列表项。`);
+        // 2. 【【【 核心修复：尝试直接使用后端返回的数据，跳过“数据净化”步骤 】】】
+        log(`✅ 尝试直接使用后端数据，共 ${responseData.list.length} 个列表项。`);
 
-        // 3. 将纯净的数据对象传递给 jsonify
-        return jsonify({ list: pureCards });
+        // 3. 将后端返回的数据直接传递给 jsonify
+        return jsonify({ list: responseData.list });
 
     } catch (e) {
         log(`❌ getCards 捕获到异常: ${e.message}`);
@@ -116,3 +106,5 @@ async function getPlayinfo(ext) {
     }
     return jsonify({ urls: [finalUrl] });
 }
+
+
