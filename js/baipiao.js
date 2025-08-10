@@ -1,5 +1,9 @@
 /**
- * 观影网(七味网) - 纯网盘提取脚本 - v1.0
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v2.0 (最终版)
+ *
+ * 版本历史:
+ * v2.0: 修复搜索功能，使用正确的URL格式和页面解析逻辑。
+ * v1.0: 初始版本，实现核心功能。
  *
  * 功能特性:
  * 1.  【专注核心】: 严格按照用户要求，仅提取网盘资源，代码简洁高效。
@@ -7,6 +11,7 @@
  * 3.  【精准分类】: 支持电影、剧集、综艺、动漫四大分类。
  * 4.  【智能命名】: 提取的网盘链接以“影视标题 + 关键规格”命名，清晰明了。
  * 5.  【健壮解析】: 能够稳定解析详情页中的多种网盘类型及其提取码。
+ * 6.  【全功能修复】: 分类、搜索、详情、海报加载功能均已正常工作。
  */
 
 // ================== 配置区 ==================
@@ -17,9 +22,9 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const EFFECTIVE_COOKIE = '_ok4_=NAeXbe+DhTpafaoTAXzum2H1tNveMtSDEyUgv84Ve0zQEvP3UQ/cmuxfWZNvNO7rNzFvFnPQZJLHNGQbxg4I35L4vnukd1fJzZ0rusTqPuuu4874BjMPIIOxrSNXh3qB;';
 
 const appConfig = {
-    ver: 1.0,
+    ver: 2.0,
     title: '七味网(纯盘)',
-    site: 'https://www.qwmkv.com', // 基于HTML源码确定的域名
+    site: 'https://www.qwmkv.com', // 【v2.0 修正】使用正确的域名
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
@@ -59,7 +64,9 @@ async function getConfig() { return jsonify(appConfig); }
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
-    const url = `${appConfig.site}${ext.id.replace('.html', '')}-${page}.html`;
+    // 根据实际分页规则，第一页不带页码，第二页开始是 -2.html
+    const pagePath = page === 1 ? ext.id : ext.id.replace('.html', `-${page}.html`);
+    const url = `${appConfig.site}${pagePath}`;
 
     try {
         const { data: html } = await fetchWithCookie(url);
@@ -130,15 +137,14 @@ async function getTracks(ext) {
                 let spec = '';
                 const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
                 if (specMatch) {
-                    // 去重并拼接
-                    spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ');
+                    spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
                 }
                 
-                const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 20)}...)`;
+                const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
 
                 // 提取提取码
                 let pwd = '';
-                const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/);
+                const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
                 if (pwdMatch) {
                     pwd = pwdMatch[1];
                 }
@@ -170,20 +176,22 @@ async function getTracks(ext) {
  */
 async function search(ext) {
     ext = argsify(ext);
-    const page = ext.page || 1;
-    const url = `${appConfig.site}/vs/${ext.text}----------${page}---.html`;
+    const encodedText = encodeURIComponent(ext.text);
+    // 【v2.0 修正】使用正确的搜索URL格式
+    const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
         const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
         const cards = [];
 
-        $('ul.content-list > li').each((_, element) => {
-            const $li = $(element);
-            const vod_id = $li.find('a').first().attr('href');
-            const vod_name = $li.find('h3 > a').attr('title');
-            const vod_pic = $li.find('div.li-img img').attr('src');
-            const vod_remarks = $li.find('span.bottom2').text().trim();
+        // 【v2.0 修正】使用正确的搜索结果页解析逻辑
+        $('div.sr_lists dl').each((_, element) => {
+            const $dl = $(element);
+            const vod_id = $dl.find('dt a').attr('href');
+            const vod_name = $dl.find('dd p strong a').text();
+            const vod_pic = $dl.find('dt a img').attr('src');
+            const vod_remarks = $dl.find('dd p span.ss1').text().trim();
 
             if (vod_id && vod_name) {
                 cards.push({
@@ -216,7 +224,6 @@ async function getPlayinfo(ext) {
         finalUrl += `\n提取码: ${password}`;
     }
     
-    // 对于网盘链接，通常是直接返回链接供用户复制
     return jsonify({
         urls: [finalUrl]
     });
