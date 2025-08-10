@@ -1,14 +1,15 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.1 (精准修复版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.3 (最终正确版)
  *
  * 版本说明:
  * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
  * 发送到本地运行的后端API，由后端负责处理所有验证和数据抓取。
  *
- * v4.0.1 更新日志:
- * - [修复] 严格基于 v4.0 版本，仅修正 getCards 函数。解决了因数据解构失败，
- *   导致后端返回数据后前端列表无法显示海报的唯一问题。
- * - [兼容性] 其他函数 (getTracks, search 等) 保持原样，以确保与特定App环境的最大兼容性。
+ * v4.0.3 更新日志:
+ * - [重大修复] 根据 v3.0 纯前端脚本的工作模式，完全修正了 getCards 函数。
+ *   现在脚本能正确处理 $fetch 库对后端JSON响应的包装，通过 `const { data } = ...`
+ *   成功解构出列表数据，解决了海报列表为空的根本问题。
+ * - [兼容性] 所有函数的数据处理模式均与 v3.0 对齐，确保与特定App环境完美兼容。
  */
 
 // ================== 配置区 ==================
@@ -20,7 +21,7 @@ const cheerio = createCheerio(); // 保留，以防某些App环境需要它
 const appConfig = {
     ver: 4.0, // 保持主版本号为 4.0
     title: '七味网(我的专属源  )',
-    site: 'http://192.168.1.4:3000', // <-- 请根据您的实际情况修改这里！
+    site: 'http://localhost:3000', // <-- 请根据您的实际情况修改这里！
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
@@ -44,10 +45,13 @@ async function getCards(ext) {
     const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
-        // 【【【 精准修复点 】】】
-        // 直接获取后端返回的完整数据，而不是试图解构一个不存在的 'data' 属性。
-        const responseData = await $fetch.get(url);
-        return jsonify(responseData);
+        // 【【【 最终修复点 】】】
+        // 1. $fetch.get(url) 返回的是 { data: { list: [...] } }
+        // 2. 使用 const { data } 解构，得到 data = { list: [...] }
+        // 3. 将这个 data 对象 jsonify 后返回给App，完全符合 v3.0 的成功模式。
+        const { data } = await $fetch.get(url);
+        log(`✅ 成功解构并获取到 ${data.list.length} 条列表数据。`);
+        return jsonify(data);
     } catch (e) {
         log(`❌ 请求后端/list接口异常: ${e.message}`);
         return jsonify({ list: [] });
