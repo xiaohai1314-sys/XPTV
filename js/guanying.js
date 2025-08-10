@@ -1,188 +1,165 @@
 /**
- * gying.org - 纯网盘提取脚本 - v8.0 (返璞归真·终极版)
+ * 观影网脚本 - v19.0 (最终修正版)
  *
- * 版本历史:
- * v8.0: 【返璞归真·终极版】彻底重写getTracks，回归到最正确的HTML解析方案，并根据用户要求精准筛选网盘类型。
- * v7.0: 错误的API请求导致功能崩溃。
- * v5.1: 错误的全局请求头修改，导致功能崩溃。
- * v5.0: 逻辑正确的版本，但getTracks方向错误。
+ * --- 核心修正 ---
+ * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
+ * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
+ * 3.  保留了之前版本中对数据解析的稳定逻辑。
+ * 4.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
-// 【v8.0 提示】此Cookie是脚本运行的唯一命脉。如果脚本失效，请在浏览器中访问gying.org完成验证后，将新的Cookie完整替换到此处。
-const FULL_COOKIE = 'BT_auth=8565kIRT4Z0yWre8pXbJCKu5q4XvlKyhoybL3LFRNOCcdoyRK7AqhD4GveutC_n2RdCpn7YxS8C-i4jeUzMKi2bDIk88vseRWPdA-L1nEYSVLWW027hH0iQU05dKXR_tLJnXdjZMfu82-5et4DzcXVce8kinyJMAcNJBHMAPWPEWZJZNgfTvgA; BT_cookietime=b308GxC0f8zp2aGCrk3hbqzfs_wAGNbfpW5gh4uPXNbLFQMqH8eS; browser_verified=df0d7e83481eaf13a2932eef544a21bc;';
+// 【Cookie修正】直接使用您提供的有效Cookie
+const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 8.0,
-    title: '观影网(gying)',
-    site: 'https://www.gying.org',
+    ver: 19.0, // 版本号更新为最终修正版
+    title: '观影网',
+    site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: '/mv?page=' } },
-        { name: '剧集', ext: { id: '/tv?page=' } },
-        { name: '动漫', ext: { id: '/ac?page=' } },
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
     ],
 };
 
-// 【v8.0 新增】您指定的网盘类型
-const ALLOWED_PAN_TYPES = {
-    '夸克网盘': /quark/i,
-    'UC网盘': /uc/i,
-    '天翼网盘': /189/i,
-    '阿里网盘': /ali/i,
-    '115网盘': /115/i,
-};
+// ================== 核心函数 (简化登录逻辑 ) ==================
 
-// ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[gying.org v8.0] ${msg}`); } catch (_) { console.log(`[gying.org v8.0] ${msg}`); } }
+function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-function buildHeaders(referer) {
-    const headers = {};
-    headers['User-Agent'] = String(UA);
-    headers['Cookie'] = String(FULL_COOKIE);
-    headers['Referer'] = String(referer);
-    headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7';
-    headers['Accept-Language'] = 'zh-CN,zh;q=0.9';
-    return headers;
+/**
+ * 使用固定的Cookie发起网络请求
+ */
+async function fetchWithCookie(url, options = {}) {
+    const headers = { 
+        'User-Agent': UA, 
+        'Cookie': HARDCODED_COOKIE, 
+        'Referer': appConfig.site, 
+        ...options.headers 
+    };
+    return $fetch.get(url, { ...options, headers });
 }
-
-// ================== 核心实现 ==================
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数 - 已修正】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+/**
+ * 获取分类页面的卡片列表
+ */
 async function getCards(ext) {
     ext = argsify(ext);
-    const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
-    const headers = buildHeaders(`${appConfig.site}/`);
+    const { id, page = 1 } = ext;
+    const url = `${appConfig.site}${id}${page}`;
+    log(`请求分类列表: ${url}`);
 
     try {
-        const { data: html } = await $fetch.get(url, { headers });
-        const inlistMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) throw new Error("未能匹配到 _obj.inlist 数据");
+        const { data: htmlText } = await fetchWithCookie(url);
+        const inlistMatch = htmlText.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) {
+            throw new Error("未能从HTML响应中匹配到 '_obj.inlist' 数据块。");
+        }
         const inlistData = JSON.parse(inlistMatch[1]);
-        if (!inlistData || !inlistData.i) return jsonify({ list: [] });
-
+        if (!inlistData || !inlistData.i) {
+            return jsonify({ list: [] });
+        }
         const cards = inlistData.i.map((item, index) => {
-            // 【v8.0 修正】vod_id直接使用详情页路径
-            const detailPageUrl = `/${inlistData.ty}/${item}`;
+            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
             return {
-                vod_id: detailPageUrl,
+                vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
+                // 【海报URL修正】正确拼接海报地址，增加 /220 后缀
                 vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
                 vod_remarks: inlistData.g[index] || '',
-                ext: { url: detailPageUrl }, // ext.url也使用详情页路径
+                ext: { url: detailApiUrl },
             };
         } );
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
+/**
+ * 获取播放轨道列表
+ */
 async function getTracks(ext) {
     ext = argsify(ext);
-    const detailPageUrl = `${appConfig.site}${ext.url}`;
-    const headers = buildHeaders(detailPageUrl);
-
+    let url = ext.url; 
+    log(`请求详情数据: ${url}`);
     try {
-        log(`请求详情页HTML: ${detailPageUrl}`);
-        const { data: html } = await $fetch.get(detailPageUrl, { headers });
-        const $ = cheerio.load(html);
-
-        const panListContainer = $('div.pt-list');
-        if (panListContainer.length === 0) {
-            $utils.toastError('未找到网盘列表容器 (div.pt-list)', 4000);
-            return jsonify({ list: [] });
+        const { data } = await fetchWithCookie(url);
+        const respstr = JSON.parse(data);
+        let tracks = [];
+        if (respstr.hasOwnProperty('panlist')) {
+            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
+            respstr.panlist.url.forEach((item, index) => {
+                let name = '';
+                for (const keyword in regex) {
+                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
+                    if (matches) name = `${name}${matches[0]}`;
+                }
+                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
+            });
         }
-
-        const tracksByGroup = {};
-
-        panListContainer.find('li').each((_, element) => {
-            const linkElement = $(element).find('a');
-            if (linkElement.length === 0) return;
-
-            const href = linkElement.attr('href');
-            const title = linkElement.text();
-
-            if (!href || href === 'javascript:;') return;
-
-            let matchedType = null;
-            for (const typeName in ALLOWED_PAN_TYPES) {
-                if (ALLOWED_PAN_TYPES[typeName].test(href)) {
-                    matchedType = typeName;
-                    break;
-                }
-            }
-
-            if (matchedType) {
-                if (!tracksByGroup[matchedType]) {
-                    tracksByGroup[matchedType] = [];
-                }
-                
-                let pwd = '';
-                const pwdMatch = title.match(/(?:提取码|访问码|密码)[：: ]?\s*(\w+)/i);
-                if (pwdMatch) {
-                    pwd = pwdMatch[1];
-                }
-
-                tracksByGroup[matchedType].push({
-                    name: title,
-                    pan: href,
-                    ext: { pwd: pwd }
-                });
-            }
-        });
-
-        const finalList = Object.keys(tracksByGroup).map(groupName => ({
-            title: groupName,
-            tracks: tracksByGroup[groupName]
-        }));
-
-        if (finalList.length === 0) {
-            $utils.toastError('在页面中未找到您指定的网盘类型链接', 4000);
-        }
-
-        return jsonify({ list: finalList });
-
+        return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
-        log(`❌ 解析详情页异常: ${e.message}`);
-        $utils.toastError(`解析资源失败: ${e.message}`, 4000);
+        log(`❌ 获取详情数据异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
+/**
+ * 执行搜索
+ */
 async function search(ext) {
     ext = argsify(ext);
-    const page = ext.page || 1;
-    const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(ext.text)}`;
-    const headers = buildHeaders(`${appConfig.site}/`);
-
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    let url = `${appConfig.site}/s/1---${page}/${text}`;
+    log(`执行搜索: ${url}`);
     try {
-        const { data: html } = await $fetch.get(url, { headers });
-        const dataMatch = html.match(/_obj\.search\s*=\s*({.*?});/);
-        if (!dataMatch || !dataMatch[1]) throw new Error("未在搜索结果页匹配到 _obj.search 数据");
-        const searchData = JSON.parse(dataMatch[1]).l;
-        if (!searchData || !searchData.i) return jsonify({ list: [] });
+        const { data } = await fetchWithCookie(url);
+        const $ = cheerio.load(data);
+        let cards = [];
+        $('.v5d').each((_, element) => {
+            const $element = $(element);
+            const name = $element.find('b').text().trim();
+            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
+            const additionalInfo = $element.find('p').text().trim();
+            const path = $element.find('a').attr('href');
+            if (!path) return;
+            const match = path.match(/\/([a-z]+)\/(\d+)/);
+            if (!match) return;
+            const type = match[1];
+            const vodId = match[2];
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            
+            // 【海报URL修正】搜索结果的海报地址也需要修正
+            // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
+            // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
+            let finalImgUrl = imgUrl || '';
+            if (finalImgUrl.endsWith('.webp' )) {
+                finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
+            }
 
-        const cards = searchData.i.map((_, index) => {
-            const type = searchData.d[index];
-            const vodId = searchData.i[index];
-            // 【v8.0 修正】vod_id直接使用详情页路径
-            const detailPageUrl = `/${type}/${vodId}`;
-            const vodName = `${searchData.title[index]} ${searchData.name[index]} (${searchData.year[index]})`;
-            return {
-                vod_id: detailPageUrl,
-                vod_name: vodName,
-                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
-                vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
-                ext: { url: detailPageUrl },
-            };
+            cards.push({
+                vod_id: detailApiUrl,
+                vod_name: name,
+                vod_pic: finalImgUrl,
+                vod_remarks: additionalInfo,
+                ext: { url: detailApiUrl },
+            });
         });
         return jsonify({ list: cards });
     } catch (e) {
@@ -191,13 +168,11 @@ async function search(ext) {
     }
 }
 
+/**
+ * 获取播放链接
+ */
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
-    const password = ext.pwd;
-    let finalUrl = panLink;
-    if (password) {
-        finalUrl += `\n提取码: ${password}`;
-    }
-    return jsonify({ urls: [finalUrl] });
+    return jsonify({ urls: [panLink] });
 }
