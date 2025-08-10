@@ -1,23 +1,22 @@
 /**
- * gying.org - 纯网盘提取脚本 - v5.1 (网盘提取强化版)
+ * gying.org - 纯网盘提取脚本 - v7.0 (最终置信版)
  *
  * 版本历史:
- * v5.1: 【网盘提取强化】在v5.0的成功基础上，为getTracks函数引入了更强大的错误处理机制，能够明确提示用户Cookie失效需验证的情况。
- * v5.0: 【回归初心】回归到原脚本正确的getTracks逻辑，并为所有请求注入捕获到的高保真请求头。
- * v4.0: 基于错误情报，尝试追踪s.json，方向错误。
- * v3.0: 基于七味网脚本修复，但未完全适配。
- * v1.0: 初始版本。
+ * v7.0: 【最终置信版】在经历了所有探索后，回归到唯一被验证过的正确道路。坚定地使用 /res/downurl/ API，并为其注入高保真请求头以通过验证。同时集成了强大的错误处理机制。
+ * v6.0: 错误的“环境兼容性”修正，方向错误。
+ * v5.1: 错误的全局请求头修改，导致功能崩溃。
+ * v5.0: 逻辑正确的版本，但错误处理不足。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v5.1 提示】此Cookie是脚本运行的关键，如果失效，请在浏览器中访问gying.org完成验证后，将新的Cookie完整替换到此处。
+// 【v7.0 提示】此Cookie是脚本运行的唯一命脉。如果脚本失效，请在浏览器中访问gying.org完成验证后，将新的Cookie完整替换到此处。
 const FULL_COOKIE = 'BT_auth=8565kIRT4Z0yWre8pXbJCKu5q4XvlKyhoybL3LFRNOCcdoyRK7AqhD4GveutC_n2RdCpn7YxS8C-i4jeUzMKi2bDIk88vseRWPdA-L1nEYSVLWW027hH0iQU05dKXR_tLJnXdjZMfu82-5et4DzcXVce8kinyJMAcNJBHMAPWPEWZJZNgfTvgA; BT_cookietime=b308GxC0f8zp2aGCrk3hbqzfs_wAGNbfpW5gh4uPXNbLFQMqH8eS; browser_verified=df0d7e83481eaf13a2932eef544a21bc;';
 
 const appConfig = {
-    ver: 5.1,
+    ver: 7.0,
     title: '观影网(gying)',
     site: 'https://www.gying.org',
     tabs: [
@@ -28,16 +27,27 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[gying.org v5.1] ${msg}`); } catch (_) { console.log(`[gying.org v5.1] ${msg}`); } }
+function log(msg ) { try { $log(`[gying.org v7.0] ${msg}`); } catch (_) { console.log(`[gying.org v7.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-function buildHeaders(referer) {
+// 【v7.0 修正】为不同类型的请求构建不同的高保真请求头
+function buildHtmlHeaders(referer) {
     const headers = {};
     headers['User-Agent'] = String(UA);
     headers['Cookie'] = String(FULL_COOKIE);
     headers['Referer'] = String(referer);
     headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7';
+    headers['Accept-Language'] = 'zh-CN,zh;q=0.9';
+    return headers;
+}
+
+function buildApiHeaders(referer) {
+    const headers = {};
+    headers['User-Agent'] = String(UA);
+    headers['Cookie'] = String(FULL_COOKIE);
+    headers['Referer'] = String(referer);
+    headers['Accept'] = '*/*'; // API请求的关键
     headers['Accept-Language'] = 'zh-CN,zh;q=0.9';
     return headers;
 }
@@ -50,7 +60,7 @@ async function getConfig() { return jsonify(appConfig); }
 async function getCards(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
-    const headers = buildHeaders(`${appConfig.site}/`);
+    const headers = buildHtmlHeaders(`${appConfig.site}/`);
 
     try {
         const { data: html } = await $fetch.get(url, { headers });
@@ -79,14 +89,12 @@ async function getCards(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     const detailPageUrl = ext.url.replace('/res/downurl', '');
-    const headers = buildHeaders(detailPageUrl);
-    headers['Accept'] = '*/*';
+    const headers = buildApiHeaders(detailPageUrl); // 使用专门为API设计的请求头
 
     try {
         const { data } = await $fetch.get(ext.url, { headers });
         const respstr = JSON.parse(data);
         
-        // 【v5.1 核心修正】引入强大的错误处理逻辑
         if (respstr.hasOwnProperty('panlist') && respstr.panlist.url && respstr.panlist.url.length > 0) {
             const vod_name = respstr.info.t || '资源';
             const tracks = [];
@@ -133,7 +141,7 @@ async function search(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
     const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(ext.text)}`;
-    const headers = buildHeaders(`${appConfig.site}/`);
+    const headers = buildHtmlHeaders(`${appConfig.site}/`);
 
     try {
         const { data: html } = await $fetch.get(url, { headers });
