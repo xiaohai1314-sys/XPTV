@@ -1,27 +1,26 @@
 /**
- * gying.org - 纯网盘提取脚本 - v2.1 (网盘功能恢复版)
+ * gying.org - 纯网盘提取脚本 - v2.2 (终极稳定版)
  *
  * 版本历史:
- * v2.1: 【功能恢复】恢复了被遗漏的、完整的网盘链接提取和格式化逻辑，确保核心功能完整。
- * v2.0: 修复了搜索功能，但错误地简化了网盘提取逻辑。
- * v1.0: 初始版本，分类和详情功能正常，搜索功能待修复。
+ * v2.2: 【逻辑修正】修复了v2.1中因修改ext对象导致程序崩溃的问题。getTracks函数改为从详情API直接获取标题，增强了健壮性。
+ * v2.1: 恢复了网盘提取逻辑，但引入了新的bug。
+ * v2.0: 修复了搜索功能。
+ * v1.0: 初始版本。
  *
  * 功能特性:
- * 1.  【专注核心】: 仅提取网盘资源，并能处理多种网盘类型及提取码。
- * 2.  【Cookie策略】: 内置有效Cookie，稳定访问。
- * 3.  【全功能修复】: 分类、搜索、详情提取功能均已调通。
- * 4.  【高效解析】: 搜索功能直取数据核心，精准且高效。
+ * 1.  【稳定可靠】: 核心逻辑回归原脚本的稳定实现，杜绝程序崩溃。
+ * 2.  【功能完整】: 分类、搜索、详情、网盘提取功能均正常工作。
+ * 3.  【智能命名】: 网盘链接命名逻辑优化，数据来源更可靠。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
-// gying.org 的有效Cookie
 const Gying_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 2.1,
+    ver: 2.2,
     title: '观影网(gying)',
     site: 'https://www.gying.org/',
     tabs: [
@@ -32,7 +31,7 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[gying.org] ${msg}`); } catch (_) { console.log(`[gying.org] ${msg}`); } }
+function log(msg ) { try { $log(`[gying.org v2.2] ${msg}`); } catch (_) { console.log(`[gying.org v2.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -61,16 +60,18 @@ async function getCards(ext) {
         if (!inlistMatch || !inlistMatch[1]) throw new Error("未能匹配到 _obj.inlist 数据");
         const inlistData = JSON.parse(inlistMatch[1]);
         if (!inlistData || !inlistData.i) return jsonify({ list: [] });
-        const cards = inlistData.i.map((item, index) => ({
-            vod_id: `${appConfig.site}res/downurl/${inlistData.ty}/${item}`,
-            vod_name: inlistData.t[index],
-            vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
-            vod_remarks: inlistData.g[index] || '',
-            ext: { 
-                url: `${appConfig.site}res/downurl/${inlistData.ty}/${item}`,
-                vod_name: inlistData.t[index] // 将主标题传递给详情页
-            },
-        } ));
+        
+        const cards = inlistData.i.map((item, index) => {
+            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
+            return {
+                vod_id: detailApiUrl,
+                vod_name: inlistData.t[index],
+                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
+                vod_remarks: inlistData.g[index] || '',
+                // 【v2.2 修正】保持ext对象纯粹 ，避免程序崩溃
+                ext: { url: detailApiUrl },
+            };
+        });
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -84,13 +85,13 @@ async function getTracks(ext) {
         const { data } = await fetchWithCookie(ext.url);
         const respstr = JSON.parse(data);
         
-        // 从 ext 中获取主标题，如果不存在则设为默认值
-        const vod_name = ext.vod_name || '资源';
+        // 【v2.2 修正】从详情API的响应中直接获取标题
+        const vod_name = respstr.info.t || '资源';
         const tracks = [];
 
         if (respstr.hasOwnProperty('panlist')) {
             const panData = respstr.panlist;
-            const panTypes = [...new Set(panData.t)]; // 获取所有不重复的网盘类型
+            const panTypes = [...new Set(panData.t)];
 
             panTypes.forEach(panType => {
                 const groupTracks = [];
@@ -98,36 +99,20 @@ async function getTracks(ext) {
                     if (type === panType) {
                         const linkUrl = panData.url[index];
                         const originalTitle = panData.name[index];
-
-                        // 提取关键规格信息
                         let spec = '';
                         const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
                         if (specMatch) {
                             spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
                         }
-                        
                         const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
-
-                        // 提取提取码
                         let pwd = '';
                         const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
-                        if (pwdMatch) {
-                            pwd = pwdMatch[1];
-                        }
-
-                        groupTracks.push({
-                            name: trackName,
-                            pan: linkUrl,
-                            ext: { pwd: pwd }
-                        });
+                        if (pwdMatch) pwd = pwdMatch[1];
+                        groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
                     }
                 });
-
                 if (groupTracks.length > 0) {
-                    tracks.push({
-                        title: panType,
-                        tracks: groupTracks
-                    });
+                    tracks.push({ title: panType, tracks: groupTracks });
                 }
             });
         }
@@ -163,10 +148,8 @@ async function search(ext) {
                 vod_name: vodName,
                 vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
                 vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
-                ext: { 
-                    url: detailApiUrl,
-                    vod_name: vodName // 将主标题传递给详情页
-                },
+                // 【v2.2 修正】保持ext对象纯粹
+                ext: { url: detailApiUrl },
             };
         });
         return jsonify({ list: cards });
