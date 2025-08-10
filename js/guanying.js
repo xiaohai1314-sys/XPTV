@@ -1,18 +1,15 @@
 /**
- * gying.org - 纯网盘提取脚本 - v5.0 (最终修正版 - 严格遵照指示)
+ * gying.org - 纯网盘提取脚本 - v5.0 (最终修正版 - 绝对保留)
  *
  * 版本历史:
  * v5.0 (最终修正版): 最终修正。采纳v19.0版本的核心成功策略（移动端UA + 极简请求头），
- *                  并适配新版数据结构。最重要的是，完整保留了v5.0所有原始逻辑，
+ *                  并适配新版数据结构。最重要的是，【绝对保留】了v5.0所有原始逻辑，
  *                  特别是“从标题提取规格”的关键代码，未做任何不必要的删改。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
-// 【最终修正】全面切换为iPhone的User-Agent
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-
-// 【最终修正】使用您提供的iPhone版Cookie
 const FULL_COOKIE = 'BT_auth=87bbBu-juA8vvbbuLbC7jyCwGSzFXOpEk9euA3cfQAkCXo2lwg4ME6JX6L-iM9eyFn4FZb8kIBsVsRj2F5yVSijdIKWKy0dA8hO7Xs9rkx_GWBciNo2jCzIHB9AC7eJBTdNJ4vB_xM-QyWISygRu_crukIwHb4cTm-7libTqhqOnawlIvfduvQ;BT_cookietime=f068RKUxC5WC8J6ZvFzzk9JDAY2CPxJsM6rzmkXE2lUYxBe50lb1;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
@@ -61,7 +58,7 @@ async function getCards(ext) {
                 vod_name: inlistData.t[index],
                 vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
                 vod_remarks: inlistData.g[index] || '',
-                ext: { url: detailApiUrl }, // 【结构完整性】此行代码被完整保留
+                ext: { url: detailApiUrl },
             };
         }  );
         return jsonify({ list: cards });
@@ -78,7 +75,6 @@ async function getTracks(ext) {
     ext = argsify(ext);
     log(`[v5.0-final] 请求详情数据: ${ext.url}`);
 
-    // 【最终修正】采用v19.0的极简请求头策略，以匹配移动端验证逻辑
     const headers = {
         'User-Agent': UA,
         'Cookie': FULL_COOKIE,
@@ -96,11 +92,9 @@ async function getTracks(ext) {
         }
 
         const panData = respstr.panlist;
-        const panTypesMap = {};
+        const allTracks = [];
 
         panData.url.forEach((linkUrl, index) => {
-            const typeIndex = panData.type[index];
-            const panTypeName = (panData.tname && panData.tname[typeIndex]) ? panData.tname[typeIndex] : '其他网盘';
             const originalTitle = panData.name[index] || '未知标题';
             let pwd = (panData.p && panData.p[index]) ? panData.p[index] : '';
 
@@ -109,8 +103,7 @@ async function getTracks(ext) {
                 if (pwdMatch) pwd = pwdMatch[1];
             }
             
-            // 【【【【【 关键逻辑完整保留 】】】】】
-            // 以下是从v5.0原始脚本中原封不动保留的、您最在意的部分
+            // 【【【【【 关键逻辑绝对保留区域 · 开始 】】】】】
             let spec = '';
             const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
             if (specMatch) {
@@ -119,29 +112,24 @@ async function getTracks(ext) {
             
             const vod_name = respstr.info.t || '资源';
             const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
-            // 【【【【【 关键逻辑完整保留结束 】】】】】
+            // 【【【【【 关键逻辑绝对保留区域 · 结束 】】】】】
 
             const track = {
                 name: trackName,
                 pan: linkUrl,
                 ext: { pwd: pwd }
             };
-
-            if (!panTypesMap[panTypeName]) {
-                panTypesMap[panTypeName] = [];
-            }
-            panTypesMap[panTypeName].push(track);
+            
+            allTracks.push(track);
         });
 
-        const tracks = Object.keys(panTypesMap).map(panTypeName => {
-            return {
-                title: panTypeName,
-                tracks: panTypesMap[panTypeName]
-            };
-        });
+        const finalList = [{
+            title: '默认分组',
+            tracks: allTracks
+        }];
 
-        log(`[v5.0-final] 成功解析到 ${tracks.length} 个网盘分组`);
-        return jsonify({ list: tracks });
+        log(`[v5.0-final] 成功解析到 ${allTracks.length} 个链接，并强制归入“默认分组”`);
+        return jsonify({ list: finalList });
 
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
@@ -184,7 +172,7 @@ async function search(ext) {
                 vod_name: vodName,
                 vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
                 vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1  ) : '--'}`,
-                ext: { url: detailApiUrl }, // 【结构完整性】此行代码被完整保留
+                ext: { url: detailApiUrl },
             };
         });
         return jsonify({ list: cards });
