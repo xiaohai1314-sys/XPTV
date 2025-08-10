@@ -1,58 +1,71 @@
 /**
- * gying.org - 纯网盘提取脚本 - v5.0 (最终修正版 - 绝对保留)
+ * 观影网脚本 - v19.0 (最终融合版)
  *
- * 版本历史:
- * v5.0 (最终修正版): 最终修正。采纳v19.0版本的核心成功策略（移动端UA + 极简请求头），
- *                  并适配新版数据结构。最重要的是，【绝对保留】了v5.0所有原始逻辑，
- *                  特别是“从标题提取规格”的关键代码，未做任何不必要的删改。
+ * --- 核心修正 ---
+ * 1.  【功能融合】: 保留了v19.0所有能成功提取网盘的核心逻辑。
+ * 2.  【搜索升级】: 将v19.0原有的、基于cheerio的搜索功能，替换为v5.0版本中更高效、更精确的、基于_obj.search数据块的搜索功能。
+ * 3.  这是一个集v19.0稳定性与v5.0高效性于一体的最终版本。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-const FULL_COOKIE = 'BT_auth=87bbBu-juA8vvbbuLbC7jyCwGSzFXOpEk9euA3cfQAkCXo2lwg4ME6JX6L-iM9eyFn4FZb8kIBsVsRj2F5yVSijdIKWKy0dA8hO7Xs9rkx_GWBciNo2jCzIHB9AC7eJBTdNJ4vB_xM-QyWISygRu_crukIwHb4cTm-7libTqhqOnawlIvfduvQ;BT_cookietime=f068RKUxC5WC8J6ZvFzzk9JDAY2CPxJsM6rzmkXE2lUYxBe50lb1;browser_verified=b142dc23ed95f767248f452739a94198;';
+
+// 【Cookie修正】直接使用您提供的有效Cookie
+const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 5.0,
-    title: '观影网(gying)',
-    site: 'https://www.gying.org',
+    ver: 19.0,
+    title: '观影网',
+    site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: '/mv?page=' } },
-        { name: '剧集', ext: { id: '/tv?page=' } },
-        { name: '动漫', ext: { id: '/ac?page=' } },
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
     ],
 };
 
-// ================== 辅助函数 ==================
-function log(msg  ) { try { $log(`[gying.org v5.0] ${msg}`); } catch (_) { console.log(`[gying.org v5.0] ${msg}`); } }
+// ================== 核心函数 (简化登录逻辑  ) ==================
+
+function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ================== 核心实现 ==================
+async function fetchWithCookie(url, options = {}) {
+    const headers = { 
+        'User-Agent': UA, 
+        'Cookie': HARDCODED_COOKIE, 
+        'Referer': appConfig.site, 
+        ...options.headers 
+    };
+    return $fetch.get(url, { ...options, headers });
+}
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数 - 已修正】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
 async function getCards(ext) {
     ext = argsify(ext);
-    const url = `${appConfig.site}${ext.id}${ext.page || 1}`;
-    
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Referer': `${appConfig.site}/`,
-    };
+    const { id, page = 1 } = ext;
+    const url = `${appConfig.site}${id}${page}`;
+    log(`请求分类列表: ${url}`);
 
     try {
-        const { data: html } = await $fetch.get(url, { headers });
-        const inlistMatch = html.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) throw new Error("未能匹配到 _obj.inlist 数据");
+        const { data: htmlText } = await fetchWithCookie(url);
+        const inlistMatch = htmlText.match(/_obj\.inlist\s*=\s*({.*?});/);
+        if (!inlistMatch || !inlistMatch[1]) {
+            throw new Error("未能从HTML响应中匹配到 '_obj.inlist' 数据块。");
+        }
         const inlistData = JSON.parse(inlistMatch[1]);
-        if (!inlistData || !inlistData.i) return jsonify({ list: [] });
-
+        if (!inlistData || !inlistData.i) {
+            return jsonify({ list: [] });
+        }
         const cards = inlistData.i.map((item, index) => {
-            const detailApiUrl = `${appConfig.site}/res/downurl/${inlistData.ty}/${item}`;
+            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
             return {
                 vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
@@ -64,96 +77,48 @@ async function getCards(ext) {
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// 【【【【【【【【【【【【【【【【【 此函数已被替换为最终修正版 】】】】】】】】】】】】】】】】】
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 async function getTracks(ext) {
     ext = argsify(ext);
-    log(`[v5.0-final] 请求详情数据: ${ext.url}`);
-
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Accept': '*/*',
-        'Referer': ext.url.replace('/res/downurl', ''),
-    };
-
+    let url = ext.url; 
+    log(`请求详情数据: ${url}`);
     try {
-        const { data } = await $fetch.get(ext.url, { headers });
+        const { data } = await fetchWithCookie(url);
         const respstr = JSON.parse(data);
-
-        if (!respstr.panlist || !respstr.panlist.url) {
-            log("❌ 数据结构中未找到 panlist 或 panlist.url。");
-            return jsonify({ list: [] });
+        let tracks = [];
+        if (respstr.hasOwnProperty('panlist')) {
+            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
+            respstr.panlist.url.forEach((item, index) => {
+                let name = '';
+                for (const keyword in regex) {
+                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
+                    if (matches) name = `${name}${matches[0]}`;
+                }
+                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
+            });
         }
-
-        const panData = respstr.panlist;
-        const allTracks = [];
-
-        panData.url.forEach((linkUrl, index) => {
-            const originalTitle = panData.name[index] || '未知标题';
-            let pwd = (panData.p && panData.p[index]) ? panData.p[index] : '';
-
-            if (!pwd) {
-                const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
-                if (pwdMatch) pwd = pwdMatch[1];
-            }
-            
-            // 【【【【【 关键逻辑绝对保留区域 · 开始 】】】】】
-            let spec = '';
-            const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
-            if (specMatch) {
-                spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
-            }
-            
-            const vod_name = respstr.info.t || '资源';
-            const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
-            // 【【【【【 关键逻辑绝对保留区域 · 结束 】】】】】
-
-            const track = {
-                name: trackName,
-                pan: linkUrl,
-                ext: { pwd: pwd }
-            };
-            
-            allTracks.push(track);
-        });
-
-        const finalList = [{
-            title: '默认分组',
-            tracks: allTracks
-        }];
-
-        log(`[v5.0-final] 成功解析到 ${allTracks.length} 个链接，并强制归入“默认分组”`);
-        return jsonify({ list: finalList });
-
+        return jsonify({ list: [{ title: '默认分组', tracks }] });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-// 【【【【【【【【【【【【【【【【【 以上函数已被替换为最终修正版 】】】】】】】】】】】】】】】】】
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// 【【【【【【【【【【【【【【【【【 此函数已从v5.0移植并适配 】】】】】】】】】】】】】】】】】
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 async function search(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
-    const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(ext.text)}`;
+    const url = `${appConfig.site}s/1---${page}/${encodeURIComponent(ext.text)}`;
+    log(`执行v5.0版搜索: ${url}`);
     
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
-        'Referer': `${appConfig.site}/`,
-    };
-
     try {
-        const { data: html } = await $fetch.get(url, { headers });
+        const { data: html } = await fetchWithCookie(url);
         const dataMatch = html.match(/_obj\.search\s*=\s*({.*?});/);
         if (!dataMatch || !dataMatch[1]) {
             log("未在搜索结果页匹配到 _obj.search 数据");
@@ -165,13 +130,16 @@ async function search(ext) {
         const cards = searchData.i.map((_, index) => {
             const type = searchData.d[index];
             const vodId = searchData.i[index];
-            const detailApiUrl = `${appConfig.site}/res/downurl/${type}/${vodId}`;
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
             const vodName = `${searchData.title[index]} ${searchData.name[index]} (${searchData.year[index]})`;
+            
+            const vod_pic = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
+
             return {
                 vod_id: detailApiUrl,
                 vod_name: vodName,
-                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
-                vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1  ) : '--'}`,
+                vod_pic: vod_pic,
+                vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
                 ext: { url: detailApiUrl },
             };
         });
@@ -185,10 +153,5 @@ async function search(ext) {
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
-    const password = ext.pwd;
-    let finalUrl = panLink;
-    if (password) {
-        finalUrl += `\n提取码: ${password}`;
-    }
-    return jsonify({ urls: [finalUrl] });
+    return jsonify({ urls: [panLink] });
 }
