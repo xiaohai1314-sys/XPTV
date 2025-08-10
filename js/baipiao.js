@@ -1,26 +1,24 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (WebView 智能验证最终版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (去 Cookie 实验版)
  *
- * 版本历史:
- * v3.0 (WebView Mod): 集成了 WebView 智能验证机制，可自动检测“点选文字”和“输入数字”两种人机验证，并调用 App 环境让用户完成验证，实现半自动化更新会话。
- * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
- * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
- * v1.0: 修正了域名，修复了分类和详情页功能。
+ * 版本说明:
+ * 这是一个实验性版本，旨在测试网站是否支持由 App 环境自动管理 Cookie。
+ * 本版本移除了脚本中写死的 `FULL_COOKIE`，完全依赖 App 在 WebView 验证成功后，
+ * 能自动为后续请求附加有效的 Cookie。
  *
- * 功能特性:
- * 1.  【专注核心】: 仅提取网盘资源。
- * 2.  【高级反制】: 内置完整的Cookie和请求头，高度模拟真实用户行为。
- * 3.  【智能验证】: 可检测人机验证，并调用 WebView 让用户完成操作，解决 Cookie 时效性问题。
- * 4.  【功能完整】: 分类、搜索、详情提取功能均已调通。
- * 5.  【智能命名】: 网盘链接以“影视标题 + 关键规格”命名。
+ * 预期行为:
+ * 1. 首次使用时，会触发 WebView 进行人机验证。
+ * 2. 用户在 WebView 中验证成功后，返回 App 刷新或再次操作。
+ * 3. 【关键】如果后续操作不再需要验证，则证明本方案成功。
+ * 4. 如果后续操作仍然每次都需要验证，则证明网站服务器强制要求脚本提供显式的 Cookie，本方案失败。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v3.0 修正】使用您提供的、在搜索时捕获的完整Cookie字符串
-const FULL_COOKIE = 'PHPSESSID=98sro02gntq5qqis734ik8hi07; _ok4_=Kx0heu4m9F05IybrnY0Su5Z/+8XD070kFSNNc3U60CbfDnwycM43lOWI53CID8HrUOTbfs6rVPpr9Ci4din5LbRuo71yd0W3vDWdqke6DiMGdVql+SH+NRXbsNuEFThm; beitouviews_5838=KX9OmCyAYuTWNn4uQ6ANjK8Ce5oqXXfdJv39G1aCFkEVfokPEar8iT%252BYb%252FXVqMhcoweHKTc1d3GfGMwcl3Bb20WdH%252BAbiNkWGuCP6uSyD8aXTerq%252FkCJrzOl2a%252BtaLp7Qei9n2CVUmn2h05gnPG3fLQe7VN4VqFdLvL94VQULPYJ9DQFB%252BLPCWNFk%252FbovqSDuKAFGSMqFcVEz%252B3US9vlTdHoY9SVGvD44KoHt9MdhZixDtltrq89XMBWJ%252F7zo0OlIGqRguGnxsrs%252BPcMwG4CF7OHrmEY6jLDGQBMOsyrFLmjNMVv5HCIA5FYzggeUgXbA4Oym5UEqlG3Mzzp%252FKX5TA%253D%253D; richviews_5839=BmcIxW4naNjRymCJYBQYN0Ghx8wFCcEInp8uCmSDRs2CN3NGVYl78JaG9aBsqYBXDg8bpCsD6P6E38lTcqYNoqpaomm5j4Hn%252BTjYsoX%252FuJcyhWEzD5qow4%252FDljjWTB7d5LmF3bvdmNrdBeS6zu2ULvyZKVpnUYBDFkBRP%252BcT%252Fi59jNaKP8vOGYmgKkqO1u2gIo6313AcXvR6YgQBkaN294r%252Bl83pOhnbLjVg6Wp7hZHtNRE2kzyFVC7zJI0bdlrEbl78A7XbrR9oD2Lff45d8%252Fr25nuJZ1yJ6bxQ5Qxq4gpLnIcVtNwsEs%252FgGZfG6fJ72oML%252BV79W3FbK1k%252FbHGSuQ%253D%253D;';
+// 【实验性移除】不再需要写死的 Cookie
+// const FULL_COOKIE = '...'; 
 
 const appConfig = {
     ver: 3.0,
@@ -36,17 +34,18 @@ const appConfig = {
 
 // ================== 辅助函数 ==================
 
-function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[七味网 v3.0 Exp] ${msg}`); } catch (_) { console.log(`[七味网 v3.0 Exp] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
+// 【核心修改】此函数不再主动添加 Cookie，依赖 App 环境自动处理
 async function fetchWithCookie(url, customHeaders = {}) {
     const headers = {
         'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
+        // 'Cookie': FULL_COOKIE, // <-- 已移除此行
         ...customHeaders
     };
-    log(`请求URL: ${url}`);
+    log(`请求URL (无显式Cookie): ${url}`);
     return $fetch.get(url, { headers });
 }
 
@@ -66,16 +65,11 @@ async function getCards(ext) {
         const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
 
-        // --- 新增验证逻辑 START ---
-        // 通过检查页面是否包含“请依次点击：”这段特征文字来判断是否需要验证
         if (html.includes('请依次点击：')) {
             log('🔍 检测到“点选文字”验证，准备调用 WebView...');
-            // 调用 App 接口打开 WebView，让用户手动验证
             $utils.openSafari(appConfig.site, UA); 
-            // 返回空列表，提示用户验证后刷新
             return jsonify({ list: [] }); 
         }
-        // --- 新增验证逻辑 END ---
 
         const cards = [];
         $('ul.content-list > li').each((_, element) => {
@@ -89,7 +83,6 @@ async function getCards(ext) {
             }
         });
 
-        // 备用触发器：如果解析到的卡片数量为 0，且页面没有“无结果”提示，也可能需要验证
         if (cards.length === 0 && !html.includes('没有找到相关影片')) {
             log('⚠️ 列表为空，可能需要验证，尝试触发 WebView');
             $utils.openSafari(appConfig.site, UA);
@@ -152,7 +145,6 @@ async function search(ext) {
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        // 【v3.0 修正】构造完整的、高仿真度的请求头
         const searchHeaders = {
             'Referer': `${appConfig.site}/`,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -167,16 +159,11 @@ async function search(ext) {
         const { data: html } = await fetchWithCookie(url, searchHeaders);
         const $ = cheerio.load(html);
 
-        // --- 新增验证逻辑 START ---
-        // 通过检查页面是否包含“请输入验证码：”这段特征文字来判断
         if (html.includes('请输入验证码：')) {
             log('🔍 检测到“输入数字”验证，准备调用 WebView...');
-            // 对于搜索验证，直接加载包含搜索词的 URL，让用户在 WebView 里直接验证并看到结果
             $utils.openSafari(url, UA);
-            // 返回空列表，提示用户验证后重新搜索
             return jsonify({ list: [] });
         }
-        // --- 新增验证逻辑 END ---
 
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
@@ -190,7 +177,6 @@ async function search(ext) {
             }
         });
 
-        // 备用触发器：如果搜索结果为空，且页面没有“无结果”提示，也可能需要验证
         if (cards.length === 0 && !html.includes('没有找到相关影片')) {
             log('⚠️ 搜索结果为空，可能需要验证，尝试触发 WebView');
             $utils.openSafari(url, UA);
