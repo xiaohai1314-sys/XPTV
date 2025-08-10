@@ -24,7 +24,7 @@ const FULL_COOKIE = '_ok4_=Lbkk0jYCfd3hHATB+xveBaT7y3mNzMAHYcq4PCS/kzhB17Dky8ssv
 const appConfig = {
     ver: 3.0,
     title: '七味网(纯盘)',
-    site: 'https://www.qwmkv.com',
+    site: 'https://www.gmp4.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
