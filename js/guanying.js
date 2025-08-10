@@ -1,23 +1,28 @@
 /**
- * 观影网脚本 - v19.0 (最终修正版)
+ * gying.org - 纯网盘提取脚本 - v2.3 (完美融合版)
  *
- * --- 核心修正 ---
- * 1.  【Cookie修正】: 严格按照用户要求，硬编码了指定的有效Cookie，移除了所有动态登录逻辑，确保身份验证的稳定性。
- * 2.  【海报URL修正】: 严格按照用户指出的新规则，在 `getCards` 和 `search` 函数中，为所有海报URL路径增加了 `/220` 后缀，以获取正确的图片。
- * 3.  保留了之前版本中对数据解析的稳定逻辑。
- * 4.  这是一个为当前网站规则和用户需求深度定制的稳定版本。
+ * 版本历史:
+ * v2.3: 【完美融合】getCards函数完全恢复至v19.0原脚本的稳定实现，杜绝崩溃；同时整合已修复的、功能更强的search和getTracks函数。
+ * v2.2: 修复了v2.1的逻辑错误，但getCards实现仍有瑕疵。
+ * v2.1: 恢复了网盘提取逻辑，但引入了新的bug。
+ * v2.0: 修复了搜索功能。
+ * v1.0: 初始版本。
+ *
+ * 功能特性:
+ * 1.  【稳定为王】: 分类列表加载逻辑100%采用原脚本，确保程序入口稳定。
+ * 2.  【功能完整】: 分类、搜索、详情、网盘提取功能均正常工作。
+ * 3.  【智能强大】: 保留了先进的搜索解析逻辑和网盘处理能力。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 
-// 【Cookie修正】直接使用您提供的有效Cookie
-const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
+const Gying_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
 
 const appConfig = {
-    ver: 19.0, // 版本号更新为最终修正版
-    title: '观影网',
+    ver: 2.3,
+    title: '观影网(gying)',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -26,34 +31,30 @@ const appConfig = {
     ],
 };
 
-// ================== 核心函数 (简化登录逻辑 ) ==================
-
-function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
+// ================== 辅助函数 ==================
+function log(msg ) { try { $log(`[gying.org v2.3] ${msg}`); } catch (_) { console.log(`[gying.org v2.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-/**
- * 使用固定的Cookie发起网络请求
- */
 async function fetchWithCookie(url, options = {}) {
-    const headers = { 
-        'User-Agent': UA, 
-        'Cookie': HARDCODED_COOKIE, 
-        'Referer': appConfig.site, 
-        ...options.headers 
+    const headers = {
+        'User-Agent': UA,
+        'Cookie': Gying_COOKIE,
+        'Referer': appConfig.site,
+        ...options.headers
     };
+    log(`请求URL: ${url}`);
     return $fetch.get(url, { ...options, headers });
 }
+
+// ================== 核心实现 ==================
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数 - 已修正】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
-
 /**
  * 获取分类页面的卡片列表
+ * 【v2.3 修正】: 完全恢复至v19.0原脚本的稳定实现
  */
 async function getCards(ext) {
     ext = argsify(ext);
@@ -76,43 +77,61 @@ async function getCards(ext) {
             return {
                 vod_id: detailApiUrl,
                 vod_name: inlistData.t[index],
-                // 【海报URL修正】正确拼接海报地址，增加 /220 后缀
                 vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
                 vod_remarks: inlistData.g[index] || '',
                 ext: { url: detailApiUrl },
             };
-        } );
+        }  );
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        // 在APP环境中，toast可能不可用，但保留以备调试
+        try { $utils.toastError(`加载失败: ${e.message}`, 4000); } catch(_) {}
         return jsonify({ list: [] });
     }
 }
 
 /**
  * 获取播放轨道列表
+ * 【v2.3 修正】: 采用从详情API获取标题的健壮版本
  */
 async function getTracks(ext) {
     ext = argsify(ext);
-    let url = ext.url; 
-    log(`请求详情数据: ${url}`);
     try {
-        const { data } = await fetchWithCookie(url);
+        const { data } = await fetchWithCookie(ext.url);
         const respstr = JSON.parse(data);
-        let tracks = [];
+        
+        const vod_name = respstr.info.t || '资源';
+        const tracks = [];
+
         if (respstr.hasOwnProperty('panlist')) {
-            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
-            respstr.panlist.url.forEach((item, index) => {
-                let name = '';
-                for (const keyword in regex) {
-                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) name = `${name}${matches[0]}`;
+            const panData = respstr.panlist;
+            const panTypes = [...new Set(panData.t)];
+
+            panTypes.forEach(panType => {
+                const groupTracks = [];
+                panData.t.forEach((type, index) => {
+                    if (type === panType) {
+                        const linkUrl = panData.url[index];
+                        const originalTitle = panData.name[index];
+                        let spec = '';
+                        const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
+                        if (specMatch) {
+                            spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
+                        }
+                        const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
+                        let pwd = '';
+                        const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
+                        if (pwdMatch) pwd = pwdMatch[1];
+                        groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
+                    }
+                });
+                if (groupTracks.length > 0) {
+                    tracks.push({ title: panType, tracks: groupTracks });
                 }
-                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
             });
         }
-        return jsonify({ list: [{ title: '默认分组', tracks }] });
+        return jsonify({ list: tracks });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -121,45 +140,35 @@ async function getTracks(ext) {
 
 /**
  * 执行搜索
+ * 【v2.3 修正】: 采用已验证成功的正则提取方案
  */
 async function search(ext) {
     ext = argsify(ext);
-    let text = encodeURIComponent(ext.text);
-    let page = ext.page || 1;
-    let url = `${appConfig.site}/s/1---${page}/${text}`;
-    log(`执行搜索: ${url}`);
+    const page = ext.page || 1;
+    const url = `${appConfig.site}/s/1---${page}/${encodeURIComponent(ext.text)}`;
     try {
-        const { data } = await fetchWithCookie(url);
-        const $ = cheerio.load(data);
-        let cards = [];
-        $('.v5d').each((_, element) => {
-            const $element = $(element);
-            const name = $element.find('b').text().trim();
-            const imgUrl = $element.find('picture source[data-srcset]').attr('data-srcset');
-            const additionalInfo = $element.find('p').text().trim();
-            const path = $element.find('a').attr('href');
-            if (!path) return;
-            const match = path.match(/\/([a-z]+)\/(\d+)/);
-            if (!match) return;
-            const type = match[1];
-            const vodId = match[2];
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            
-            // 【海报URL修正】搜索结果的海报地址也需要修正
-            // 原始imgUrl: https://s.tutu.pm/img/mv/y9jJ.webp
-            // 修正后: https://s.tutu.pm/img/mv/y9jJ/220.webp
-            let finalImgUrl = imgUrl || '';
-            if (finalImgUrl.endsWith('.webp' )) {
-                finalImgUrl = finalImgUrl.replace('.webp', '/220.webp');
-            }
+        const { data: html } = await fetchWithCookie(url);
+        const dataMatch = html.match(/_fun\.setlist\s*\(\s*({.*?})\s*,\s*{/);
+        if (!dataMatch || !dataMatch[1]) {
+            log("未在搜索结果页匹配到 _fun.setlist 数据");
+            return jsonify({ list: [] });
+        }
+        const searchData = JSON.parse(dataMatch[1]);
+        if (!searchData || !searchData.i) return jsonify({ list: [] });
 
-            cards.push({
+        const cards = searchData.i.map((_, index) => {
+            const type = searchData.d[index];
+            const vodId = searchData.i[index];
+            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
+            const vodName = `${searchData.title[index]} ${searchData.name[index]} (${searchData.year[index]})`;
+            
+            return {
                 vod_id: detailApiUrl,
-                vod_name: name,
-                vod_pic: finalImgUrl,
-                vod_remarks: additionalInfo,
+                vod_name: vodName,
+                vod_pic: `https://s.tutu.pm/img/${type}/${vodId}/220.webp`,
+                vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
                 ext: { url: detailApiUrl },
-            });
+            };
         });
         return jsonify({ list: cards });
     } catch (e) {
@@ -170,9 +179,15 @@ async function search(ext) {
 
 /**
  * 获取播放链接
+ * 【v2.3 修正】: 恢复了提取码拼接功能
  */
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
-    return jsonify({ urls: [panLink] });
+    const password = ext.pwd;
+    let finalUrl = panLink;
+    if (password) {
+        finalUrl += `\n提取码: ${password}`;
+    }
+    return jsonify({ urls: [finalUrl] });
 }
