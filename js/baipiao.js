@@ -20,7 +20,7 @@ const cheerio = createCheerio(); // 保留，以防某些App环境需要它
 const appConfig = {
     ver: 4.0, // 保持主版本号为 4.0
     title: '七味网(我的专属源  )',
-    site: 'http://localhost:3000', // <-- 请根据您的实际情况修改这里！
+    site: 'http://192.168.1.4:3000', // <-- 请根据您的实际情况修改这里！
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
