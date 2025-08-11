@@ -18,7 +18,7 @@ const cheerio = createCheerio();
 const appConfig = {
     ver: 4.0,
     title: '七味网(我的专属源 )',
-    site: 'http://192.168.1.4:3000',
+    site: 'http://192.168.1.7:3000',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
