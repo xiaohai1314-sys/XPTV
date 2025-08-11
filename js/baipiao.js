@@ -1,19 +1,16 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.1 (UI修正 & 后端预备版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.2 (绝对纯净版)
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【后端预留】后端服务器地址，当前版本暂不使用，为后续升级做准备。
-const COOKIE_SERVER_URL = 'http://192.168.1.4:3000/getCookie';
-
-// 【保持稳定】暂时使用V3.0中经过验证的硬编码Cookie ，以确保数据能正常加载。
-const STABLE_COOKIE = 'PHPSESSID=98sro02gntq5qqis734ik8hi07; _ok4_=Kx0heu4m9F05IybrnY0Su5Z/+8XD070kFSNNc3U60CbfDnwycM43lOWI53CID8HrUOTbfs6rVPpr9Ci4din5LbRuo71yd0W3vDWdqke6DiMGdVql+SH+NRXbsNuEFThm; beitouviews_5838=KX9OmCyAYuTWNn4uQ6ANjK8Ce5oqXXfdJv39G1aCFkEVfokPEar8iT%252BYb%252FXVqMhcoweHKTc1d3GfGMwcl3Bb20WdH%252BAbiNkWGuCP6uSyD8aXTerq%252FkCJrzOl2a%252BtaLp7Qei9n2CVUmn2h05gnPG3fLQe7VN4VqFdLvL94VQULPYJ9DQFB%252BLPCWNFk%252FbovqSDuKAFGSMqFcVEz%252B3US9vlTdHoY9SVGvD44KoHt9MdhZixDtltrq89XMBWJ%252F7zo0OlIGqRguGnxsrs%252BPcMwG4CF7OHrmEY6jLDGQBMOsyrFLmjNMVv5HCIA5FYzggeUgXbA4Oym5UEqlG3Mzzp%252FKX5TA%253D%253D; richviews_5839=BmcIxW4naNjRymCJYBQYN0Ghx8wFCcEInp8uCmSDRs2CN3NGVYl78JaG9aBsqYBXDg8bpCsD6P6E38lTcqYNoqpaomm5j4Hn%252BTjYsoX%252FuJcyhWEzD5qow4%252FDljjWTB7d5LmF3bvdmNrdBeS6zu2ULvyZKVpnUYBDFkBRP%252BcT%252Fi59jNaKP8vOGYmgKkqO1u2gIo6313AcXvR6YgQBkaN294r%252Bl83pOhnbLjVg6Wp7hZHtNRE2kzyFVC7zJI0bdlrEbl78A7XbrR9oD2Lff45d8%252Fr25nuJZ1yJ6bxQ5Qxq4gpLnIcVtNwsEs%252FgGZfG6fJ72oML%252BV79W3FbK1k%252FbHGSuQ%253D%253D;';
+// 【唯一修改点】: 使用您提供并验证过的“黄金Cookie”
+const FULL_COOKIE = 'PHPSESSID=98sro02gntq5qqis734ik8hi07;_ok4_=S+QRLrRVriPoSXvR5iQrtTRzlpWmtdEn9ZqGlYwlya/Cid74Avtf4A/rNbLYdOMo1rNf4WCt1x4hqsB0q3RuXtnqHzESYg+yGls6XcU46TwB9QMB3tttVwGKbSJ1Gsx';
 
 const appConfig = {
-    ver: '3.1-UI-Fixed',
+    ver: 3.2, // 仅更新版本号以作区分
     title: '七味网(纯盘)',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -24,35 +21,29 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 (来自V3.0 ) ==================
-function log(msg) { try { $log(`[七味网 v3.1] ${msg}`); } catch (_) { console.log(`[七味网 v3.1] ${msg}`); } }
+// ================== 辅助函数 (100%来自V3.0 ) ==================
+function log(msg) { try { $log(`[七味网 v3.2] ${msg}`); } catch (_) { console.log(`[七味网 v3.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ================== 网络核心 (来自V3.0) ==================
+// ================== 网络核心 (100%来自V3.0) ==================
 async function fetchWithCookie(url, customHeaders = {}) {
     const headers = {
         'User-Agent': UA,
-        'Cookie': STABLE_COOKIE, // 使用稳定的、硬编码的Cookie
+        'Cookie': FULL_COOKIE,
         ...customHeaders
     };
     log(`请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (关键修正) ==================
+// ================== 核心实现 (100%来自V3.0) ==================
 
 async function init(ext) { return jsonify({}); }
 
-// ★★★【核心修正】★★★
-// 这个函数现在和V3.0完全一样，直接返回应用配置。
-// 它不进行任何网络请求，从而保证了分类列表总能被App正确、快速地加载。
 async function getConfig() {
-    log('正在提供应用配置...');
     return jsonify(appConfig);
 }
-
-// --- 以下函数100%来自V3.0，无需任何改动 ---
 
 async function getCards(ext) {
     ext = argsify(ext);
