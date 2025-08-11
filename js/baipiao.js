@@ -1,18 +1,21 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.2 (逻辑纯粹最终版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.3 (绝对忠于原版)
  *
  * 版本说明:
- * 纠正了之前版本中对核心函数逻辑的错误修改，100% 回归可运转的 v3.0 脚本的业务逻辑。
- * 这是对“纯前端逻辑 + 动态Cookie”思想最忠实的实现。
+ * 100% 基于用户提供的、可成功运转的 v3.0 脚本进行修改。
+ * 唯一的改动是将写死的 Cookie 替换为从后端动态获取。
+ * 所有核心函数 (getCards, getTracks, search 等) 的逻辑与原版一字不差。
  */
 
-// ================== 配置区 ==================
+// ================== 配置区 (来自您的 v3.0) ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+
+// ★★★【唯一修改点 1/2】: 后端服务器地址 ★★★
 const COOKIE_SERVER_URL = 'http://192.168.1.7:3000/getCookie';
 
 const appConfig = {
-    ver: 3.2,
+    ver: 3.3, // 版本号更新以区分
     title: '七味网(纯盘 )',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -23,16 +26,15 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 ==================
-function log(msg  ) { try { $log(`[七味网 v3.2] ${msg}`); } catch (_) { console.log(`[七味网 v3.2] ${msg}`); } }
+// ================== 辅助函数 (来自您的 v3.0 ) ==================
+function log(msg ) { try { $log(`[七味网 v3.3] ${msg}`); } catch (_) { console.log(`[七味网 v3.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 动态获取Cookie的fetch函数 ---
+// ★★★【唯一修改点 2/2】: 实现动态获取Cookie的 fetchWithCookie 函数 ★★★
 let cachedCookie = null;
 async function fetchWithCookie(url, customHeaders = {}) {
     // 为了确保每次操作都能通过验证，强制刷新Cookie
-    // 如果您发现速度慢，可以恢复缓存逻辑: if (!cachedCookie) { ... }
     cachedCookie = null; 
     
     if (!cachedCookie) {
@@ -50,16 +52,22 @@ async function fetchWithCookie(url, customHeaders = {}) {
             throw new Error(`无法从后端获取Cookie: ${e.message}`);
         }
     }
-    const headers = { 'User-Agent': UA, 'Cookie': cachedCookie, ...customHeaders };
+
+    const headers = {
+        'User-Agent': UA,
+        'Cookie': cachedCookie, // 使用从后端获取的动态Cookie
+        ...customHeaders
+    };
     log(`请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (100% 恢复到 v3.0 的原始逻辑) ==================
+
+// ================== 核心实现 (100% 复制于您的 v3.0 脚本) ==================
+
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
-// ★★★ getCards 函数已完全恢复到 v3.0 的原始逻辑 ★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
@@ -87,7 +95,6 @@ async function getCards(ext) {
     }
 }
 
-// ★★★ getTracks 函数保持 v3.0 的原始逻辑 ★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
@@ -98,8 +105,10 @@ async function getTracks(ext) {
         const tracks = [];
         const panDownloadArea = $('h2:contains("网盘下载")').parent();
         if (panDownloadArea.length === 0) return jsonify({ list: [] });
+
         const panTypes = [];
         panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
+
         panDownloadArea.find('.down-list.tab-content > ul.content').each((index, ul) => {
             const panType = panTypes[index] || '未知网盘';
             const groupTracks = [];
@@ -109,14 +118,18 @@ async function getTracks(ext) {
                 const originalTitle = $a.attr('title') || $a.text();
                 let spec = '';
                 const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
-                if (specMatch) spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
+                if (specMatch) {
+                    spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
+                }
                 const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
                 let pwd = '';
                 const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
                 if (pwdMatch) pwd = pwdMatch[1];
                 groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
             });
-            if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
+            if (groupTracks.length > 0) {
+                tracks.push({ title: panType, tracks: groupTracks });
+            }
         });
         return jsonify({ list: tracks });
     } catch (e) {
@@ -125,11 +138,11 @@ async function getTracks(ext) {
     }
 }
 
-// ★★★ search 函数保持 v3.0 的原始逻辑 ★★★
 async function search(ext) {
     ext = argsify(ext);
     const encodedText = encodeURIComponent(ext.text);
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
+
     try {
         const searchHeaders = {
             'Referer': `${appConfig.site}/`,
@@ -141,6 +154,7 @@ async function search(ext) {
             'Sec-Fetch-User': '?1',
             'Upgrade-Insecure-Requests': '1'
         };
+
         const { data: html } = await fetchWithCookie(url, searchHeaders);
         const $ = cheerio.load(html);
         const cards = [];
@@ -161,7 +175,6 @@ async function search(ext) {
     }
 }
 
-// ★★★ getPlayinfo 函数保持 v3.0 的原始逻辑 ★★★
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
