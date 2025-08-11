@@ -1,21 +1,20 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.4 (最终修正版)
- *
- * 版本说明:
- * - [UI修正] 修正了 getConfig 函数，确保分类列表能被立即、正确地加载，解决白屏问题。
- * - [性能优化] 优化了 fetchWithCookie 函数，采用“失败后刷新”策略，避免对后端造成频繁请求。
- * - [后端协同] 脚本现在完全依赖后端提供一个包含 PHPSESSID 和 _ok4_ 的完整Cookie。
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.1 (UI修正 & 后端预备版)
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-const COOKIE_SERVER_URL = 'http://192.168.1.7:3000/getCookie'; // 您的后端地址
+// 【后端预留】后端服务器地址，当前版本暂不使用，为后续升级做准备。
+const COOKIE_SERVER_URL = 'http://192.168.1.4:3000/getCookie';
+
+// 【保持稳定】暂时使用V3.0中经过验证的硬编码Cookie ，以确保数据能正常加载。
+const STABLE_COOKIE = 'PHPSESSID=98sro02gntq5qqis734ik8hi07; _ok4_=Kx0heu4m9F05IybrnY0Su5Z/+8XD070kFSNNc3U60CbfDnwycM43lOWI53CID8HrUOTbfs6rVPpr9Ci4din5LbRuo71yd0W3vDWdqke6DiMGdVql+SH+NRXbsNuEFThm; beitouviews_5838=KX9OmCyAYuTWNn4uQ6ANjK8Ce5oqXXfdJv39G1aCFkEVfokPEar8iT%252BYb%252FXVqMhcoweHKTc1d3GfGMwcl3Bb20WdH%252BAbiNkWGuCP6uSyD8aXTerq%252FkCJrzOl2a%252BtaLp7Qei9n2CVUmn2h05gnPG3fLQe7VN4VqFdLvL94VQULPYJ9DQFB%252BLPCWNFk%252FbovqSDuKAFGSMqFcVEz%252B3US9vlTdHoY9SVGvD44KoHt9MdhZixDtltrq89XMBWJ%252F7zo0OlIGqRguGnxsrs%252BPcMwG4CF7OHrmEY6jLDGQBMOsyrFLmjNMVv5HCIA5FYzggeUgXbA4Oym5UEqlG3Mzzp%252FKX5TA%253D%253D; richviews_5839=BmcIxW4naNjRymCJYBQYN0Ghx8wFCcEInp8uCmSDRs2CN3NGVYl78JaG9aBsqYBXDg8bpCsD6P6E38lTcqYNoqpaomm5j4Hn%252BTjYsoX%252FuJcyhWEzD5qow4%252FDljjWTB7d5LmF3bvdmNrdBeS6zu2ULvyZKVpnUYBDFkBRP%252BcT%252Fi59jNaKP8vOGYmgKkqO1u2gIo6313AcXvR6YgQBkaN294r%252Bl83pOhnbLjVg6Wp7hZHtNRE2kzyFVC7zJI0bdlrEbl78A7XbrR9oD2Lff45d8%252Fr25nuJZ1yJ6bxQ5Qxq4gpLnIcVtNwsEs%252FgGZfG6fJ72oML%252BV79W3FbK1k%252FbHGSuQ%253D%253D;';
 
 const appConfig = {
-    ver: '3.4-final', // 更新版本号
-    title: '七味网(纯盘 )',
+    ver: '3.1-UI-Fixed',
+    title: '七味网(纯盘)',
     site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -25,74 +24,36 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 ==================
-function log(msg ) { try { $log(`[七味网 v3.4] ${msg}`); } catch (_) { console.log(`[七味网 v3.4] ${msg}`); } }
+// ================== 辅助函数 (来自V3.0 ) ==================
+function log(msg) { try { $log(`[七味网 v3.1] ${msg}`); } catch (_) { console.log(`[七味网 v3.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ================== 网络核心 (已优化) ==================
-let cachedCookie = null;
-
+// ================== 网络核心 (来自V3.0) ==================
 async function fetchWithCookie(url, customHeaders = {}) {
-    // 1. 如果没有缓存的Cookie，则先获取一次
-    if (!cachedCookie) {
-        try {
-            log('缓存为空，首次从后端获取Cookie...');
-            const response = await $fetch.get(COOKIE_SERVER_URL);
-            if (response.status === 'success' && response.cookie && response.cookie.includes('PHPSESSID') && response.cookie.includes('_ok4_')) {
-                cachedCookie = response.cookie;
-                log('✅ 成功获取并缓存了有效Cookie！');
-            } else {
-                throw new Error('后端未返回有效的组合Cookie');
-            }
-        } catch (e) {
-            log(`❌ 首次获取Cookie失败: ${e.message}`);
-            throw e;
-        }
-    }
-
-    const headers = { 'User-Agent': UA, 'Cookie': cachedCookie, ...customHeaders };
-    
-    try {
-        // 2. 使用当前缓存的Cookie发起请求
-        log(`尝试使用缓存Cookie请求: ${url}`);
-        return await $fetch.get(url, { headers });
-    } catch (requestError) {
-        // 3. 如果请求失败（可能是Cookie失效），则强制刷新Cookie并重试一次
-        log(`⚠️ 请求失败: ${requestError.message}。尝试强制刷新Cookie并重试...`);
-        cachedCookie = null; // 清空旧缓存
-        try {
-            const response = await $fetch.get(COOKIE_SERVER_URL);
-            if (response.status === 'success' && response.cookie && response.cookie.includes('PHPSESSID') && response.cookie.includes('_ok4_')) {
-                cachedCookie = response.cookie;
-                log('✅ 成功刷新并缓存了有效Cookie！');
-                const newHeaders = { ...headers, 'Cookie': cachedCookie };
-                log(`重试请求: ${url}`);
-                return await $fetch.get(url, { headers: newHeaders });
-            } else {
-                throw new Error('后端刷新时未返回有效的组合Cookie');
-            }
-        } catch (refreshError) {
-            log(`❌ 强制刷新Cookie并重试均失败: ${refreshError.message}`);
-            throw refreshError;
-        }
-    }
+    const headers = {
+        'User-Agent': UA,
+        'Cookie': STABLE_COOKIE, // 使用稳定的、硬编码的Cookie
+        ...customHeaders
+    };
+    log(`请求URL: ${url}`);
+    return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (已修正) ==================
+// ================== 核心实现 (关键修正) ==================
 
 async function init(ext) { return jsonify({}); }
 
-// ★★★【关键修正 1/2】: 直接返回配置，解决UI白屏问题 ★★★
+// ★★★【核心修正】★★★
+// 这个函数现在和V3.0完全一样，直接返回应用配置。
+// 它不进行任何网络请求，从而保证了分类列表总能被App正确、快速地加载。
 async function getConfig() {
     log('正在提供应用配置...');
     return jsonify(appConfig);
 }
 
-// ★★★【关键修正 2/2】: 所有网络功能现在都依赖于优化后的 fetchWithCookie ★★★
-// getCards, getTracks, search, getPlayinfo 函数与您的 v3.3 完全相同，
-// 它们会自动使用我们上面定义的新的、更智能的 fetchWithCookie 函数。
-// (此处省略重复代码，您无需改动这些函数)
+// --- 以下函数100%来自V3.0，无需任何改动 ---
+
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
