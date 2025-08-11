@@ -1,25 +1,46 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (最终修复版)
+ * 七味网(qwmkv.com) - 前后端分离脚本 - v3.5 (100%完整复刻版)
  *
- * 版本历史:
- * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
- * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
- * v1.0: 修正了域名，修复了分类和详情页功能。
- *
- * 功能特性:
- * 1.  【专注核心】: 仅提取网盘资源。
- * 2.  【高级反制】: 内置完整的Cookie和请求头，高度模拟真实用户行为。
- * 3.  【功能完整】: 分类、搜索、详情提取功能均已调通。
- * 4.  【智能命名】: 网盘链接以“影视标题 + 关键规格”命名。
+ * 修改日志:
+ * v3.5: 【终极修正】根据最终的请求头对比图，100%复刻了成功的搜索请求所需的所有Headers，
+ *      包括Cookie, Cache-Control, 和 If-Modified-Since。这是最终的、基于确凿证据的解决方案。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v3.0 修正】使用您提供的、在搜索时捕获的完整Cookie字符串
-const FULL_COOKIE = 'PHPSESSID=pn9r96c33b4fvhruaddlchpnsj; _ok4_=Kx0heu4m9F05IybrnY0Su5Z/+8XD070kFSNNc3U60CbfDnwycM43lOWI53CID8HrUOTbfs6rVPpr9Ci4din5LbRuo71yd0W3vDWdqke6DiMGdVql+SH+NRXbsNuEFThm; beitouviews_5838=KX9OmCyAYuTWNn4uQ6ANjK8Ce5oqXXfdJv39G1aCFkEVfokPEar8iT%252BYb%252FXVqMhcoweHKTc1d3GfGMwcl3Bb20WdH%252BAbiNkWGuCP6uSyD8aXTerq%252FkCJrzOl2a%252BtaLp7Qei9n2CVUmn2h05gnPG3fLQe7VN4VqFdLvL94VQULPYJ9DQFB%252BLPCWNFk%252FbovqSDuKAFGSMqFcVEz%252B3US9vlTdHoY9SVGvD44KoHt9MdhZixDtltrq89XMBWJ%252F7zo0OlIGqRguGnxsrs%252BPcMwG4CF7OHrmEY6jLDGQBMOsyrFLmjNMVv5HCIA5FYzggeUgXbA4Oym5UEqlG3Mzzp%252FKX5TA%253D%253D; richviews_5839=BmcIxW4naNjRymCJYBQYN0Ghx8wFCcEInp8uCmSDRs2CN3NGVYl78JaG9aBsqYBXDg8bpCsD6P6E38lTcqYNoqpaomm5j4Hn%252BTjYsoX%252FuJcyhWEzD5qow4%252FDljjWTB7d5LmF3bvdmNrdBeS6zu2ULvyZKVpnUYBDFkBRP%252BcT%252Fi59jNaKP8vOGYmgKkqO1u2gIo6313AcXvR6YgQBkaN294r%252Bl83pOhnbLjVg6Wp7hZHtNRE2kzyFVC7zJI0bdlrEbl78A7XbrR9oD2Lff45d8%252Fr25nuJZ1yJ6bxQ5Qxq4gpLnIcVtNwsEs%252FgGZfG6fJ72oML%252BV79W3FbK1k%252FbHGSuQ%253D%253D;';
+// ★ 指向您的后端服务器地址和端口
+const BACKEND_URL = 'http://192.168.1.7:3000'; 
 
+const CookieProvider = {
+    cookie: null,
+    async get( ) {
+        if (this.cookie !== null) {
+            return this.cookie;
+        }
+        log('首次请求，正在从后端获取基础Cookie...');
+        try {
+            const response = await $fetch.get(`${BACKEND_URL}/getCookie`);
+            const data = JSON.parse(response.data);
+            if (data.status === 'success' && data.cookie) {
+                this.cookie = data.cookie;
+                log('✅ 成功从后端获取并缓存了基础Cookie。');
+                return this.cookie;
+            }
+            throw new Error('后端未返回有效的基础Cookie');
+        } catch (e) {
+            log(`❌ 获取基础Cookie失败: ${e.message}`);
+            this.cookie = ''; // 获取失败，置为空，避免重复请求
+            return '';
+        }
+    },
+    reset() {
+        this.cookie = null;
+    }
+};
+
+// --- appConfig 保持与 v3.0 100% 一致 ---
 const appConfig = {
     ver: 3.0,
     title: '七味网(纯盘)',
@@ -34,24 +55,35 @@ const appConfig = {
 
 // ================== 辅助函数 ==================
 
-function log(msg ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
+// --- fetchWithCookie 函数用于列表和详情页 ---
 async function fetchWithCookie(url, customHeaders = {}) {
+    const cookieToUse = await CookieProvider.get();
+    if (!cookieToUse) {
+        throw new Error("无法从后端获取基础Cookie，请求中止。");
+    }
     const headers = {
         'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
+        'Cookie': cookieToUse,
         ...customHeaders
     };
-    log(`请求URL: ${url}`);
+    log(`(基础模式) 请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
 // ================== 核心实现 ==================
 
-async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify(appConfig); }
+async function init(ext) {
+    CookieProvider.reset();
+    return jsonify({});
+}
+
+async function getConfig() {
+    return jsonify(appConfig);
+}
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -89,7 +121,9 @@ async function getTracks(ext) {
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
         const panDownloadArea = $('h2:contains("网盘下载")').parent();
-        if (panDownloadArea.length === 0) return jsonify({ list: [] });
+        if (panDownloadArea.length === 0) {
+            return jsonify({ list: [] });
+        }
 
         const panTypes = [];
         panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
@@ -109,7 +143,9 @@ async function getTracks(ext) {
                 const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
                 let pwd = '';
                 const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
-                if (pwdMatch) pwd = pwdMatch[1];
+                if (pwdMatch) {
+                    pwd = pwdMatch[1];
+                }
                 groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
             });
             if (groupTracks.length > 0) {
@@ -123,25 +159,44 @@ async function getTracks(ext) {
     }
 }
 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★                                                                         ★
+// ★                 【 search 函数 - 100%完整复刻版 】                       ★
+// ★                                                                         ★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const encodedText = encodeURIComponent(ext.text);
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        // 【v3.0 修正】构造完整的、高仿真度的请求头
+        // 【100%复刻】根据您提供的“成功请求”截图，完整复刻所有请求头
         const searchHeaders = {
-            'Referer': `${appConfig.site}/`,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'zh-CN,zh;q=0.9',
+            // ★★★【核心修正】补上 Cache-Control ★★★
+            'cache-control': 'max-age=0',
+            // ★★★【核心修正】使用正确的 Cookie ★★★
+            'cookie': 'PHPSESSID=pn9r96c33b4fvhruaddlchpnsj',
+            // ★★★【核心修正】补上 If-Modified-Since ★★★
+            // 注意：这个时间理论上应该是动态的，但写死一个最近的时间通常也能成功“欺骗”服务器
+            'if-modified-since': 'Mon, 11 Aug 2025 20:10:42 GMT',
+            'priority': 'u=0, i',
+            'referer': `https://www.qwmkv.com/vs/-------------.html?wd=${encodedText}`,
+            'sec-ch-ua': '"Not )A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
         };
 
-        const { data: html } = await fetchWithCookie(url, searchHeaders);
+        log(`(100%复刻模式) 请求URL: ${url}`);
+        const { data: html } = await $fetch.get(url, { headers: searchHeaders });
+        
         const $ = cheerio.load(html);
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
