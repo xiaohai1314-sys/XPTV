@@ -17,34 +17,9 @@
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v3.3 终极改造点】将写死的Cookie替换为一段能从后端动态获取的代码块。
-// 这段代码将模拟原始脚本的行为，确保在需要时，能提供一个有效的Cookie字符串。
-const CookieProvider = {
-    cookie: null,
-    backendUrl: 'http://192.168.1.7:3000', // ★ 指向您的后端服务器
-    async get( ) {
-        if (this.cookie !== null) {
-            return this.cookie;
-        }
-        try {
-            const response = await $fetch.get(`${this.backendUrl}/getCookie`);
-            const data = JSON.parse(response.data);
-            if (data.status === 'success' && data.cookie) {
-                this.cookie = data.cookie;
-                return this.cookie;
-            }
-            throw new Error('后端未返回有效Cookie');
-        } catch (e) {
-            this.cookie = ''; // 获取失败，置为空，避免重复请求
-            return '';
-        }
-    },
-    reset() {
-        this.cookie = null;
-    }
-};
+// 【v3.0 修正】使用您提供的、在搜索时捕获的完整Cookie字符串
+const FULL_COOKIE = 'PHPSESSID=pn9r96c33b4fvhruaddlchpnsj; _ok4_=Kx0heu4m9F05IybrnY0Su5Z/+8XD070kFSNNc3U60CbfDnwycM43lOWI53CID8HrUOTbfs6rVPpr9Ci4din5LbRuo71yd0W3vDWdqke6DiMGdVql+SH+NRXbsNuEFThm; beitouviews_5838=KX9OmCyAYuTWNn4uQ6ANjK8Ce5oqXXfdJv39G1aCFkEVfokPEar8iT%252BYb%252FXVqMhcoweHKTc1d3GfGMwcl3Bb20WdH%252BAbiNkWGuCP6uSyD8aXTerq%252FkCJrzOl2a%252BtaLp7Qei9n2CVUmn2h05gnPG3fLQe7VN4VqFdLvL94VQULPYJ9DQFB%252BLPCWNFk%252FbovqSDuKAFGSMqFcVEz%252B3US9vlTdHoY9SVGvD44KoHt9MdhZixDtltrq89XMBWJ%252F7zo0OlIGqRguGnxsrs%252BPcMwG4CF7OHrmEY6jLDGQBMOsyrFLmjNMVv5HCIA5FYzggeUgXbA4Oym5UEqlG3Mzzp%252FKX5TA%253D%253D; richviews_5839=BmcIxW4naNjRymCJYBQYN0Ghx8wFCcEInp8uCmSDRs2CN3NGVYl78JaG9aBsqYBXDg8bpCsD6P6E38lTcqYNoqpaomm5j4Hn%252BTjYsoX%252FuJcyhWEzD5qow4%252FDljjWTB7d5LmF3bvdmNrdBeS6zu2ULvyZKVpnUYBDFkBRP%252BcT%252Fi59jNaKP8vOGYmgKkqO1u2gIo6313AcXvR6YgQBkaN294r%252Bl83pOhnbLjVg6Wp7hZHtNRE2kzyFVC7zJI0bdlrEbl78A7XbrR9oD2Lff45d8%252Fr25nuJZ1yJ6bxQ5Qxq4gpLnIcVtNwsEs%252FgGZfG6fJ72oML%252BV79W3FbK1k%252FbHGSuQ%253D%253D;';
 
-// --- appConfig 保持与 v3.0 100% 一致 ---
 const appConfig = {
     ver: 3.0,
     title: '七味网(纯盘)',
@@ -57,33 +32,25 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 (与 v3.0 100% 一致 ) ==================
+// ================== 辅助函数 ==================
 
 function log(msg ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- fetchWithCookie 函数进行最小化“嫁接”改造 ---
 async function fetchWithCookie(url, customHeaders = {}) {
-    const cookieToUse = await CookieProvider.get(); // ★ 调用我们新的Cookie提供者
-    if (!cookieToUse) {
-        throw new Error("无法从后端获取有效Cookie，请求中止。");
-    }
     const headers = {
         'User-Agent': UA,
-        'Cookie': cookieToUse, // ★ 使用动态获取的Cookie
+        'Cookie': FULL_COOKIE,
         ...customHeaders
     };
     log(`请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (与 v3.0 100% 一致) ==================
+// ================== 核心实现 ==================
 
-async function init(ext) { 
-    CookieProvider.reset(); // ★ 确保每次重启App都重置Cookie缓存
-    return jsonify({}); 
-}
+async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
@@ -162,6 +129,7 @@ async function search(ext) {
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
+        // 【v3.0 修正】构造完整的、高仿真度的请求头
         const searchHeaders = {
             'Referer': `${appConfig.site}/`,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
