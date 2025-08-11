@@ -1,15 +1,15 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.6 (终极净化版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0.6 (修正版)
  *
  * 版本说明:
  * 这是一个依赖本地后端服务的客户端脚本。它将所有的数据请求
  * 发送到本地运行的后端API，由后端负责处理所有验证和数据抓取。
  *
- * v4.0.5 更新日志:
- * - [重大修复] 解决了数据从后端返回后，因App环境兼容性问题导致无法渲染的根本原因。
- *   在 getCards 函数中增加了“数据净化”步骤：手动遍历从后端获取的列表，
- *   重新创建一个纯净、原生的JavaScript对象数组，确保App渲染引擎能正确识别。
- *   这完美复刻了 v3.0 纯前端脚本在内存中处理数据的成功模式。
+ * v4.0.6 更新日志:
+ * - [关键修复] 修正了 getCards 函数中 ext 字段的构建逻辑。
+ *   之前直接传递了后端返回的 ext 对象，导致前端渲染引擎无法解析。
+ *   现已改为将 ext 对象通过 jsonify (JSON.stringify) 转换为字符串，
+ *   确保符合应用框架的渲染和点击跳转要求，从而解决了列表页为空的问题。
  */
 
 // ================== 配置区 ==================
@@ -28,7 +28,7 @@ const appConfig = {
 };
 
 // ================== 辅助函数 ==================
-function log(msg   ) { try { $log(`[七味网 v4.0.5] ${msg}`); } catch (_) { console.log(`[七味网 v4.0.5] ${msg}`); } }
+function log(msg    ) { try { $log(`[七味网 v4.0.6] ${msg}`); } catch (_) { console.log(`[七味网 v4.0.6] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -39,7 +39,6 @@ async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
-    // 恢复 URL 拼接为 ext.id，因为 ext.id 本身就是正确的字符串
     const url = `${appConfig.site}/list?id=${ext.id}&pageNum=${ext.page || 1}`;
     log(`请求后端API: ${url}`);
     try {
@@ -50,11 +49,25 @@ async function getCards(ext) {
             return jsonify({ list: [] });
         }
 
-        // 2. 【【【 核心修复：尝试直接使用后端返回的数据，跳过“数据净化”步骤 】】】
-        log(`✅ 尝试直接使用后端数据，共 ${responseData.list.length} 个列表项。`);
+        // 2. 【【【 核心修正：数据净化并正确构建 ext 】】】
+        const pureCards = [];
+        for (const item of responseData.list) {
+            pureCards.push({
+                vod_id: item.vod_id,
+                vod_name: item.vod_name,
+                vod_pic: item.vod_pic,
+                vod_remarks: item.vod_remarks,
+                
+                // ★★★ 唯一的、关键的修改点在这里 ★★★
+                // 将后端返回的 ext 对象【字符串化】，以符合前端框架要求
+                ext: jsonify(item.ext),
+            });
+        }
+        
+        log(`✅ 数据已净化，并为 ${pureCards.length} 个列表项正确构建了 ext 字段。`);
 
-        // 3. 将后端返回的数据直接传递给 jsonify
-        return jsonify({ list: responseData.list });
+        // 3. 将纯净的数据对象传递给 jsonify
+        return jsonify({ list: pureCards });
 
     } catch (e) {
         log(`❌ getCards 捕获到异常: ${e.message}`);
@@ -62,13 +75,12 @@ async function getCards(ext) {
     }
 }
 
-// 其他函数保持 v4.0.4 的正确逻辑
+// 其他函数保持原样，无需修改
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}/detail?urlPath=${ext.url}`;
     log(`请求后端API: ${url}`);
     try {
-        // 详情页和搜索页的 $fetch 行为可能不同，保留原始的 {data} 解构
         const { data } = await $fetch.get(url);
         return jsonify(data);
     } catch (e) {
@@ -82,11 +94,11 @@ async function search(ext) {
     const url = `${appConfig.site}/search?keyword=${encodeURIComponent(ext.text)}`;
     log(`请求后端API: ${url}`);
     try {
-        // 搜索功能由前端脚本自己添加 ext，保持 v4.0 的模式
         const responseData = await $fetch.get(url);
         if (responseData && responseData.list) {
             responseData.list.forEach(item => {
-                item.ext = { url: item.vod_id };
+                // 在搜索结果中，我们同样需要构建一个【字符串化】的 ext
+                item.ext = jsonify({ url: item.vod_id });
             });
         }
         return jsonify(responseData);
@@ -106,5 +118,3 @@ async function getPlayinfo(ext) {
     }
     return jsonify({ urls: [finalUrl] });
 }
-
-
