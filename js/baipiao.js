@@ -1,5 +1,6 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.2 (绝对纯净版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (内核) / v3.4 (代号)
+ * 这是一个基于V3.0的纯净解耦版，仅更新了Cookie值。
  */
 
 // ================== 配置区 ==================
@@ -10,7 +11,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const FULL_COOKIE = 'PHPSESSID=98sro02gntq5qqis734ik8hi07;_ok4_=S+QRLrRVriPoSXvR5iQrtTRzlpWmtdEn9ZqGlYwlya/Cid74Avtf4A/rNbLYdOMo1rNf4WCt1x4hqsB0q3RuXtnqHzESYg+yGls6XcU46TwB9QMB3tttVwGKbSJ1Gsx';
 
 const appConfig = {
-    ver: 3.2, // 仅更新版本号以作区分
+    ver: 3.0, // 保持V3.0原样，不做任何不必要的改动
     title: '七味网(纯盘)',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -22,15 +23,19 @@ const appConfig = {
 };
 
 // ================== 辅助函数 (100%来自V3.0 ) ==================
-function log(msg) { try { $log(`[七味网 v3.2] ${msg}`); } catch (_) { console.log(`[七味网 v3.2] ${msg}`); } }
+// 日志中的版本号也保持V3.0原样
+function log(msg) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// ================== 网络核心 (100%来自V3.0) ==================
+// ================== 网络核心 (未来与后端集成的关键) ==================
+// ★★★ 解耦说明 ★★★
+// 未来，我们只需要修改这一个函数，让它从请求后端API来获取Cookie，
+// 就可以实现动态化，而不需要触碰下面任何其他业务代码。
 async function fetchWithCookie(url, customHeaders = {}) {
     const headers = {
         'User-Agent': UA,
-        'Cookie': FULL_COOKIE,
+        'Cookie': FULL_COOKIE, // 当前使用硬编码Cookie
         ...customHeaders
     };
     log(`请求URL: ${url}`);
@@ -44,6 +49,9 @@ async function init(ext) { return jsonify({}); }
 async function getConfig() {
     return jsonify(appConfig);
 }
+
+// --- 以下所有业务函数，都将自动使用上面定义的 fetchWithCookie ---
+// --- 因此，未来我们升级网络核心时，无需改动它们 ---
 
 async function getCards(ext) {
     ext = argsify(ext);
