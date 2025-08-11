@@ -1,11 +1,11 @@
 /**
- * 七味网(qwmkv.com) - 前后端分离脚本 - v4.2 (懒加载注入版)
+ * 七味网(qwmkv.com) - 前后端分离脚本 - v3.1 (最小化注入版)
  *
- * 设计原则:
- * 1.  【UI优先】: getConfig同步返回，保证分类列表永远优先显示，绝不卡顿或白板。
- * 2.  【懒加载】: 只在用户第一次发起需要Cookie的请求时，才从后端获取Cookie。
- * 3.  【全局缓存】: Cookie一次获取，全局共享，避免重复请求。
- * 4.  【优雅降级】: 即使后端服务异常，也只影响数据加载，不影响App框架。
+ * 修改日志:
+ * v3.1: 在v3.0的稳定基础上，进行最小化修改。
+ *      - 移除了写死的FULL_COOKIE。
+ *      - 增加了从后端动态获取Cookie的逻辑。
+ *      - 核心抓取和解析函数保持100%不变，确保最大稳定性。
  */
 
 // ================== 配置区 ==================
@@ -15,11 +15,12 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // ★ 指向您的后端服务器地址和端口
 const BACKEND_URL = 'http://192.168.1.7:3000'; 
 
-// ★ 全局变量 ，用于缓存从后端获取的、唯一的Cookie
-let GLOBAL_COOKIE = null; // 初始为null，表示尚未获取
+// 【v3.1 改造点 1】将写死的 const 替换为可动态赋值的 let 变量
+let dynamicCookie = null; // 初始为null ，表示尚未获取
 
+// --- appConfig 保持100%不变 ---
 const appConfig = {
-    ver: 4.2,
+    ver: 3.1, // 版本号更新以作区分
     title: '七味网(后端版)',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -32,57 +33,61 @@ const appConfig = {
 
 // ================== 辅助函数 ==================
 
-function log(msg  ) { try { $log(`[七味网 v4.2] ${msg}`); } catch (_) { console.log(`[七味网 v4.2] ${msg}`); } }
+// --- log, argsify, jsonify 保持100%不变 ---
+function log(msg  ) { try { $log(`[七味网 v3.1] ${msg}`); } catch (_) { console.log(`[七味网 v3.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-/**
- * ★ 核心辅助函数：获取并缓存Cookie
- * 这是整个“懒加载”模式的核心。
- */
-async function ensureCookie() {
-    // 如果已经获取过Cookie，直接返回缓存的
-    if (GLOBAL_COOKIE !== null) {
-        log('使用已缓存的Cookie');
-        return GLOBAL_COOKIE;
-    }
 
-    // 如果是第一次调用，则从后端获取
+// 【v3.1 改造点 2】增加一个独立的、全新的函数，用于获取并缓存Cookie
+async function ensureCookie() {
+    if (dynamicCookie !== null) {
+        return dynamicCookie;
+    }
     log('首次请求，正在从后端获取Cookie...');
     try {
         const response = await $fetch.get(`${BACKEND_URL}/getCookie`);
         const data = JSON.parse(response.data);
         if (data.status === 'success' && data.cookie) {
-            GLOBAL_COOKIE = data.cookie; // 成功获取后，存入全局变量
+            dynamicCookie = data.cookie;
             log('✅ 成功从后端获取并缓存了Cookie。');
-            return GLOBAL_COOKIE;
+            return dynamicCookie;
         } else {
             throw new Error('后端未返回有效的Cookie。');
         }
     } catch (e) {
         log(`❌ 获取Cookie失败: ${e.message}`);
-        GLOBAL_COOKIE = ''; // 设置为空字符串，避免下次重复请求
-        return ''; // 返回空字符串，本次请求会失败，但不会阻塞程序
+        dynamicCookie = ''; 
+        return '';
     }
 }
 
-// ================== 核心实现 ==================
 
-// --- init 和 getConfig 保持最简，确保UI稳定 ---
+// 【v3.1 改造点 3】只修改 fetchWithCookie 函数，用动态Cookie替换静态Cookie
+async function fetchWithCookie(url, customHeaders = {}) {
+    const cookieToUse = await ensureCookie(); // ★ 在这里调用新函数
+    if (!cookieToUse) {
+        throw new Error("无法获取有效Cookie，请求中止。");
+    }
+
+    const headers = {
+        'User-Agent': UA,
+        'Cookie': cookieToUse, // ★ 使用从后端获取的动态Cookie
+        ...customHeaders
+    };
+    log(`请求URL: ${url}`);
+    return $fetch.get(url, { headers });
+}
+
+// ================== 核心实现 (以下所有函数，保持100%不变) ==================
+
 async function init(ext) { 
-    // 清空缓存，以便每次重启App都能重新获取最新的Cookie
-    GLOBAL_COOKIE = null;
+    // 增加一个重置逻辑，确保每次App重启都能重新获取Cookie
+    dynamicCookie = null;
     return jsonify({}); 
 }
 
-async function getConfig() {
-    // 直接、同步返回配置，保证分类列表100%显示
-    return jsonify(appConfig); 
-}
-
-
-// --- getCards, getTracks, search 函数改造 ---
-// 它们现在都需要在请求前，调用 ensureCookie() 来确保身份已就绪
+async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
     ext = argsify(ext);
@@ -91,13 +96,7 @@ async function getCards(ext) {
     const url = `${appConfig.site}${pagePath}`;
 
     try {
-        const cookie = await ensureCookie(); // ★ 在发起请求前，确保Cookie已就绪
-        if (!cookie) throw new Error("无法获取有效Cookie，请求中止。");
-
-        const { data: html } = await $fetch.get(url, { 
-            headers: { 'User-Agent': UA, 'Cookie': cookie } 
-        });
-
+        const { data: html } = await fetchWithCookie(url);
         const $ = cheerio.load(html);
         const cards = [];
         $('ul.content-list > li').each((_, element) => {
@@ -121,14 +120,7 @@ async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
     try {
-        const cookie = await ensureCookie(); // ★ 在发起请求前，确保Cookie已就绪
-        if (!cookie) throw new Error("无法获取有效Cookie，请求中止。");
-
-        const { data: html } = await $fetch.get(url, { 
-            headers: { 'User-Agent': UA, 'Cookie': cookie, 'Referer': appConfig.site } 
-        });
-        
-        // ...后续的解析逻辑与v3.0完全一致，此处省略以保持简洁...
+        const { data: html } = await fetchWithCookie(url, { 'Referer': appConfig.site });
         const $ = cheerio.load(html);
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
@@ -161,7 +153,6 @@ async function getTracks(ext) {
             }
         });
         return jsonify({ list: tracks });
-
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -174,12 +165,7 @@ async function search(ext) {
     const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        const cookie = await ensureCookie(); // ★ 在发起请求前，确保Cookie已就绪
-        if (!cookie) throw new Error("无法获取有效Cookie，请求中止。");
-
         const searchHeaders = {
-            'User-Agent': UA,
-            'Cookie': cookie,
             'Referer': `${appConfig.site}/`,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'zh-CN,zh;q=0.9',
@@ -190,9 +176,7 @@ async function search(ext) {
             'Upgrade-Insecure-Requests': '1'
         };
 
-        const { data: html } = await $fetch.get(url, { headers: searchHeaders });
-        
-        // ...后续的解析逻辑与v3.0完全一致，此处省略以保持简洁...
+        const { data: html } = await fetchWithCookie(url, searchHeaders);
         const $ = cheerio.load(html);
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
@@ -206,14 +190,12 @@ async function search(ext) {
             }
         });
         return jsonify({ list: cards });
-
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- getPlayinfo 保持不变 ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
