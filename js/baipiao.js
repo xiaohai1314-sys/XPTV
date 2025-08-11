@@ -1,11 +1,9 @@
 /**
- * 七味网(qwmkv.com) - 前后端分离脚本 - v3.1 (最小化注入版)
+ * 七味网(qwmkv.com) - 前后端分离脚本 - v3.2 (终极修正版)
  *
  * 修改日志:
- * v3.1: 在v3.0的稳定基础上，进行最小化修改。
- *      - 移除了写死的FULL_COOKIE。
- *      - 增加了从后端动态获取Cookie的逻辑。
- *      - 核心抓取和解析函数保持100%不变，确保最大稳定性。
+ * v3.2: 【致歉并终极修正】恢复了所有与v3.0完全一致的配置，特别是title。
+ *      只对Cookie的获取方式进行最小化修改，确保100%兼容性。
  */
 
 // ================== 配置区 ==================
@@ -15,13 +13,13 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // ★ 指向您的后端服务器地址和端口
 const BACKEND_URL = 'http://192.168.1.7:3000'; 
 
-// 【v3.1 改造点 1】将写死的 const 替换为可动态赋值的 let 变量
+// 【v3.2 改造点 1】将写死的 const 替换为可动态赋值的 let 变量
 let dynamicCookie = null; // 初始为null ，表示尚未获取
 
-// --- appConfig 保持100%不变 ---
+// --- appConfig 恢复为与 v3.0 100% 一致 ---
 const appConfig = {
-    ver: 3.1, // 版本号更新以作区分
-    title: '七味网(后端版)',
+    ver: 3.0, // ★★★ 恢复版本号
+    title: '七味网(纯盘)', // ★★★【核心修正】恢复原始标题，确保App能正确识别
     site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -34,12 +32,12 @@ const appConfig = {
 // ================== 辅助函数 ==================
 
 // --- log, argsify, jsonify 保持100%不变 ---
-function log(msg  ) { try { $log(`[七味网 v3.1] ${msg}`); } catch (_) { console.log(`[七味网 v3.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
 
-// 【v3.1 改造点 2】增加一个独立的、全新的函数，用于获取并缓存Cookie
+// 【v3.2 改造点 2】增加一个独立的、全新的函数，用于获取并缓存Cookie
 async function ensureCookie() {
     if (dynamicCookie !== null) {
         return dynamicCookie;
@@ -63,16 +61,16 @@ async function ensureCookie() {
 }
 
 
-// 【v3.1 改造点 3】只修改 fetchWithCookie 函数，用动态Cookie替换静态Cookie
+// 【v3.2 改造点 3】只修改 fetchWithCookie 函数，用动态Cookie替换静态Cookie
 async function fetchWithCookie(url, customHeaders = {}) {
-    const cookieToUse = await ensureCookie(); // ★ 在这里调用新函数
+    const cookieToUse = await ensureCookie();
     if (!cookieToUse) {
         throw new Error("无法获取有效Cookie，请求中止。");
     }
 
     const headers = {
         'User-Agent': UA,
-        'Cookie': cookieToUse, // ★ 使用从后端获取的动态Cookie
+        'Cookie': cookieToUse,
         ...customHeaders
     };
     log(`请求URL: ${url}`);
@@ -82,7 +80,6 @@ async function fetchWithCookie(url, customHeaders = {}) {
 // ================== 核心实现 (以下所有函数，保持100%不变) ==================
 
 async function init(ext) { 
-    // 增加一个重置逻辑，确保每次App重启都能重新获取Cookie
     dynamicCookie = null;
     return jsonify({}); 
 }
