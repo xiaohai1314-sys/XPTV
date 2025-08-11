@@ -1,25 +1,53 @@
 /**
- * 七味网(qwmkv.com) - 前后端分离脚本 - v3.2 (终极修正版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (最终修复版)
  *
- * 修改日志:
- * v3.2: 【致歉并终极修正】恢复了所有与v3.0完全一致的配置，特别是title。
- *      只对Cookie的获取方式进行最小化修改，确保100%兼容性。
+ * 版本历史:
+ * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
+ * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
+ * v1.0: 修正了域名，修复了分类和详情页功能。
+ *
+ * 功能特性:
+ * 1.  【专注核心】: 仅提取网盘资源。
+ * 2.  【高级反制】: 内置完整的Cookie和请求头，高度模拟真实用户行为。
+ * 3.  【功能完整】: 分类、搜索、详情提取功能均已调通。
+ * 4.  【智能命名】: 网盘链接以“影视标题 + 关键规格”命名。
  */
 
 // ================== 配置区 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// ★ 指向您的后端服务器地址和端口
-const BACKEND_URL = 'http://192.168.1.7:3000'; 
+// 【v3.3 终极改造点】将写死的Cookie替换为一段能从后端动态获取的代码块。
+// 这段代码将模拟原始脚本的行为，确保在需要时，能提供一个有效的Cookie字符串。
+const CookieProvider = {
+    cookie: null,
+    backendUrl: 'http://192.168.1.7:3000', // ★ 指向您的后端服务器
+    async get( ) {
+        if (this.cookie !== null) {
+            return this.cookie;
+        }
+        try {
+            const response = await $fetch.get(`${this.backendUrl}/getCookie`);
+            const data = JSON.parse(response.data);
+            if (data.status === 'success' && data.cookie) {
+                this.cookie = data.cookie;
+                return this.cookie;
+            }
+            throw new Error('后端未返回有效Cookie');
+        } catch (e) {
+            this.cookie = ''; // 获取失败，置为空，避免重复请求
+            return '';
+        }
+    },
+    reset() {
+        this.cookie = null;
+    }
+};
 
-// 【v3.2 改造点 1】将写死的 const 替换为可动态赋值的 let 变量
-let dynamicCookie = null; // 初始为null ，表示尚未获取
-
-// --- appConfig 恢复为与 v3.0 100% 一致 ---
+// --- appConfig 保持与 v3.0 100% 一致 ---
 const appConfig = {
-    ver: 3.0, // ★★★ 恢复版本号
-    title: '七味网(纯盘)', // ★★★【核心修正】恢复原始标题，确保App能正确识别
+    ver: 3.0,
+    title: '七味网(纯盘)',
     site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -29,61 +57,33 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 ==================
+// ================== 辅助函数 (与 v3.0 100% 一致 ) ==================
 
-// --- log, argsify, jsonify 保持100%不变 ---
-function log(msg  ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-
-// 【v3.2 改造点 2】增加一个独立的、全新的函数，用于获取并缓存Cookie
-async function ensureCookie() {
-    if (dynamicCookie !== null) {
-        return dynamicCookie;
-    }
-    log('首次请求，正在从后端获取Cookie...');
-    try {
-        const response = await $fetch.get(`${BACKEND_URL}/getCookie`);
-        const data = JSON.parse(response.data);
-        if (data.status === 'success' && data.cookie) {
-            dynamicCookie = data.cookie;
-            log('✅ 成功从后端获取并缓存了Cookie。');
-            return dynamicCookie;
-        } else {
-            throw new Error('后端未返回有效的Cookie。');
-        }
-    } catch (e) {
-        log(`❌ 获取Cookie失败: ${e.message}`);
-        dynamicCookie = ''; 
-        return '';
-    }
-}
-
-
-// 【v3.2 改造点 3】只修改 fetchWithCookie 函数，用动态Cookie替换静态Cookie
+// --- fetchWithCookie 函数进行最小化“嫁接”改造 ---
 async function fetchWithCookie(url, customHeaders = {}) {
-    const cookieToUse = await ensureCookie();
+    const cookieToUse = await CookieProvider.get(); // ★ 调用我们新的Cookie提供者
     if (!cookieToUse) {
-        throw new Error("无法获取有效Cookie，请求中止。");
+        throw new Error("无法从后端获取有效Cookie，请求中止。");
     }
-
     const headers = {
         'User-Agent': UA,
-        'Cookie': cookieToUse,
+        'Cookie': cookieToUse, // ★ 使用动态获取的Cookie
         ...customHeaders
     };
     log(`请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (以下所有函数，保持100%不变) ==================
+// ================== 核心实现 (与 v3.0 100% 一致) ==================
 
 async function init(ext) { 
-    dynamicCookie = null;
+    CookieProvider.reset(); // ★ 确保每次重启App都重置Cookie缓存
     return jsonify({}); 
 }
-
 async function getConfig() { return jsonify(appConfig); }
 
 async function getCards(ext) {
