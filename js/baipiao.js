@@ -15,7 +15,7 @@
 const appConfig = {
     ver: 7.1,
     title: '七味网(后端版)',
-    site: 'http://192.168.1.4:3000', // 指向您的后端服务
+    site: 'http://192.168.1.7:3000', // 指向您的后端服务
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
