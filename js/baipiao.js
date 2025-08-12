@@ -1,19 +1,24 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v6.3 (赎罪版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v6.4 (最终赎罪版)
  *
  * 版本历史:
- * v6.3: 【紧急修正】恢复getCards函数的正确逻辑，只保留对search函数的修改。
- * v6.2: 【最终修正】增加JSON.parse()，正确处理后端返回的JSON字符串。
+ * v6.4: 【最终赎罪】以v5.0为基础，只替换search函数，确保其他部分100%不变。
+ * v6.3: (废弃)
+ * v6.2: (废弃)
+ * v6.1: (废弃)
+ * v6.0: (废弃)
+ * v5.0: 【终极升级】实现智能分页加载，解决无止境重复搜索问题。
+ * v4.0: 【架构升级】引入后端服务处理验证码，前端只负责请求和解析。
  */
 
-// ================== 🔴 配置区 🔴 ==================
+// ================== 🔴 配置区 (与v5.0完全一致) 🔴 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 // ★★★ 请务必将这里的IP地址修改为您后端服务器的实际IP地址 ★★★
-const BACKEND_API_URL = 'http://127.0.0.1:8000/get-search-html'; 
+const BACKEND_API_URL = 'http://192.168.1.7:8000/get-search-html'; 
 
 const appConfig = {
-    ver: 6.3, // 版本号更新
+    ver: 6.4, // 版本号更新
     title: '七味网(纯盘 )',
     site: 'https://www.qwmkv.com',
     tabs: [
@@ -24,8 +29,8 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 (保持不变 ) ==================
-function log(msg) { try { $log(`[七味网 v${appConfig.ver}] ${msg}`); } catch (_) { console.log(`[七味网 v${appConfig.ver}] ${msg}`); } }
+// ================== 辅助函数 (与v5.0完全一致 ) ==================
+function log(msg) { try { $log(`[七味网 v6.4] ${msg}`); } catch (_) { console.log(`[七味网 v6.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function fetchOriginalSite(url) {
@@ -34,13 +39,10 @@ async function fetchOriginalSite(url) {
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 ==================
+// ================== 核心实现 (init, getConfig, getCards, getTracks, getPlayinfo 与v5.0完全一致) ==================
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 紧急修正：将 getCards 函数恢复到 v5.0 的正确状态
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
@@ -60,7 +62,6 @@ async function getCards(ext) {
                 cards.push({ vod_id, vod_name, vod_pic, vod_remarks, ext: { url: vod_id } });
             }
         });
-        // ★★★ 恢复到正确的返回格式 ★★★
         return jsonify({ list: cards });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
@@ -68,7 +69,6 @@ async function getCards(ext) {
     }
 }
 
-// getTracks 和 getPlayinfo 函数保持不变
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
@@ -116,7 +116,7 @@ async function getPlayinfo(ext) {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 最终修正的 search 函数
+// ★ 唯一的修改点：替换为最终修正的 search 函数
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
@@ -136,11 +136,13 @@ async function search(ext) {
             { headers: { 'Content-Type': 'application/json' } }
         );
 
-        // ★ 关键修正点：解析后端返回的JSON字符串
+        // 关键修正点：解析后端返回的JSON字符串
         let resultData;
         try {
+            // 假设 response.data 是一个需要解析的JSON字符串
             resultData = JSON.parse(response.data);
         } catch (parseError) {
+            // 如果解析失败，可能是 response.data 本身就是对象了
             log(`JSON.parse 失败，尝试直接使用 response.data: ${parseError.message}`);
             resultData = response.data;
         }
