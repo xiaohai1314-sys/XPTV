@@ -1,53 +1,22 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v3.0 (最终修复版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0 (后端验证版)
  *
  * 版本历史:
- * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头，包括完整的Cookie和Referer，以绕过服务器的特殊校验。
- * v2.0: 修复了搜索URL格式和结果页解析逻辑，但因缺少完整请求头而失败。
- * v1.0: 修正了域名，修复了分类和详情页功能。
- *
- * 功能特性:
- * 1.  【专注核心】: 仅提取网盘资源。
- * 2.  【高级反制】: 内置完整的Cookie和请求头，高度模拟真实用户行为。
- * 3.  【功能完整】: 分类、搜索、详情提取功能均已调通。
- * 4.  【智能命名】: 网盘链接以“影视标题 + 关键规格”命名。
+ * v4.0: 【架构升级】引入后端服务处理验证码，前端只负责请求和解析。
+ * v3.0: 【终极修复】为搜索功能配备了完整的、从真实浏览器捕获的请求头。
  */
 
-// ================== 配置区 ==================
+// ================== 🔴 配置区 (请根据您的实际情况修改) 🔴 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
-// 【v3.3 终极改造点】将写死的Cookie替换为一段能从后端动态获取的代码块。
-// 这段代码将模拟原始脚本的行为，确保在需要时，能提供一个有效的Cookie字符串。
-const CookieProvider = {
-    cookie: null,
-    backendUrl: 'http://192.168.1.7:3000', // ★ 指向您的后端服务器
-    async get( ) {
-        if (this.cookie !== null) {
-            return this.cookie;
-        }
-        try {
-            const response = await $fetch.get(`${this.backendUrl}/getCookie`);
-            const data = JSON.parse(response.data);
-            if (data.status === 'success' && data.cookie) {
-                this.cookie = data.cookie;
-                return this.cookie;
-            }
-            throw new Error('后端未返回有效Cookie');
-        } catch (e) {
-            this.cookie = ''; // 获取失败，置为空，避免重复请求
-            return '';
-        }
-    },
-    reset() {
-        this.cookie = null;
-    }
-};
+// ★ 改造点: 定义您的后端服务地址
+const BACKEND_API_URL = 'http://192.168.1.7:8000/get-search-html'; // ★ 请将 localhost 替换为您后端服务器的IP地址
 
 // --- appConfig 保持与 v3.0 100% 一致 ---
 const appConfig = {
-    ver: 3.0,
-    title: '七味网(纯盘)',
+    ver: 4.0, // ★ 改造点: 更新版本号
+    title: '七味网(纯盘 )',
     site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -57,35 +26,26 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 (与 v3.0 100% 一致 ) ==================
+// ================== 辅助函数 (大部分保持不变 ) ==================
 
-function log(msg ) { try { $log(`[七味网 v3.0] ${msg}`); } catch (_) { console.log(`[七味网 v3.0] ${msg}`); } }
+function log(msg) { try { $log(`[七味网 v4.0] ${msg}`); } catch (_) { console.log(`[七味网 v4.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- fetchWithCookie 函数进行最小化“嫁接”改造 ---
-async function fetchWithCookie(url, customHeaders = {}) {
-    const cookieToUse = await CookieProvider.get(); // ★ 调用我们新的Cookie提供者
-    if (!cookieToUse) {
-        throw new Error("无法从后端获取有效Cookie，请求中止。");
-    }
-    const headers = {
-        'User-Agent': UA,
-        'Cookie': cookieToUse, // ★ 使用动态获取的Cookie
-        ...customHeaders
-    };
-    log(`请求URL: ${url}`);
+// ★ 改造点: 原始的 fetchWithCookie 不再需要，因为Cookie管理已移至后端
+// 我们保留一个简单的 fetch 函数用于分类页，它不经过后端
+async function fetchOriginalSite(url) {
+    const headers = { 'User-Agent': UA };
+    log(`直连请求URL: ${url}`);
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (与 v3.0 100% 一致) ==================
+// ================== 核心实现 (getCards保持原样, search被改造) ==================
 
-async function init(ext) { 
-    CookieProvider.reset(); // ★ 确保每次重启App都重置Cookie缓存
-    return jsonify({}); 
-}
+async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
+// getCards 函数保持原样，因为它访问的页面通常不需要验证
 async function getCards(ext) {
     ext = argsify(ext);
     const page = ext.page || 1;
@@ -93,7 +53,8 @@ async function getCards(ext) {
     const url = `${appConfig.site}${pagePath}`;
 
     try {
-        const { data: html } = await fetchWithCookie(url);
+        // ★ 改造点: 使用新的直连函数
+        const { data: html } = await fetchOriginalSite(url);
         const $ = cheerio.load(html);
         const cards = [];
         $('ul.content-list > li').each((_, element) => {
@@ -113,20 +74,19 @@ async function getCards(ext) {
     }
 }
 
+// getTracks 和 getPlayinfo 函数保持 100% 不变
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
     try {
-        const { data: html } = await fetchWithCookie(url, { 'Referer': appConfig.site });
+        const { data: html } = await fetchOriginalSite(url); // ★ 改造点: 使用新的直连函数
         const $ = cheerio.load(html);
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
         const panDownloadArea = $('h2:contains("网盘下载")').parent();
         if (panDownloadArea.length === 0) return jsonify({ list: [] });
-
         const panTypes = [];
         panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
-
         panDownloadArea.find('.down-list.tab-content > ul.content').each((index, ul) => {
             const panType = panTypes[index] || '未知网盘';
             const groupTracks = [];
@@ -156,24 +116,39 @@ async function getTracks(ext) {
     }
 }
 
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const panLink = ext.pan;
+    const password = ext.pwd;
+    let finalUrl = panLink;
+    if (password) {
+        finalUrl += `\n提取码: ${password}`;
+    }
+    return jsonify({ urls: [finalUrl] });
+}
+
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ 改造重点: search 函数
+// ★ 它不再直接请求目标网站，而是请求我们的后端服务来获取HTML
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const encodedText = encodeURIComponent(ext.text);
-    const url = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
+    const targetSearchUrl = `${appConfig.site}/vs/-------------.html?wd=${encodedText}`;
 
     try {
-        const searchHeaders = {
-            'Referer': `${appConfig.site}/`,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
-        };
+        log(`正在通过后端服务请求URL: ${targetSearchUrl}`);
+        
+        // 1. 调用我们自己的后端服务
+        const response = await $fetch.post(BACKEND_API_URL, {
+            search_url: targetSearchUrl // 将目标URL作为参数发给后端
+        });
 
-        const { data: html } = await fetchWithCookie(url, searchHeaders);
+        // 2. 后端直接返回了最终的HTML字符串
+        const html = response.data;
+
+        // 3. 【无缝衔接】后续的解析逻辑与 v3.0 完全一样！
         const $ = cheerio.load(html);
         const cards = [];
         $('div.sr_lists dl').each((_, element) => {
@@ -187,19 +162,12 @@ async function search(ext) {
             }
         });
         return jsonify({ list: cards });
+
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
+        // ★ 改造点: 可以向用户显示更友好的后端错误信息
+        const errorMessage = e.response ? e.response.data : e.message;
+        $toast(`搜索失败: ${errorMessage}`);
         return jsonify({ list: [] });
     }
-}
-
-async function getPlayinfo(ext) {
-    ext = argsify(ext);
-    const panLink = ext.pan;
-    const password = ext.pwd;
-    let finalUrl = panLink;
-    if (password) {
-        finalUrl += `\n提取码: ${password}`;
-    }
-    return jsonify({ urls: [finalUrl] });
 }
