@@ -1,5 +1,5 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.0 (后端验证版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v4.1 (后端验证版)
  *
  * 版本历史:
  * v4.0: 【架构升级】引入后端服务处理验证码，前端只负责请求和解析。
@@ -141,9 +141,17 @@ async function search(ext) {
         log(`正在通过后端服务请求URL: ${targetSearchUrl}`);
         
         // 1. 调用我们自己的后端服务
-        const response = await $fetch.post(BACKEND_API_URL, {
-            search_url: targetSearchUrl // 将目标URL作为参数发给后端
-        });
+        const response = await $fetch.post(BACKEND_API_URL, 
+            {
+                search_url: targetSearchUrl // 将目标URL作为参数发给后端
+            },
+            {
+                // ★ 本次修正点: 明确告知后端我们发送的是JSON数据, 解决 req.body undefined 的问题
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
 
         // 2. 后端直接返回了最终的HTML字符串
         const html = response.data;
