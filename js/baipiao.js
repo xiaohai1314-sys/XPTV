@@ -1,13 +1,9 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v6.4 (最终赎罪版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v7.0 (基于v5.0的终极升级版)
  *
  * 版本历史:
- * v6.4: 【最终赎罪】以v5.0为基础，只替换search函数，确保其他部分100%不变。
- * v6.3: (废弃)
- * v6.2: (废弃)
- * v6.1: (废弃)
- * v6.0: (废弃)
- * v5.0: 【终极升级】实现智能分页加载，解决无止境重复搜索问题。
+ * v7.0: 【终极升级】以v5.0为基础，只升级search函数，实现精准分页控制。
+ * v5.0: 【智能分页】实现智能分页加载，解决无止境重复搜索问题。
  * v4.0: 【架构升级】引入后端服务处理验证码，前端只负责请求和解析。
  */
 
@@ -15,11 +11,11 @@
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 // ★★★ 请务必将这里的IP地址修改为您后端服务器的实际IP地址 ★★★
-const BACKEND_API_URL = 'http://192.168.1.7:8000/get-search-html'; 
+const BACKEND_API_URL = 'http://192.168.1.7:8000/get-search-html'; // ★ 请修改为您的后端IP
 
 const appConfig = {
-    ver: 6.4, // 版本号更新
-    title: '七味网(纯盘 )',
+    ver: 7.0, // 版本号更新
+    title: '七味网(纯盘  )',
     site: 'https://www.qwmkv.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -30,7 +26,7 @@ const appConfig = {
 };
 
 // ================== 辅助函数 (与v5.0完全一致 ) ==================
-function log(msg) { try { $log(`[七味网 v6.4] ${msg}`); } catch (_) { console.log(`[七味网 v6.4] ${msg}`); } }
+function log(msg ) { try { $log(`[七味网 v7.0] ${msg}`); } catch (_) { console.log(`[七味网 v7.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function fetchOriginalSite(url) {
@@ -62,7 +58,7 @@ async function getCards(ext) {
                 cards.push({ vod_id, vod_name, vod_pic, vod_remarks, ext: { url: vod_id } });
             }
         });
-        return jsonify({ list: cards });
+        return jsonify({ list: cards, page: page, pagecount: page + (cards.length > 0 ? 1 : 0) });
     } catch (e) {
         log(`❌ 获取卡片列表异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -116,7 +112,7 @@ async function getPlayinfo(ext) {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 唯一的修改点：替换为最终修正的 search 函数
+// ★ 唯一的修改点：以v5.0为基础，升级search函数，实现精准分页控制
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
@@ -139,10 +135,8 @@ async function search(ext) {
         // 关键修正点：解析后端返回的JSON字符串
         let resultData;
         try {
-            // 假设 response.data 是一个需要解析的JSON字符串
             resultData = JSON.parse(response.data);
         } catch (parseError) {
-            // 如果解析失败，可能是 response.data 本身就是对象了
             log(`JSON.parse 失败，尝试直接使用 response.data: ${parseError.message}`);
             resultData = response.data;
         }
