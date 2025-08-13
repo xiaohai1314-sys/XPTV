@@ -1,5 +1,5 @@
 /**
- * 海绵小站前端插件 - 最终修复版
+ * 海绵小站前端插件 - 最终修复版1
  * 
  * 版本说明:
  * - 修复了 search 和 getCards 函数中的 .trim() 错误。
@@ -8,11 +8,12 @@
  * - Cookie 仍为您提供的最新值。
  * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及大量谐音字等。
  * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
+ * - 【v3 更新】增加对上下标数字和英文字母的转换支持。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X    ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X     ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -21,7 +22,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { 
+function log(msg   ) { 
     try { 
         $log(`[海绵小站 最终修复版] ${msg}`); 
     } catch (_) { 
@@ -116,7 +117,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -183,7 +184,7 @@ async function getTracks(ext) {
 
         // --- 步骤一：采集所有链接地址 ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex  ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
         // --- 步骤二：采集所有访问码 ---
@@ -194,7 +195,7 @@ async function getTracks(ext) {
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http'  )) {
+            if (code.length < 15 && !code.includes('http'   )) {
                  codePool.push(code);
             }
         }
@@ -216,7 +217,7 @@ async function getTracks(ext) {
                 let rawCode = match[1].trim(); 
                 log(`兜底策略捕获到原始字符串: "${rawCode}"`);
                 
-                // ★★★ 【最终版】超大字符映射表 ★★★
+                // ★★★ 【v3】超大字符映射表 ★★★
                 const finalNumMap = {
                     // 数字 0
                     '零': '0', '〇': '0',
@@ -243,11 +244,20 @@ async function getTracks(ext) {
                     // 带圈数字
                     '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
                     // 全角数字
-                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+                    // 【新增】上下标数字
+                    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+                    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
                 };
+                // 【新增】英文字母转换表
+                const finalCharMap = {
+                    'ᵃ': 'a', 'ᴬ': 'A', 'ₐ': 'a', 'b': 'b', 'ᴮ': 'B', 'ᶜ': 'c', 'd': 'd', 'ᴰ': 'D', 'ᵉ': 'e', 'ᴱ': 'E', 'ₑ': 'e', 'f': 'f', 'g': 'g', 'ᴳ': 'G', 'ʰ': 'h', 'ᴴ': 'H', 'ᵢ': 'i', 'ᴵ': 'I', 'ʲ': 'j', 'ᴶ': 'J', 'ᵏ': 'k', 'ᴷ': 'K', 'ˡ': 'l', 'ᴸ': 'L', 'ᵐ': 'm', 'ᴹ': 'M', 'ⁿ': 'n', 'ᴺ': 'N', 'ᵒ': 'o', 'ᴼ': 'O', 'ₒ': 'o', 'ᵖ': 'p', 'ᴾ': 'P', 'q': 'q', 'ʳ': 'r', 'ᴿ': 'R', 'ˢ': 's', 'ˢ': 'S', 'ᵗ': 't', 'ᵀ': 'T', 'ᵘ': 'u', 'ᵁ': 'U', 'ᵤ': 'u', 'ᵛ': 'v', 'ⱽ': 'V', 'w': 'w', 'ᵂ': 'W', 'ˣ': 'x', 'ˣ': 'X', 'y': 'y', 'Y': 'Y', 'ᶻ': 'z', 'ᶻ': 'Z'
+                };
+
                 let convertedCode = '';
                 for (const char of rawCode) {
-                    convertedCode += finalNumMap[char] || char;
+                    // 优先进行数字和中文谐音转换，然后进行字母转换
+                    convertedCode += finalNumMap[char] || finalCharMap[char] || char;
                 }
                 log(`转换后字符串: "${convertedCode}"`);
 
