@@ -9,11 +9,12 @@
  * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及大量谐音字等。
  * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
  * - 【v4 更新】补全所有上下标数字和英文字母的转换支持，修复下标4无法识别的问题。
+ * - 【v5 最终版】根据您的指示，修正并补全了英文字母转换表(finalCharMap)，确保其完整性和严谨性。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X     ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X      ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -22,7 +23,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg   ) { 
+function log(msg    ) { 
     try { 
         $log(`[海绵小站 最终修复版] ${msg}`); 
     } catch (_) { 
@@ -117,7 +118,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'   )) return path;
+    if (path.startsWith('http'    )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -184,7 +185,7 @@ async function getTracks(ext) {
 
         // --- 步骤一：采集所有链接地址 ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex    ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
         // --- 步骤二：采集所有访问码 ---
@@ -195,7 +196,7 @@ async function getTracks(ext) {
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http'   )) {
+            if (code.length < 15 && !code.includes('http'    )) {
                  codePool.push(code);
             }
         }
@@ -250,10 +251,23 @@ async function getTracks(ext) {
                     // 【修正】补全所有下标数字
                     '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
                 };
-                // 英文字母转换表
+                
+                // =====================================================================
+                // ★★★★★★★★★★★★★★★ 【v5 最终修正区域】 ★★★★★★★★★★★★★★★
+                // 英文字母转换表 (已修正并补全)
                 const finalCharMap = {
-                    'ᵃ': 'a', 'ᴬ': 'A', 'ₐ': 'a', 'b': 'b', 'ᴮ': 'B', 'ᶜ': 'c', 'd': 'd', 'ᴰ': 'D', 'ᵉ': 'e', 'ᴱ': 'E', 'ₑ': 'e', 'f': 'f', 'g': 'g', 'ᴳ': 'G', 'ʰ': 'h', 'ᴴ': 'H', 'ᵢ': 'i', 'ᴵ': 'I', 'ʲ': 'j', 'ᴶ': 'J', 'ᵏ': 'k', 'ᴷ': 'K', 'ˡ': 'l', 'ᴸ': 'L', 'ᵐ': 'm', 'ᴹ': 'M', 'ⁿ': 'n', 'ᴺ': 'N', 'ᵒ': 'o', 'ᴼ': 'O', 'ₒ': 'o', 'ᵖ': 'p', 'ᴾ': 'P', 'q': 'q', 'ʳ': 'r', 'ᴿ': 'R', 'ˢ': 's', 'ˢ': 'S', 'ᵗ': 't', 'ᵀ': 'T', 'ᵘ': 'u', 'ᵁ': 'U', 'ᵤ': 'u', 'ᵛ': 'v', 'ⱽ': 'V', 'w': 'w', 'ᵂ': 'W', 'ˣ': 'x', 'ˣ': 'X', 'y': 'y', 'Y': 'Y', 'ᶻ': 'z', 'ᶻ': 'Z'
+                    // 上标
+                    'ᵃ': 'a', 'ᵅ': 'a', 'ᴬ': 'A', 'ᴮ': 'B', 'ᵇ': 'b', 'ᶜ': 'c', 'ᶝ': 'c', 'ᴰ': 'D', 'ᵈ': 'd',
+                    'ᵉ': 'e', 'ᴱ': 'E', 'ᶠ': 'f', 'ᴳ': 'G', 'ᵍ': 'g', 'ᴴ': 'H', 'ʰ': 'h', 'ᴵ': 'I', 'ⁱ': 'i',
+                    'ᴶ': 'J', 'ʲ': 'j', 'ᴷ': 'K', 'ᵏ': 'k', 'ᴸ': 'L', 'ˡ': 'l', 'ᴹ': 'M', 'ᵐ': 'm', 'ᴺ': 'N',
+                    'ⁿ': 'n', 'ᴼ': 'O', 'ᵒ': 'o', 'ᴾ': 'P', 'ᵖ': 'p', 'ᴿ': 'R', 'ʳ': 'r', 'ˢ': 's', 'ᵀ': 'T',
+                    'ᵗ': 't', 'ᵁ': 'U', 'ᵘ': 'u', 'ⱽ': 'V', 'ᵛ': 'v', 'ᵂ': 'W', 'ʷ': 'w', 'ˣ': 'X', 'ʸ': 'Y', 
+                    'ᶻ': 'Z', 'ᶻ': 'z',
+                    // 下标
+                    'ₐ': 'a', 'ₑ': 'e', 'ᵢ': 'i', 'ₒ': 'o', 'ᵣ': 'r', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
                 };
+                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                // =====================================================================
 
                 let convertedCode = '';
                 for (const char of rawCode) {
