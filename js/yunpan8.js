@@ -1,33 +1,30 @@
 /**
- * 海绵小站前端插件 - 最终修复版
+ * 海绵小站前端插件 - V8.0 荣耀版
  * 
  * 版本说明:
- * - 修复了 search 和 getCards 函数中的 .trim() 错误。
- * - 修复了 getTracks 函数中 setTimeout 不存在的致命错误。
- * - 保留了您指示的核心修改：将文件名硬编码为"网盘"。
- * - Cookie 仍为您提供的最新值。
- * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及大量谐音字等。
- * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
- * - 【v4 更新】补全所有上下标数字和英文字母的转换支持，修复下标4无法识别的问题。
- * - 【v7.0 谢罪版】重构搜索功能，完全基于用户提供的URL规律，解决搜索无止境和分页重复问题。
+ * - 【V8.0 核心升级】植入“完美伪装”战术，解决“定风波”等资源因高级反爬虫策略而失败的问题。
+ *   - 1. COOKIE常量已更新为包含bbs_token的完整版。
+ *   - 2. fetchWithCookie函数已重构，所有请求都将携带从curl命令中提取的、完整的、真实的浏览器请求头，实现完美伪装。
+ * - 【绝对忠于蓝本】此版本严格基于用户提供的【v7.0】版本进行修改，除“伪装”升级外，其他所有函数（getCards, search, getTracks等）的内部逻辑均保持原样，未作任何改动。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X    ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+// UA 已在下方的 defaultHeaders 中定义 ，此处的 UA 仅作为备用。
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
-// ★★★★★【用户配置区 - Cookie】 ★★★★★
-const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs_token=BPFCD_2FVCweXKMKKJDFHNmqWWvmdFBhgpxoARcZD3zy5FoDMu;Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1754329315,1754403914,1754439300,1754546919;HMACCOUNT=A4FF248A8A431217;Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1754546923;";
+// ★★★★★【V8.0 身份令牌升级】★★★★★
+const COOKIE = 'bbs_token=FNadiSz82ritwSG4Ik4_2F8uZij2PotVP6VX8oKMQJk66ZicaB; bbs_sid=ai7g629c5i90qseoi9nf7b4t5f; _xn_accesscount_visited=1; Hm_lvt_d8d486f5aec7b83ea1172477c2ecde4f=1754232197,1754315193,1755050562,1755080864; HMACCOUNT=29968E74595D96C7; Hm_lpvt_d8d486f5aec7b83ea1172477c2ecde4f=1755085598';
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { 
+function log(msg   ) { 
     try { 
-        $log(`[海绵小站 最终修复版] ${msg}`); 
+        $log(`[海绵小站 V8.0 荣耀版] ${msg}`); 
     } catch (_) { 
-        console.log(`[海绵小站 最终修复版] ${msg}`); 
+        console.log(`[海绵小站 V8.0 荣耀版] ${msg}`); 
     } 
 }
 function argsify(ext) { 
@@ -47,19 +44,46 @@ function getRandomText(arr) {
     return arr[Math.floor(Math.random() * arr.length)]; 
 }
 
-// --- 网络请求与回帖 ---
+// ★★★★★【V8.0 完美伪装核心】★★★★★
+// 定义一个包含所有真实浏览器请求头的对象
+const defaultHeaders = {
+    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'cache-control': 'max-age=0',
+    'priority': 'u=0, i',
+    'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': 'same-origin',
+    'sec-fetch-user': '?1',
+    'upgrade-insecure-requests': '1',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+};
+
+// 重构网络请求函数，植入完整的伪装请求头
 async function fetchWithCookie(url, options = {}) {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
         $utils.toastError("请先在插件脚本中配置Cookie", 3000);
         throw new Error("Cookie not configured.");
     }
-    const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
+    // 合并默认请求头、Cookie以及调用时传入的自定义头
+    const headers = { 
+        ...defaultHeaders, 
+        'Cookie': COOKIE,
+        // 'referer' 是动态的，通常在调用时传入，这里把它也加入默认值
+        'referer': options.headers?.referer || SITE_URL + '/',
+        ...options.headers 
+    };
     const finalOptions = { ...options, headers };
+
     if (options.method === 'POST') {
         return $fetch.post(url, options.body, finalOptions);
     }
     return $fetch.get(url, finalOptions);
 }
+// ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 async function reply(url) {
     log("尝试使用Cookie自动回帖...");
@@ -78,10 +102,11 @@ async function reply(url) {
     };
 
     try {
+        // 此处调用已升级的 fetchWithCookie 函数，自动带上完美伪装
         const { data } = await fetchWithCookie(postUrl, {
             method: 'POST',
             body: postData,
-            headers: { 'Referer': url }
+            headers: { 'Referer': url } // 动态传入当前页的Referer
         });
         if (data.includes("您尚未登录")) {
             log("回帖失败：Cookie已失效或不正确。");
@@ -99,10 +124,10 @@ async function reply(url) {
     }
 }
 
-// --- 核心函数 ---
+// --- 核心函数 (均未改动，忠于V7.0蓝本) ---
 
 async function getConfig() {
-  log("插件初始化 (最终修复版)");
+  log("插件初始化 (V8.0 荣耀版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -118,7 +143,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -149,7 +174,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版 + 兜底策略访问码提取】 getTracks 函数 ===================
+// =================== 【V7.0 蓝本，未作改动】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -185,7 +210,7 @@ async function getTracks(ext) {
 
         // --- 步骤一：采集所有链接地址 ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex  ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
         // --- 步骤二：采集所有访问码 ---
@@ -196,7 +221,7 @@ async function getTracks(ext) {
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http'  )) {
+            if (code.length < 15 && !code.includes('http'   )) {
                  codePool.push(code);
             }
         }
@@ -220,56 +245,24 @@ async function getTracks(ext) {
                 
                 // ★★★ 【v4】超大字符映射表 (补全所有上下标数字和英文字母) ★★★
                 const finalNumMap = {
-                    // 数字 0
-                    '零': '0', '〇': '0',
-                    // 数字 1
-                    '一': '1', '壹': '1', '依': '1',
-                    // 数字 2
-                    '二': '2', '贰': '2',
-                    // 数字 3
-                    '三': '3', '叁': '3',
-                    // 数字 4
-                    '四': '4', '肆': '4',
-                    // 数字 5 (新增大量谐音/形近字)
-                    '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5',
-                    // 数字 6
-                    '六': '6', '陆': '6',
-                    // 数字 7
-                    '七': '7', '柒': '7',
-                    // 数字 8
-                    '八': '8', '捌': '8',
-                    // 数字 9
-                    '九': '9', '玖': '9', '久': '9', '酒': '9',
-                    // 罗马数字
-                    'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
-                    // 带圈数字
-                    '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
-                    // 全角数字
-                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-                    // 上下标数字
-                    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
-                    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
+                    '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
                 };
-                // 英文字母转换表 (补全所有上下标)
                 const finalCharMap = {
-                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z',
-                    'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W',
-                    'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
+                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
                 };
 
                 let convertedCode = '';
                 for (const char of rawCode) {
-                    // 优先进行数字和中文谐音转换，然后进行字母转换
                     convertedCode += finalNumMap[char] || finalCharMap[char] || char;
                 }
                 log(`转换后字符串: "${convertedCode}"`);
 
+                // 【V7.0 蓝本逻辑，未作改动】
                 const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
                 if (cleanCodeMatch) {
                     let finalCode = cleanCodeMatch[0];
                     log(`精加工提取出初步访问码: "${finalCode}"`);
                     
-                    // 【新增】访问码长度检查和日志记录
                     if (finalCode.length < 4) {
                         log(`警告：提取到的访问码 "${finalCode}" 长度小于4位，可能是一个无效码。`);
                     }
@@ -415,4 +408,3 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(vod_id, vod_name, ext) { return jsonify({ url: ext.url, name: vod_name, play: ext.url }); }
 async function test(ext) { return getConfig(); }
-
