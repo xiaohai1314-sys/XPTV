@@ -1,12 +1,10 @@
 /**
- * 夸父资源前端插件 - V5.2 王者归来版
+ * 夸父资源前端插件 - V5.3 最终完美版
  *
  * 版本说明:
- * - 【V5.2 核心】基于 V5.1 版本，其搜索逻辑（缓存机制 + 正确的URL格式）被完整保留，这是我们解决所有搜索问题的关键。
- * - 【王者归来】彻底废除 V5.1 中有缺陷的 `fetchWithCookie` 辅助函数和调用它的 `performReply` 函数。
- * - 【经典重现】100% 完整地、原封不动地，将 V1.9 版本中那个最原始、最可靠、已被验证成功的 `performReply` 函数移植回来，彻底解决自动回复失败的问题。
- * - 【保留完美提示】`getTracks` 函数中的提示语 “内容已隐藏，后台自动回帖，请稍后刷新本页” 被完整保留，确保了最佳的用户体验。
- * - 【继承所有成果】保留了最新的有效Cookie、固定的分类列表、以及所有其他已验证的成功逻辑。
+ * - 【V5.3 核心】基于 V5.2 版本，只对 `performReply` 函数进行了一次外科手术式的修正。
+ * - 【完美回帖】彻底废除了 `performReply` 中错误的 `JSON.parse` 逻辑，改为使用最可靠的HTML内容匹配来判断回帖是否成功，彻底解决了“红色HTML代码”的丑陋错误。
+ * - 【保留所有胜利果实】V5.2 中已完美解决的搜索逻辑（缓存机制+正确URL）、您最满意的提示语、最新的有效Cookie等所有来之不易的成果，均被完整保留，未动分毫。
  */
 
 // --- 配置区 ---
@@ -22,9 +20,9 @@ const COOKIE = 'bbs_sid=r9voaafporp90loq4pb9tkb19f; Hm_lvt_2c2cd308748eb9097e250
 // --- 核心辅助函数 ---
 function log(msg ) {
     try {
-        $log(`[夸父资源 王者归来] ${msg}`);
+        $log(`[夸父资源 最终完美版] ${msg}`);
     } catch (_) {
-        console.log(`[夸父资源 王者归来] ${msg}`);
+        console.log(`[夸父资源 最终完美版] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -37,14 +35,13 @@ function getRandomReply() {
     return replies[Math.floor(Math.random() * replies.length)];
 }
 
-// ★★★★★【V5.2 核心修正：V1.9经典回帖引擎回归】★★★★★
+// ★★★★★【V5.3 核心修正：最终完美回帖引擎】★★★★★
 async function performReply(threadId) {
     log(`正在尝试为帖子 ${threadId} 自动回帖...`);
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
     const message = getRandomReply();
     const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
     try {
-        // 直接使用最原始、最可靠的 $fetch.post
         const { data } = await $fetch.post(replyUrl, formData, {
             headers: {
                 'User-Agent': UA,
@@ -55,14 +52,17 @@ async function performReply(threadId) {
                 'Referer': `${SITE_URL}/thread-${threadId}.htm`
             }
         });
-        const result = JSON.parse(data);
-        if (result.code !== 0) {
-            log(`回帖失败: ${result.message}`);
-            $utils.toastError(`回帖失败: ${result.message}`, 3000);
+        
+        // 核心修正：不再使用错误的JSON.parse，而是直接判断返回的HTML中是否包含我们发送的内容
+        if (data && data.includes(message)) {
+            log(`回帖成功, 内容: "${message}"`);
+            return true;
+        } else {
+            log(`回帖失败: 服务器返回内容异常。`);
+            $utils.toastError("回帖失败：服务器返回异常", 3000);
             return false;
         }
-        log(`回帖成功, 内容: "${message}"`);
-        return true;
+
     } catch (e) {
         log(`回帖请求异常: ${e.message}`);
         $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
@@ -74,7 +74,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.2 王者归来版)");
+    log("插件初始化 (V5.3 最终完美版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-1.htm' } },
         { name: '剧集区', ext: { id: 'forum-2.htm' } },
@@ -171,7 +171,7 @@ async function getTracks(ext) {
     }
 }
 
-// ★★★★★【V5.1 胜利果实：最强搜索逻辑】★★★★★
+// ★★★★★【V5.1/V5.2 胜利果实：最强搜索逻辑】★★★★★
 let searchCache = {
     keyword: '',
     page: 0,
@@ -282,4 +282,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (V5.2 王者归来版)');
+log('夸父资源插件加载完成 (V5.3 最终完美版)');
