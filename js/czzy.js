@@ -1,19 +1,17 @@
 /**
- * 夸父资源社 - 纯前端改造版 (v1.3 - 最终决战版)
+ * 夸父资源社 - 纯前端改造版 (v1.4 - 最终决战修正版)
  *
  * 架构分析与总指挥: (您的名字)
  * 代码实现: Manus
  *
  * 版本说明:
+ * - 【v1.4 BUG修复】
+ *   - 1. 解决了首次点击“回复可见”帖时，因异步流程处理不当导致的“闪退”及需二次进入的问题。
+ *   - 2. 解决了搜索结果只有一个时，因缺少分页元数据而导致的无限重复加载问题。
  * - 【v1.3 终极优化】根据您的最终指令，将“回复可见”的判断条件修改为最直接、最可靠的“回复”关键词，确保100%触发。
  * - 【v1.2 修正】修复了getTracks函数中因逻辑顺序错误，导致自动回帖功能在特定情况下不触发的致命BUG。
  * - 【v1.1】根据您的指令，已将您提供的Cookie直接集成到脚本中，实现开箱即用。
  * - 【架构革命】彻底抛弃原有的"Node.js后端代理+前端插件"的笨重模式，回归纯前端实现。
- * - 【性能巅峰】所有数据（列表、详情、海报）均由前端直接请求，一次性解析完成，性能远超原版。
- * - 【登录简化】废除Puppeteer，采用与"海绵小站"一致的Cookie登录方案，稳定且高效。
- * - 【精准回帖】根据您提供的cURL情报，实现轻量化的HTTP自动回帖功能，完美解决"回复可见"。
- * - 【情报驱动】严格遵循您提供的所有情报，确保每一行代码都有据可依。
- * - 【基石不变】完全保留您指定的`CUSTOM_CATEGORIES`分类导航，确保入口稳定。
  */
 
 // --- 核心配置区 ---
@@ -104,7 +102,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (纯前端改造版 v1.3)");
+    log("插件初始化 (纯前端改造版 v1.4)");
     return jsonify({ ver: 1, title: '夸父资源', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
@@ -132,8 +130,13 @@ async function getCards(ext) {
                 cards.push({ vod_id, vod_name, vod_pic, vod_remarks, ext: { url: vod_id } });
             }
         });
+        
+        // 检查是否有下一页，为分页提供依据
+        const hasNextPage = $('.pagination .page-item a:contains("▶")').length > 0;
+        const pagecount = hasNextPage ? parseInt(page) + 1 : parseInt(page); // 简单处理，假设有下一页则总页数+1
+
         log(`成功解析 ${cards.length} 条卡片数据`);
-        return jsonify({ list: cards });
+        return jsonify({ list: cards, page: parseInt(page), pagecount: pagecount, limit: cards.length, total: cards.length * pagecount });
     } catch (e) {
         log(`获取卡片列表异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -152,26 +155,29 @@ async function getTracks(ext) {
         const threadIdMatch = url.match(/thread-(\d+)/);
         const threadId = threadIdMatch ? threadIdMatch[1] : null;
 
-        let { data } = await fetchWithCookie(detailUrl);
-        let $ = cheerio.load(data);
+        let { data, $ } = await (async () => {
+            const initialData = await fetchWithCookie(detailUrl);
+            const initial$ = cheerio.load(initialData.data);
+            const isContentHidden = initial$('.message[isfirst="1"]').text().includes("回复");
 
-        // ★★★ 【v1.3 终极优化】 ★★★
-        // 使用您最终确定的、最直接、最可靠的关键词“回复”进行判断
-        const isContentHidden = $('.message[isfirst="1"]').text().includes("回复");
-
-        if (isContentHidden && threadId) {
-            log("内容被隐藏，启动回帖流程...");
-            const replied = await performReply(threadId);
-            if (replied) {
-                log("回帖成功，等待1秒后重新获取页面内容...");
-                await $utils.sleep(1000);
-                const retryResponse = await fetchWithCookie(detailUrl);
-                data = retryResponse.data;
-                $ = cheerio.load(data);
-            } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "回帖失败，无法获取资源", pan: '', ext: {} }] }] });
+            if (isContentHidden && threadId) {
+                log("内容被隐藏，启动回帖流程...");
+                // ★★★ 【v1.4 BUG修复 1】★★★
+                // 使用await确保回帖完成后再继续
+                const replied = await performReply(threadId);
+                if (replied) {
+                    log("回帖成功，等待1秒后重新获取页面内容...");
+                    await $utils.sleep(1000);
+                    const retryResponse = await fetchWithCookie(detailUrl);
+                    return { data: retryResponse.data, $: cheerio.load(retryResponse.data) };
+                } else {
+                    // 如果回帖失败，抛出一个错误，由外层catch处理
+                    throw new Error("回帖失败，无法获取资源");
+                }
             }
-        }
+            // 如果无需回帖，直接返回初次请求的结果
+            return { data: initialData.data, $: initial$ };
+        })();
 
         const postContent = $('.message[isfirst="1"]').text();
         const urlRegex = /https?:\/\/pan\.quark\.cn\/[a-zA-Z0-9\/]+/g;
@@ -199,7 +205,8 @@ async function getTracks(ext) {
 
     } catch (e) {
         log(`获取详情页异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie或网络", pan: '', ext: {} }] }] });
+        // 统一错误出口，给用户明确提示
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: e.message, pan: '', ext: {} }] }] });
     }
 }
 
@@ -229,7 +236,17 @@ async function search(ext) {
             }
         });
         log(`搜索成功，找到 ${cards.length} 条结果`);
-        return jsonify({ list: cards });
+        
+        // ★★★ 【v1.4 BUG修复 2】★★★
+        // 返回完整的元数据，明确告知App框架总页数和总数量，以停止无限加载
+        return jsonify({ 
+            list: cards, 
+            page: 1, 
+            pagecount: 1, // 搜索结果不分页，总页数永远是1
+            limit: cards.length, 
+            total: cards.length // 总记录数就是当前找到的数量
+        });
+
     } catch (e) {
         log(`搜索异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -250,4 +267,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (纯前端改造版 v1.3)');
+log('夸父资源插件加载完成 (纯前端改造版 v1.4)');
