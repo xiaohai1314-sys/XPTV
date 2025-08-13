@@ -1,13 +1,12 @@
 /**
- * 海绵小站前端插件 - V9.0 数据分流版
+ * 海绵小站前端插件 - V10.0 最终决战版
  * 
  * 版本说明:
- * - 【V9.0 核心重构】严格遵照用户指令，重构getTracks函数的数据输出结构。
- *   - 对于带访问码的资源，不再组合成单一字符串。
- *   - 纯净链接放入 `pan` 字段。
- *   - 纯净访问码放入 `ext: { pwd: '...' }` 字段。
- *   - 此修改旨在将数据处理的责任完全交由App，以规避所有未知的组合/拆解错误。
- * - 【绝对忠于蓝本】此版本严格基于用户提供的【v7.0】版本进行修改，除上述数据结构重构外，其他所有函数和逻辑均保持原样。
+ * - 【V10.0 核心战术】严格遵照用户最终指令，执行“净化再组合”战术。
+ *   - 1. 完整捕获原始访问码，无论其包含任何非标准字符。
+ *   - 2. 使用字符映射表，对原始码进行强制“净化”，确保得到100%标准的字母数字码。
+ *   - 3. 将“净化”后的标准码，与链接“再组合”成App习惯的 `链接（访问码：xxx）` 格式。
+ * - 【绝对忠于蓝本】此版本严格基于用户提供的【v7.0】版本进行修改，仅在getTracks函数中植入“净化再组合”逻辑。
  */
 
 // --- 配置区 ---
@@ -23,9 +22,9 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // --- 核心辅助函数 ---
 function log(msg  ) { 
     try { 
-        $log(`[海绵小站 V9.0 数据分流版] ${msg}`); 
+        $log(`[海绵小站 V10.0 决战版] ${msg}`); 
     } catch (_) { 
-        console.log(`[海绵小站 V9.0 数据分流版] ${msg}`); 
+        console.log(`[海绵小站 V10.0 决战版] ${msg}`); 
     } 
 }
 function argsify(ext) { 
@@ -100,7 +99,7 @@ async function reply(url) {
 // --- 核心函数 ---
 
 async function getConfig() {
-  log("插件初始化 (V9.0 数据分流版)");
+  log("插件初始化 (V10.0 决战版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -147,7 +146,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【V9.0 数据分流版】 getTracks 函数 ===================
+// =================== 【V10.0 净化再组合版】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -186,10 +185,9 @@ async function getTracks(ext) {
         const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
-        // --- 步骤二：采集所有访问码 ---
+        // --- 步骤二：采集并【净化】所有访问码 ---
         let codePool = [];
         
-        // 【保留策略1】优先使用最精确的DIV提取
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
@@ -199,7 +197,6 @@ async function getTracks(ext) {
             }
         }
         
-        // 【保留策略2】如果策略1失败，使用次精确的文本提取
         if (codePool.length === 0) {
             const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
             while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
@@ -207,68 +204,55 @@ async function getTracks(ext) {
             }
         }
         
-        // ★★★ 【新增兜底策略】 ★★★
-        // 仅当以上所有精确策略都失败后，才启用此策略
         if (codePool.length === 0) {
             log("标准提取失败，启用兜底策略处理复杂访问码...");
             const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
             while ((match = fallbackRegex.exec(mainMessageText)) !== null) {
-                let rawCode = match[1].trim(); 
-                log(`兜底策略捕获到原始字符串: "${rawCode}"`);
-                
-                const finalNumMap = {
-                    '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
-                };
-                const finalCharMap = {
-                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
-                };
-
-                let convertedCode = '';
-                for (const char of rawCode) {
-                    convertedCode += finalNumMap[char] || finalCharMap[char] || char;
-                }
-                log(`转换后字符串: "${convertedCode}"`);
-
-                const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
-                if (cleanCodeMatch) {
-                    let finalCode = cleanCodeMatch[0];
-                    log(`精加工提取出初步访问码: "${finalCode}"`);
-                    
-                    if (finalCode.length < 4) {
-                        log(`警告：提取到的访问码 "${finalCode}" 长度小于4位，可能是一个无效码。`);
-                    }
-                    
-                    codePool.push(finalCode);
-                }
+                codePool.push(match[1].trim());
             }
         }
         
         codePool = [...new Set(codePool)];
-        log(`最终采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
+        log(`初步采集到 ${codePool.length} 个原始访问码: ${JSON.stringify(codePool)}`);
 
-        // --- ★★★ V9.0 核心修改 ★★★ ---
-        // --- 步骤三：循环处理，分配并生成【分离式】结果 ---
+        // ★★★ V10.0 核心：强制净化 ★★★
+        const finalNumMap = { '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
+        const finalCharMap = { 'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x' };
+        
+        const purifiedCodePool = codePool.map(rawCode => {
+            let convertedCode = '';
+            for (const char of rawCode) {
+                convertedCode += finalNumMap[char] || finalCharMap[char] || char;
+            }
+            log(`原始码 "${rawCode}" 已被净化为 "${convertedCode}"`);
+            const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
+            return cleanCodeMatch ? cleanCodeMatch[0] : '';
+        }).filter(code => code); // 过滤掉净化后为空的码
+
+        log(`最终净化得到 ${purifiedCodePool.length} 个标准访问码: ${JSON.stringify(purifiedCodePool)}`);
+
+        // --- ★★★ V10.0 核心：再组合 ★★★ ---
+        // --- 步骤三：循环处理，分配并生成【净化再组合】结果 ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
                 const fileName = "网盘";
-                const code = codePool[index] || '';
-                
+                const code = purifiedCodePool[index] || '';
+                let finalPan;
+
                 if (code) {
-                    // 如果有访问码，则分离数据
-                    log(`为链接 ${link} 分配到访问码: ${code}`);
-                    tracks.push({
-                        name: fileName,
-                        pan: link, // pan字段只放纯净链接
-                        ext: { pwd: code }, // pwd字段放纯净访问码
-                    });
+                    // 如果有访问码，则净化再组合
+                    finalPan = `${link}（访问码：${code}）`;
+                    log(`为链接 ${link} 分配净化后的访问码: ${code}，并组合成: ${finalPan}`);
                 } else {
                     // 如果没有访问码，则保持原样
-                    tracks.push({
-                        name: fileName,
-                        pan: link,
-                        ext: { pwd: '' },
-                    });
+                    finalPan = link;
                 }
+
+                tracks.push({
+                    name: fileName,
+                    pan: finalPan,
+                    ext: { pwd: '' }, // 保持ext为空，完全复刻V7.0成功模式
+                });
             });
         }
 
