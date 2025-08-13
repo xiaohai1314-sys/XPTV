@@ -195,7 +195,7 @@ async function getTracks(ext) {
         // 检查是否需要回复
         const threadIdMatch = url.match(/thread-(\d+)/);
         const threadId = threadIdMatch ? threadIdMatch[1] : null;
-        const isContentHidden = $('.message[isfirst="1"]').text().includes("回复后可见");
+        const isContentHidden = $('.message[isfirst="1"]').text().includes("回复");
 
         if (isContentHidden && threadId) {
             log("内容被隐藏，启动回帖流程...");
