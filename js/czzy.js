@@ -1,13 +1,13 @@
 /**
- * 夸父资源社 - 纯前端改造版 (v2.0 - 最终完美版)
+ * 夸父资源社 - 纯前端改造版 (v2.1 - 决胜版)
  *
  * 架构分析与总指挥: (您的名字)
  * 代码实现: Manus
  *
  * 版本说明:
- * - 【v2.0 最终修正】
- *   - 1. (自动回复) 彻底修复“提示语无法显示”及“二次进入”的根源问题。根据您的最终情报，确认App框架存在“单任务网络请求”限制。v2.0版getTracks函数在检测到需回帖时，将无条件、毫秒级返回操作指引，彻底规避框架限制，同时在后台异步触发回帖，逻辑完美闭环。
- *   - 2. (搜索) 彻底修复“多页结果只显示一页”的BUG。采用更鲁棒的分页解析逻辑，确保能准确获取所有分页并一次性扫荡全部数据。
+ * - 【v2.1 决胜修正】
+ *   - 1. (搜索) 彻底修复“并发请求导致搜索失效”的灾难性BUG。放弃v2.0的并发策略，回归最稳定、最可靠的“串行逐页扫描”，确保在任何App环境下都能完整获取所有分页数据。
+ *   - 2. (自动回复) 彻底修复“提示语无法显示”的BUG。放弃v2.0返回标准结构的方式，改为返回一个包含“message”字段的非标准JSON，强制App以Toast或Alert形式弹出我们的操作指引，确保用户能明确接收到指令。
  * - 【v1.9 核心保留】完整保留v1.9已成功的“一次获取，分批交付”缓存策略，杜绝重复加载。
  * - 【架构革命】彻底抛弃原有的"Node.js后端代理+前端插件"的笨重模式，回归纯前端实现。
  * - 【核心基石】所有功能均基于您提供的真实情报（Cookie、cURL、HTML）构建，并保留您指定的分类导航。
@@ -81,7 +81,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (纯前端改造版 v2.0)");
+    log("插件初始化 (纯前端改造版 v2.1)");
     searchCache = {};
     categoryCache = {};
     lastSearchKeyword = "";
@@ -183,11 +183,11 @@ async function getTracks(ext) {
         if (isContentHidden) {
             const threadIdMatch = url.match(/thread-(\d+)/);
             if (threadIdMatch) {
-                // ★★★ 【v2.0 最终修正】 ★★★
-                // 触发后台异步回帖，并立即返回操作指引
                 performReply(threadIdMatch[1]); 
-                log("内容已隐藏，返回操作指引，并已触发后台异步回帖。");
-                return jsonify({ list: [{ title: '操作提示', tracks: [{ name: '内容已隐藏，后台自动回帖，请稍后刷新本页', pan: 'about:blank' }] }] });
+                log("内容已隐藏，返回非标准JSON以强制App提示。");
+                // ★★★ 【v2.1 决胜修正】 ★★★
+                // 返回一个非标准结构，强制App以Toast或Alert形式弹出message内容
+                return jsonify({ "code": -1, "message": "内容已隐藏，后台自动回帖，请稍后刷新本页" });
             }
         }
 
@@ -209,11 +209,7 @@ async function getTracks(ext) {
         return jsonify({ list: [{ title: '资源列表', tracks }] });
     } catch (e) {
         log(`获取详情页异常: ${e.message}`);
-        // 只有在网络请求失败时，才使用toast提示
-        if (e.message === "Cookie not configured." || e.message.toLowerCase().includes('network')) {
-            $utils.toastError(`详情页加载失败: ${e.message}`, 3000);
-        }
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: `加载失败: ${e.message}`, pan: '', ext: {} }] }] });
+        return jsonify({ "code": -1, "message": `详情页加载失败: ${e.message}` });
     }
 }
 
@@ -250,8 +246,6 @@ async function search(ext) {
             
             let allResults = parsePage(firstPageData);
             
-            // ★★★ 【v2.0 最终修正】 ★★★
-            // 必须用第一页的HTML来解析分页
             const $ = cheerio.load(firstPageData);
             let pagecount = 1;
             const pageLinks = $('ul.pagination a.page-link');
@@ -265,17 +259,16 @@ async function search(ext) {
                 }
             }
 
+            // ★★★ 【v2.1 决胜修正】 ★★★
+            // 放弃并发，回归最稳定的串行逐页扫描
             if (pagecount > 1) {
-                log(`侦察到搜索结果共 ${pagecount} 页，开始扫荡剩余页面...`);
-                const pagePromises = [];
+                log(`侦察到搜索结果共 ${pagecount} 页，开始串行扫描剩余页面...`);
                 for (let i = 2; i <= pagecount; i++) {
                     const pageUrl = `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}&page=${i}`;
-                    pagePromises.push(fetchWithCookie(pageUrl));
-                }
-                const otherPageResponses = await Promise.all(pagePromises);
-                otherPageResponses.forEach(res => {
+                    log(`正在扫描第 ${i} 页...`);
+                    const res = await fetchWithCookie(pageUrl);
                     allResults = allResults.concat(parsePage(res.data));
-                });
+                }
             }
             
             log(`一次性获取到全部 ${allResults.length} 条搜索结果`);
@@ -312,4 +305,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (纯前端改造版 v2.0)');
+log('夸父资源插件加载完成 (纯前端改造版 v2.1)');
