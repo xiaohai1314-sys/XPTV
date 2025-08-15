@@ -1,5 +1,5 @@
 /**
- * 海绵小站前端插件 - 最终修复版
+ * 海绵小站前端插件 - 最终修复版 (集成访问码重组策略)
  * 
  * 版本说明:
  * - 修复了 search 和 getCards 函数中的 .trim() 错误。
@@ -10,11 +10,12 @@
  * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
  * - 【v4 更新】补全所有上下标数字和英文字母的转换支持，修复下标4无法识别的问题。
  * - 【v7.0 谢罪版】重构搜索功能，完全基于用户提供的URL规律，解决搜索无止境和分页重复问题。
+ * - 【讨论版新增】根据讨论，集成“原子化+重组”逻辑，通过白名单机制提取并重组访问码，彻底免疫“幽灵字符”和未知符号的干扰。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X    ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X     ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -23,7 +24,7 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { 
+function log(msg   ) { 
     try { 
         $log(`[海绵小站 最终修复版] ${msg}`); 
     } catch (_) { 
@@ -118,7 +119,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -149,7 +150,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版 + 兜底策略访问码提取】 getTracks 函数 ===================
+// =================== 【最终修复版 + 访问码重组策略】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -185,7 +186,7 @@ async function getTracks(ext) {
 
         // --- 步骤一：采集所有链接地址 ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex  ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
         // --- 步骤二：采集所有访问码 ---
@@ -196,7 +197,7 @@ async function getTracks(ext) {
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
             const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http'  )) {
+            if (code.length < 15 && !code.includes('http'   )) {
                  codePool.push(code);
             }
         }
@@ -209,7 +210,7 @@ async function getTracks(ext) {
             }
         }
         
-        // ★★★ 【新增兜底策略】 ★★★
+        // ★★★ 【新增兜底策略 + 访问码重组】 ★★★
         // 仅当以上所有精确策略都失败后，才启用此策略
         if (codePool.length === 0) {
             log("标准提取失败，启用兜底策略处理复杂访问码...");
@@ -218,63 +219,36 @@ async function getTracks(ext) {
                 let rawCode = match[1].trim(); 
                 log(`兜底策略捕获到原始字符串: "${rawCode}"`);
                 
-                // ★★★ 【v4】超大字符映射表 (补全所有上下标数字和英文字母) ★★★
+                // 【v4】超大字符映射表 (补全所有上下标数字和英文字母)
                 const finalNumMap = {
-                    // 数字 0
-                    '零': '0', '〇': '0',
-                    // 数字 1
-                    '一': '1', '壹': '1', '依': '1',
-                    // 数字 2
-                    '二': '2', '贰': '2',
-                    // 数字 3
-                    '三': '3', '叁': '3',
-                    // 数字 4
-                    '四': '4', '肆': '4',
-                    // 数字 5 (新增大量谐音/形近字)
-                    '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5',
-                    // 数字 6
-                    '六': '6', '陆': '6',
-                    // 数字 7
-                    '七': '7', '柒': '7',
-                    // 数字 8
-                    '八': '8', '捌': '8',
-                    // 数字 9
-                    '九': '9', '玖': '9', '久': '9', '酒': '9',
-                    // 罗马数字
-                    'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
-                    // 带圈数字
-                    '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
-                    // 全角数字
-                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-                    // 上下标数字
-                    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
-                    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
+                    '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
                 };
-                // 英文字母转换表 (补全所有上下标)
                 const finalCharMap = {
-                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z',
-                    'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W',
-                    'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
+                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
                 };
 
                 let convertedCode = '';
                 for (const char of rawCode) {
-                    // 优先进行数字和中文谐音转换，然后进行字母转换
                     convertedCode += finalNumMap[char] || finalCharMap[char] || char;
                 }
-                log(`转换后字符串: "${convertedCode}"`);
+                log(`初步转换后字符串: "${convertedCode}"`);
 
-                const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
-                if (cleanCodeMatch) {
-                    let finalCode = cleanCodeMatch[0];
-                    log(`精加工提取出初步访问码: "${finalCode}"`);
+                // ★★★【原子化与重组逻辑】★★★
+                // 1. 原子化: 采用白名单机制，仅从字符串中提取所有有效的字母和数字。
+                const atoms = convertedCode.match(/[a-zA-Z0-9]/g);
+                
+                if (atoms && atoms.length > 0) {
+                    // 2. 重组: 将提取出的有效字符“原子”拼接成最终纯净的访问码。
+                    let finalCode = atoms.join('');
+                    log(`重组后的纯净访问码: "${finalCode}"`);
                     
-                    // 【新增】访问码长度检查和日志记录
                     if (finalCode.length < 4) {
                         log(`警告：提取到的访问码 "${finalCode}" 长度小于4位，可能是一个无效码。`);
                     }
                     
                     codePool.push(finalCode);
+                } else {
+                    log(`在字符串 "${convertedCode}" 中未找到任何有效的字母或数字。`);
                 }
             }
         }
@@ -415,4 +389,3 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(vod_id, vod_name, ext) { return jsonify({ url: ext.url, name: vod_name, play: ext.url }); }
 async function test(ext) { return getConfig(); }
-
