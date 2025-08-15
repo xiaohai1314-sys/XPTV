@@ -1,17 +1,17 @@
 /**
- * 海绵小站前端插件 - V9.1 终极整合版
+ * 海绵小站前端插件 - V7.1 增强版
  * 
  * 版本说明:
- * - 【v9.1 终极整合版】基于V9.0进行重构，旨在解决“V7能行，V9不行”的特定场景。
- * - 核心修改：将访问码的“净化”逻辑（原子化+重组）提升为最高优先级。
- * - 所有通过不同方式（HTML标签、标准正则、兜底正则）捕获的原始字符串，都会被统一送入净化流程。
- * - 确保任何来源的访问码在最终使用前，都经过了严格的“去杂质”处理，保证了结果的高度一致性和纯净性。
- * - 此版本旨在最大化访问码的识别成功率和准确性。
+ * - 【v7.1 增强版】严格基于用户反馈，回归V7.0的稳定逻辑。
+ * - 100%保留V7.0原有的两步提取策略（HTML div提取、标准文本正则提取）及其执行顺序。
+ * - 唯一的修改点：在V7.0所有标准方法都提取失败后，才启用一个新增的、源自V9.0的“终极净化”兜底策略。
+ * - 这种“保持现有，增加兜底”的方式，确保了V7.0原本能处理的所有情况不受任何影响，同时增强了对复杂、非常规访问码的识别能力。
+ * - 拼接方式、数据结构等所有其他部分，均与V7.0原版保持一致。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X      ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X     ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -20,11 +20,11 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg    ) { 
+function log(msg   ) { 
     try { 
-        $log(`[海绵小站 v9.1] ${msg}`); 
+        $log(`[海绵小站 v7.1] ${msg}`); 
     } catch (_) { 
-        console.log(`[海绵小站 v9.1] ${msg}`); 
+        console.log(`[海绵小站 v7.1] ${msg}`); 
     } 
 }
 function argsify(ext) { 
@@ -99,7 +99,7 @@ async function reply(url) {
 // --- 核心函数 ---
 
 async function getConfig() {
-  log("插件初始化 (v9.1 终极整合版)");
+  log("插件初始化 (v7.1 增强版)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -115,7 +115,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'    )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -146,7 +146,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【v9.1 终极整合版】 getTracks 函数 ===================
+// =================== 【V7.1 增强版】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -179,72 +179,74 @@ async function getTracks(ext) {
         const mainMessageText = mainMessage.text();
         const tracks = [];
 
-        // --- 步骤一：采集所有链接地址 ---
+        // --- 步骤一：采集所有链接地址 (与V7一致) ---
         const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex    ) || [])];
+        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
-        // --- 步骤二：采集所有潜在的、未经处理的访问码 ---
-        const potentialCodes = [];
+        // --- 步骤二：采集所有访问码 (严格遵循V7.0流程) ---
+        let codePool = [];
         let match;
         
-        // 采集策略1: 从特定HTML结构中获取
+        // 【V7.0 保留策略1】优先使用最精确的DIV提取
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
-            potentialCodes.push(match[1].trim());
+            const code = match[1].trim();
+            if (code.length < 15 && !code.includes('http'   )) {
+                 codePool.push(code);
+            }
         }
         
-        // 采集策略2: 从 "访问码: xxxx" 标准格式中获取
-        const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]+)/g;
-        while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-            potentialCodes.push(match[1].trim());
+        // 【V7.0 保留策略2】如果策略1失败，使用次精确的文本提取
+        if (codePool.length === 0) {
+            const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
+            while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
+                codePool.push(match[1].trim());
+            }
         }
+        
+        // ★★★ 【V7.1 新增增强型兜底策略】 ★★★
+        // 仅当V7.0的所有标准策略都失败后，才启用此策略
+        if (codePool.length === 0) {
+            log("V7.0标准提取失败，启用增强型兜底策略...");
+            const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
+            while ((match = fallbackRegex.exec(mainMessageText)) !== null) {
+                let rawCode = match[1].trim(); 
+                log(`兜底策略捕获到原始字符串: "${rawCode}"`);
+                
+                const finalNumMap = { '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
+                const finalCharMap = { 'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x' };
 
-        // 采集策略3: 兜底采集，获取 "访问码:" 后面的所有内容
-        const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
-        while ((match = fallbackRegex.exec(mainMessageText)) !== null) {
-            potentialCodes.push(match[1].trim());
-        }
-        log(`采集到 ${potentialCodes.length} 个潜在访问码: ${JSON.stringify(potentialCodes)}`);
-
-        // --- 步骤三：对所有潜在访问码进行统一的、强制的净化处理 ---
-        let codePool = [];
-        if (potentialCodes.length > 0) {
-            log("启动统一净化流程...");
-            const finalNumMap = { '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
-            const finalCharMap = { 'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z', 'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W', 'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x' };
-
-            potentialCodes.forEach(rawCode => {
                 let convertedCode = '';
                 for (const char of rawCode) {
                     convertedCode += finalNumMap[char] || finalCharMap[char] || char;
                 }
-                
+                log(`兜底策略初步转换后字符串: "${convertedCode}"`);
+
                 const atoms = convertedCode.match(/[a-zA-Z0-9]/g);
                 if (atoms && atoms.length > 0) {
-                    const finalCode = atoms.join('');
-                    log(`净化: "${rawCode}" -> "${finalCode}"`);
-                    if (finalCode.length >= 4) {
-                        codePool.push(finalCode);
-                    } else {
-                        log(`警告: 净化后的码 "${finalCode}" 长度小于4，已丢弃。`);
-                    }
+                    let finalCode = atoms.join('');
+                    log(`兜底策略重组后的纯净访问码: "${finalCode}"`);
+                    codePool.push(finalCode);
                 }
-            });
+            }
         }
         
         codePool = [...new Set(codePool)];
-        log(`最终得到 ${codePool.length} 个有效访问码: ${JSON.stringify(codePool)}`);
+        log(`最终采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
 
-        // --- 步骤四：循环处理，分配并生成结果 ---
+        // --- 步骤三：循环处理，分配并生成结果 (与V7一致) ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
                 const fileName = "网盘";
                 const code = codePool[index] || '';
-                let finalPan = link;
+                let finalPan;
                 if (code) {
+                    // 严格使用V7.0的全角括号拼接格式
                     finalPan = `${link}（访问码：${code}）`;
                     log(`为链接 ${link} 分配到访问码: ${code}`);
+                } else {
+                    finalPan = link;
                 }
                 tracks.push({ name: fileName, pan: finalPan, ext: { pwd: '' } });
             });
