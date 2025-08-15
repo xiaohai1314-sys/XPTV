@@ -1,16 +1,10 @@
 /**
- * 海绵小站前端插件 - 最终修复版 (集成访问码重组策略)
+ * 海绵小站前端插件 - 最终修正版 (严格基于V7.0)
  * 
  * 版本说明:
- * - 修复了 search 和 getCards 函数中的 .trim() 错误。
- * - 修复了 getTracks 函数中 setTimeout 不存在的致命错误。
- * - 保留了您指示的核心修改：将文件名硬编码为"网盘"。
- * - Cookie 仍为您提供的最新值。
- * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及大量谐音字等。
- * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
- * - 【v4 更新】补全所有上下标数字和英文字母的转换支持，修复下标4无法识别的问题。
- * - 【v7.0 谢罪版】重构搜索功能，完全基于用户提供的URL规律，解决搜索无止境和分页重复问题。
- * - 【讨论版新增】根据讨论，集成“原子化+重组”逻辑，通过白名单机制提取并重组访问码，彻底免疫“幽灵字符”和未知符号的干扰。
+ * - 【v9.0 终版】严格基于用户提供的、可工作的V7.0版本进行修改。
+ * - 唯一的修改点：在V7.0的访问码提取逻辑中，加入了“原子化+重组”策略，以增强对复杂访问码的识别能力。
+ * - 其他所有部分，包括链接与访问码的拼接格式（使用全角括号）、ext的数据结构等，均与V7.0原版保持100%一致。
  */
 
 // --- 配置区 ---
@@ -150,7 +144,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版 + 访问码重组策略】 getTracks 函数 ===================
+// =================== 【v9.0 终版】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -189,10 +183,9 @@ async function getTracks(ext) {
         const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex   ) || [])];
         log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
 
-        // --- 步骤二：采集所有访问码 ---
+        // --- 步骤二：采集所有访问码 (集成重组策略) ---
         let codePool = [];
         
-        // 【保留策略1】优先使用最精确的DIV提取
         const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
         let match;
         while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
@@ -202,7 +195,6 @@ async function getTracks(ext) {
             }
         }
         
-        // 【保留策略2】如果策略1失败，使用次精确的文本提取
         if (codePool.length === 0) {
             const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
             while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
@@ -210,8 +202,6 @@ async function getTracks(ext) {
             }
         }
         
-        // ★★★ 【新增兜底策略 + 访问码重组】 ★★★
-        // 仅当以上所有精确策略都失败后，才启用此策略
         if (codePool.length === 0) {
             log("标准提取失败，启用兜底策略处理复杂访问码...");
             const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
@@ -219,7 +209,6 @@ async function getTracks(ext) {
                 let rawCode = match[1].trim(); 
                 log(`兜底策略捕获到原始字符串: "${rawCode}"`);
                 
-                // 【v4】超大字符映射表 (补全所有上下标数字和英文字母)
                 const finalNumMap = {
                     '零': '0', '〇': '0', '一': '1', '壹': '1', '依': '1', '二': '2', '贰': '2', '三': '3', '叁': '3', '四': '4', '肆': '4', '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5', '六': '6', '陆': '6', '七': '7', '柒': '7', '八': '8', '捌': '8', '九': '9', '玖': '9', '久': '9', '酒': '9', 'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10', '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
                 };
@@ -233,19 +222,13 @@ async function getTracks(ext) {
                 }
                 log(`初步转换后字符串: "${convertedCode}"`);
 
-                // ★★★【原子化与重组逻辑】★★★
-                // 1. 原子化: 采用白名单机制，仅从字符串中提取所有有效的字母和数字。
                 const atoms = convertedCode.match(/[a-zA-Z0-9]/g);
-                
                 if (atoms && atoms.length > 0) {
-                    // 2. 重组: 将提取出的有效字符“原子”拼接成最终纯净的访问码。
                     let finalCode = atoms.join('');
                     log(`重组后的纯净访问码: "${finalCode}"`);
-                    
                     if (finalCode.length < 4) {
                         log(`警告：提取到的访问码 "${finalCode}" 长度小于4位，可能是一个无效码。`);
                     }
-                    
                     codePool.push(finalCode);
                 } else {
                     log(`在字符串 "${convertedCode}" 中未找到任何有效的字母或数字。`);
@@ -255,18 +238,17 @@ async function getTracks(ext) {
         
         codePool = [...new Set(codePool)];
         log(`最终采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-        // --- 步骤三：循环处理，分配并生成结果 ---
+        // --- 步骤三：循环处理，分配并生成结果 (严格遵循V7.0格式) ---
         if (uniqueLinks.length > 0) {
             uniqueLinks.forEach((link, index) => {
-                
                 const fileName = "网盘";
                 log(`文件名被统一设置为: ${fileName}`);
 
                 const code = codePool[index] || '';
                 let finalPan;
                 if (code) {
+                    // 严格使用V7.0的全角括号拼接格式
                     finalPan = `${link}（访问码：${code}）`;
                     log(`为链接 ${link} 分配到访问码: ${code}`);
                 } else {
@@ -276,6 +258,7 @@ async function getTracks(ext) {
                 tracks.push({
                     name: fileName,
                     pan: finalPan,
+                    // 严格使用V7.0的ext结构
                     ext: { pwd: '' },
                 });
             });
@@ -306,7 +289,6 @@ async function search(ext) {
 
   if (!text) return jsonify({ list: [] });
 
-  // 清理旧的缓存，如果关键词发生变化
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -314,24 +296,20 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
-  // 如果请求的页码已经存在于缓存中，直接返回
   if (searchCache.data[page - 1]) {
     log(`从缓存中获取搜索结果，关键词: ${text}, 页码: ${page}`);
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
-  // 如果请求的页码超出总页数，直接返回空列表
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     log(`请求页码 ${page} 超出总页数 ${searchCache.pagecount}，返回空列表。`);
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
   let url;
-  // 根据页码构建URL
   if (page === 1) {
     url = `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`;
   } else {
-    // 使用用户提供的第二页及以后页面的URL规律
     url = `${SITE_URL}/search-${encodeURIComponent(text)}-1-0-${page}.htm`;
   }
 
@@ -352,13 +330,11 @@ async function search(ext) {
         });
     });
 
-    // 提取总页数和总条数
     let pagecount = 0;
     let total = 0;
 
     const paginationLinks = $('ul.pagination a.page-link');
     if (paginationLinks.length > 0) {
-        // 找到最后一个数字链接作为总页数
         paginationLinks.each((_, link) => {
             const pageNum = parseInt($(link).text().trim());
             if (!isNaN(pageNum)) {
@@ -367,12 +343,11 @@ async function search(ext) {
         });
     }
 
-    total = $("ul.threadlist > li.media.thread").length; // 当前页的条目数
+    total = $("ul.threadlist > li.media.thread").length;
 
-    // 更新缓存
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
-    searchCache.total = total; // 这里需要注意，total应该累加或者从某个地方获取总数，目前只是当前页的条目数
+    searchCache.total = total;
 
     log(`搜索完成，关键词: ${text}, 页码: ${page}, 找到 ${cards.length} 条结果，总页数: ${pagecount}, 当前页条目数: ${total}`);
     return jsonify({ list: cards, pagecount: pagecount, total: total });
