@@ -18,7 +18,7 @@ const BACKEND_API_URL = 'http://192.168.1.7:8000/get-search-html'; // ★ 请修
 const appConfig = {
     ver: 11.0, // 版本号更新
     title: '七味网(纯盘  )',
-    site: 'https://www.qwmkv.com',
+    site: 'https://www.qnmp4.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
