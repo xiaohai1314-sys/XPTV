@@ -1,20 +1,18 @@
 /**
- * 海绵小站前端插件 - 最终修复版
+ * 海绵小站前端插件 - V9.1 内核最终精简版
  * 
  * 版本说明:
- * - 修复了 search 和 getCards 函数中的 .trim() 错误。
- * - 修复了 getTracks 函数中 setTimeout 不存在的致命错误。
- * - 保留了您指示的核心修改：将文件名硬编码为"网盘"。
- * - Cookie 仍为您提供的最新值。
- * - 【新增】增加了增强型访问码转换功能，支持中文、罗马数字、带圈数字、全角数字及大量谐音字等。
- * - 【优化】采用“保持现有，增加兜底”策略，在不影响现有提取逻辑的基础上，增加了对复杂访问码格式的兼容性。
- * - 【v4 更新】补全所有上下标数字和英文字母的转换支持，修复下标4无法识别的问题。
- * - 【v7.0 谢罪版】重构搜索功能，完全基于用户提供的URL规律，解决搜索无止境和分页重复问题。
+ * - [V9.1] 移除了多余的Cookie占位符检查，精简了代码。
+ * - [V9] 修正“纯净码”匹配逻辑，增加URL特征排除规则，彻底解决将链接一部分误判为访问码的问题。
+ * - [V8] 扩大链接识别范围，增加对夸克网盘(pan.quark.cn)的支持。
+ * - [V8] 增强访问码匹配逻辑，可识别无“访问码:”前缀的纯净码块。
+ * - [V8] 修正自动回帖触发关键词为更通用的“回复”。
+ * - [V7] 引入“合并去重”框架，确保链接输出的唯一性和信息完整性。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X    ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X     ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png"; 
 
@@ -23,11 +21,11 @@ const COOKIE = "_xn_accesscount_visited=1;bbs_sid=ovaqn33d3msc6u1ht3cf3chu4p;bbs
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg  ) { 
+function log(msg   ) { 
     try { 
-        $log(`[海绵小站 最终修复版] ${msg}`); 
+        $log(`[海绵小站 V9.1内核] ${msg}`); 
     } catch (_) { 
-        console.log(`[海绵小站 最终修复版] ${msg}`); 
+        console.log(`[海绵小站 V9.1内核] ${msg}`); 
     } 
 }
 function argsify(ext) { 
@@ -49,10 +47,7 @@ function getRandomText(arr) {
 
 // --- 网络请求与回帖 ---
 async function fetchWithCookie(url, options = {}) {
-    if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-        $utils.toastError("请先在插件脚本中配置Cookie", 3000);
-        throw new Error("Cookie not configured.");
-    }
+    // V9.1 精简：移除多余的Cookie检查
     const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
     const finalOptions = { ...options, headers };
     if (options.method === 'POST') {
@@ -92,9 +87,7 @@ async function reply(url) {
         return true;
     } catch (e) {
         log(`回帖请求异常: ${e.message}`);
-        if (e.message !== "Cookie not configured.") {
-            $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
-        }
+        $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
         return false;
     }
 }
@@ -102,7 +95,7 @@ async function reply(url) {
 // --- 核心函数 ---
 
 async function getConfig() {
-  log("插件初始化 (最终修复版)");
+  log("插件初始化 (V9.1内核)");
   return jsonify({
     ver: 1, 
     title: '海绵小站', 
@@ -118,7 +111,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http'   )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -149,7 +142,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== 【最终修复版 + 兜底策略访问码提取】 getTracks 函数 ===================
+// =================== 【V9.1 内核 - 全场景修复最终版】 getTracks 函数 ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -158,151 +151,109 @@ async function getTracks(ext) {
 
     const detailUrl = `${SITE_URL}/${url}`;
     log(`开始处理详情页: ${detailUrl}`);
-    
+
+    // --- V9.1 内核辅助函数 ---
+    const finalNumMap = {'零':'0','〇':'0','一':'1','壹':'1','依':'1','二':'2','贰':'2','三':'3','叁':'3','四':'4','肆':'4','五':'5','伍':'5','吴':'5','吾':'5','无':'5','武':'5','悟':'5','舞':'5','物':'5','乌':'5','屋':'5','唔':'5','雾':'5','勿':'5','误':'5','污':'5','务':'5','午':'5','捂':'5','戊':'5','毋':'5','邬':'5','兀':'5','六':'6','陆':'6','七':'7','柒':'7','八':'8','捌':'8','九':'9','玖':'9','久':'9','酒':'9','Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5','Ⅵ':'6','Ⅶ':'7','Ⅷ':'8','Ⅸ':'9','①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10','０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9'};
+    const finalCharMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
+
+    function purifyAndConvertCode(rawStr) {
+        const codeMatch = rawStr.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/);
+        const extractedCode = codeMatch ? codeMatch[1].trim() : rawStr.trim();
+        let convertedCode = '';
+        for (const char of extractedCode) {
+            convertedCode += finalNumMap[char] || finalCharMap[char] || char;
+        }
+        const finalCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
+        if (finalCodeMatch) {
+            return finalCodeMatch[0].toLowerCase();
+        }
+        return null;
+    }
+
     try {
-        let { data } = await fetchWithCookie(detailUrl);
-        let $ = cheerio.load(data);
+        let { data: htmlContent } = await fetchWithCookie(detailUrl);
         
-        let isContentHidden = $("div.alert.alert-warning").text().includes("回复后");
-        if (isContentHidden) {
-            log("内容被隐藏，启动回帖流程...");
+        if (htmlContent.includes("回复")) {
+            log("检测到页面可能需要回复，启动回帖流程...");
             const replied = await reply(detailUrl);
             if (replied) {
-                log("回帖成功，重新获取页面内容...");
+                log("回帖成功，等待1秒后重新获取页面内容...");
                 await $utils.sleep(1000); 
                 const retryResponse = await fetchWithCookie(detailUrl);
-                data = retryResponse.data;
-                $ = cheerio.load(data);
+                htmlContent = retryResponse.data;
             } else {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
+                log("回帖失败或无需回帖，继续解析当前页面。");
             }
         }
 
+        const $ = cheerio.load(htmlContent);
         const mainMessage = $(".message[isfirst='1']");
-        const mainMessageHtml = mainMessage.html();
-        const mainMessageText = mainMessage.text();
-        const tracks = [];
-
-        // --- 步骤一：采集所有链接地址 ---
-        const linkRegex = /https?:\/\/cloud\.189\.cn\/[^\s<"']+/g;
-        const uniqueLinks = [...new Set(mainMessageHtml.match(linkRegex  ) || [])];
-        log(`采集到 ${uniqueLinks.length} 个不重复的链接地址: ${JSON.stringify(uniqueLinks)}`);
-
-        // --- 步骤二：采集所有访问码 ---
-        let codePool = [];
-        
-        // 【保留策略1】优先使用最精确的DIV提取
-        const htmlCodeRegex = /<div class="alert alert-success"[^>]*>([^<]+)<\/div>/g;
-        let match;
-        while ((match = htmlCodeRegex.exec(mainMessageHtml)) !== null) {
-            const code = match[1].trim();
-            if (code.length < 15 && !code.includes('http'  )) {
-                 codePool.push(code);
-            }
+        if (mainMessage.length === 0) {
+            log("错误：找不到主楼层内容。");
+            return jsonify({ list: [{ title: '错误', tracks: [{ name: "找不到主楼层", pan: '', ext: {} }] }] });
         }
-        
-        // 【保留策略2】如果策略1失败，使用次精确的文本提取
-        if (codePool.length === 0) {
-            const textCodeRegex = /(?:访问码|提取码|密码)\s*[:：]\s*([\w*.:-]{4,8})/g;
-            while ((match = textCodeRegex.exec(mainMessageText)) !== null) {
-                codePool.push(match[1].trim());
+
+        const finalResultsMap = new Map();
+        const usedCodeElements = new Set();
+
+        const allLinkNodes = mainMessage.find('a[href*="cloud.189.cn"], a[href*="pan.quark.cn"]');
+        log(`在主楼层找到 ${allLinkNodes.length} 个网盘链接节点。开始分析...`);
+
+        allLinkNodes.each((_, linkNode) => {
+            const link = $(linkNode).attr('href');
+            if (!link) return;
+
+            let code = null;
+            let currentElement = $(linkNode).closest('p, div, h3');
+            if (currentElement.length === 0) { currentElement = $(linkNode); }
+
+            const searchElements = [currentElement];
+            let next = currentElement.next();
+            for(let i=0; i<3 && next.length > 0; i++){
+                searchElements.push(next);
+                next = next.next();
             }
-        }
-        
-        // ★★★ 【新增兜底策略】 ★★★
-        // 仅当以上所有精确策略都失败后，才启用此策略
-        if (codePool.length === 0) {
-            log("标准提取失败，启用兜底策略处理复杂访问码...");
-            const fallbackRegex = /(?:访问码|提取码|密码)\s*[:：]\s*(.+)/g;
-            while ((match = fallbackRegex.exec(mainMessageText)) !== null) {
-                let rawCode = match[1].trim(); 
-                log(`兜底策略捕获到原始字符串: "${rawCode}"`);
-                
-                // ★★★ 【v4】超大字符映射表 (补全所有上下标数字和英文字母) ★★★
-                const finalNumMap = {
-                    // 数字 0
-                    '零': '0', '〇': '0',
-                    // 数字 1
-                    '一': '1', '壹': '1', '依': '1',
-                    // 数字 2
-                    '二': '2', '贰': '2',
-                    // 数字 3
-                    '三': '3', '叁': '3',
-                    // 数字 4
-                    '四': '4', '肆': '4',
-                    // 数字 5 (新增大量谐音/形近字)
-                    '五': '5', '伍': '5', '吴': '5', '吾': '5', '无': '5', '武': '5', '悟': '5', '舞': '5', '物': '5', '乌': '5', '屋': '5', '唔': '5', '雾': '5', '勿': '5', '误': '5', '污': '5', '务': '5', '午': '5', '捂': '5', '戊': '5', '毋': '5', '邬': '5', '兀': '5',
-                    // 数字 6
-                    '六': '6', '陆': '6',
-                    // 数字 7
-                    '七': '7', '柒': '7',
-                    // 数字 8
-                    '八': '8', '捌': '8',
-                    // 数字 9
-                    '九': '9', '玖': '9', '久': '9', '酒': '9',
-                    // 罗马数字
-                    'Ⅰ': '1', 'Ⅱ': '2', 'Ⅲ': '3', 'Ⅳ': '4', 'Ⅴ': '5', 'Ⅵ': '6', 'Ⅶ': '7', 'Ⅷ': '8', 'Ⅸ': '9',
-                    // 带圈数字
-                    '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10',
-                    // 全角数字
-                    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-                    // 上下标数字
-                    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
-                    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
-                };
-                // 英文字母转换表 (补全所有上下标)
-                const finalCharMap = {
-                    'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f', 'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l', 'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's', 'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z',
-                    'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H', 'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N', 'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ᵀ': 'T', 'ᵁ': 'U', 'ᵂ': 'W',
-                    'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
-                };
 
-                let convertedCode = '';
-                for (const char of rawCode) {
-                    // 优先进行数字和中文谐音转换，然后进行字母转换
-                    convertedCode += finalNumMap[char] || finalCharMap[char] || char;
-                }
-                log(`转换后字符串: "${convertedCode}"`);
+            for (const element of searchElements) {
+                const elementText = $(element).text().trim();
+                if (usedCodeElements.has(element.get(0))) continue;
 
-                const cleanCodeMatch = convertedCode.match(/^[a-zA-Z0-9]+/);
-                if (cleanCodeMatch) {
-                    let finalCode = cleanCodeMatch[0];
-                    log(`精加工提取出初步访问码: "${finalCode}"`);
-                    
-                    // 【新增】访问码长度检查和日志记录
-                    if (finalCode.length < 4) {
-                        log(`警告：提取到的访问码 "${finalCode}" 长度小于4位，可能是一个无效码。`);
+                if (elementText.match(/(?:访问码|提取码|密码)/)) {
+                    const foundCode = purifyAndConvertCode(elementText);
+                    if (foundCode) {
+                        code = foundCode;
+                        usedCodeElements.add(element.get(0));
+                        log(`在元素 <${element.get(0).tagName}> 中通过关键词匹配到访问码: ${code}`);
+                        break;
                     }
-                    
-                    codePool.push(finalCode);
+                }
+                
+                if (!elementText.includes('http' ) && !elementText.includes('/') && !elementText.includes(':')) {
+                    const purifiedText = purifyAndConvertCode(elementText);
+                    if (purifiedText && /^[a-z0-9]{4,8}$/i.test(purifiedText)) {
+                        code = purifiedText;
+                        usedCodeElements.add(element.get(0));
+                        log(`在元素 <${element.get(0).tagName}> 中通过纯净码匹配到访问码: ${code}`);
+                        break;
+                    }
                 }
             }
-        }
-        
-        codePool = [...new Set(codePool)];
-        log(`最终采集到 ${codePool.length} 个可用访问码: ${JSON.stringify(codePool)}`);
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-        // --- 步骤三：循环处理，分配并生成结果 ---
-        if (uniqueLinks.length > 0) {
-            uniqueLinks.forEach((link, index) => {
-                
-                const fileName = "网盘";
-                log(`文件名被统一设置为: ${fileName}`);
+            const existingRecord = finalResultsMap.get(link);
+            if (!existingRecord || (!existingRecord.code && code)) {
+                log(`更新结果库: 链接=${link}, 访问码=${code || '无'}`);
+                finalResultsMap.set(link, { link, code });
+            }
+        });
 
-                const code = codePool[index] || '';
-                let finalPan;
-                if (code) {
-                    finalPan = `${link}（访问码：${code}）`;
-                    log(`为链接 ${link} 分配到访问码: ${code}`);
-                } else {
-                    finalPan = link;
-                }
-
+        const tracks = [];
+        if (finalResultsMap.size > 0) {
+            finalResultsMap.forEach(record => {
+                const finalPan = record.code ? `${record.link}（访问码：${record.code}）` : record.link;
                 tracks.push({
-                    name: fileName,
+                    name: "网盘",
                     pan: finalPan,
-                    ext: { pwd: '' },
+                    ext: { pwd: record.code || '' },
                 });
             });
         }
@@ -332,7 +283,6 @@ async function search(ext) {
 
   if (!text) return jsonify({ list: [] });
 
-  // 清理旧的缓存，如果关键词发生变化
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -340,24 +290,20 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
-  // 如果请求的页码已经存在于缓存中，直接返回
   if (searchCache.data[page - 1]) {
     log(`从缓存中获取搜索结果，关键词: ${text}, 页码: ${page}`);
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
-  // 如果请求的页码超出总页数，直接返回空列表
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     log(`请求页码 ${page} 超出总页数 ${searchCache.pagecount}，返回空列表。`);
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
   let url;
-  // 根据页码构建URL
   if (page === 1) {
     url = `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`;
   } else {
-    // 使用用户提供的第二页及以后页面的URL规律
     url = `${SITE_URL}/search-${encodeURIComponent(text)}-1-0-${page}.htm`;
   }
 
@@ -378,13 +324,11 @@ async function search(ext) {
         });
     });
 
-    // 提取总页数和总条数
     let pagecount = 0;
     let total = 0;
 
     const paginationLinks = $('ul.pagination a.page-link');
     if (paginationLinks.length > 0) {
-        // 找到最后一个数字链接作为总页数
         paginationLinks.each((_, link) => {
             const pageNum = parseInt($(link).text().trim());
             if (!isNaN(pageNum)) {
@@ -393,12 +337,11 @@ async function search(ext) {
         });
     }
 
-    total = $("ul.threadlist > li.media.thread").length; // 当前页的条目数
+    total = $("ul.threadlist > li.media.thread").length;
 
-    // 更新缓存
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
-    searchCache.total = total; // 这里需要注意，total应该累加或者从某个地方获取总数，目前只是当前页的条目数
+    searchCache.total = total;
 
     log(`搜索完成，关键词: ${text}, 页码: ${page}, 找到 ${cards.length} 条结果，总页数: ${pagecount}, 当前页条目数: ${total}`);
     return jsonify({ list: cards, pagecount: pagecount, total: total });
@@ -415,4 +358,3 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(vod_id, vod_name, ext) { return jsonify({ url: ext.url, name: vod_name, play: ext.url }); }
 async function test(ext) { return getConfig(); }
-
