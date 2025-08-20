@@ -1,11 +1,11 @@
 /**
- * 网盘资源社 App 插件前端代码 (V18.1 - 最终修正版)
+ * 网盘资源社 App 插件前端代码 (V19.1 - 回归初心·终极版)
  *
  * 功能:
- * - 【最终修正】移除了 parseDetailHtml 函数中一个多余且错误的“回复”关键词检测，该检测导致回帖成功后内容依然被屏蔽，是造成回帖失败假象的根本原因。
- * - 【最终框架】采用您指定的、经过验证的App环境框架，包含正确的`$fetch`, `cheerio`及您最认可的回帖逻辑。
- * - 【V14解析引擎】搭载我们共同打磨的“节点遍历”解析引擎，精准处理所有复杂布局。
- * - 【最终指令】严格执行您的核心要求，在`pan`字段中输出拼接好的`?pwd=`链接。
+ * - 【逻辑回归】彻底废除 parseDetailHtml 函数，所有解析逻辑回归至 getTracks 内部，100%对标您提供的成功范例。
+ * - 【单一检测】只在 getTracks 开头进行唯一一次“回复可见”检测，杜绝“双重检测”的致命错误，打破死循环。
+ * - 【引擎集成】在我们共同打磨的V14“节点遍历”解析引擎的基础上，适配了回归后的新逻辑。
+ * - 【格式修正】清除了所有导致解析失败的非标准空白字符。
  */
 
 // --- 1. 配置区 ---
@@ -17,7 +17,7 @@ const cheerio = createCheerio();
 // --- 2. 核心工具函数 ---
 
 function log(msg) {
-  try { $log(`[网盘资源社插件] ${msg}`); }  
+  try { $log(`[网盘资源社插件] ${msg}`); }
   catch (_) { console.log(`[网盘资源社插件] ${msg}`); }
 }
 
@@ -26,8 +26,8 @@ function argsify(ext) {
     return ext || {};
 }
 
-function jsonify(data) { 
-    return JSON.stringify(data); 
+function jsonify(data) {
+    return JSON.stringify(data);
 }
 
 function getRandomReply() {
@@ -35,7 +35,6 @@ function getRandomReply() {
     return replies[Math.floor(Math.random() * replies.length)];
 }
 
-// ★★★★★【移植您指定的最终完美回帖引擎】★★★★★
 async function performReply(threadId) {
     log(`正在尝试为帖子 ${threadId} 自动回帖...`);
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
@@ -52,7 +51,7 @@ async function performReply(threadId) {
                 'Referer': `${SITE_URL}/thread-${threadId}.htm`
             }
         });
-        
+
         if (data && data.includes(message)) {
             log(`回帖成功, 内容: "${message}"`);
             return true;
@@ -61,7 +60,6 @@ async function performReply(threadId) {
             $utils.toastError("回帖失败：服务器返回异常", 3000);
             return false;
         }
-
     } catch (e) {
         log(`回帖请求异常: ${e.message}`);
         $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
@@ -69,20 +67,17 @@ async function performReply(threadId) {
     }
 }
 
-// 使用 cheerio 修复列表解析
 function parseListHtml(html) {
   const $ = cheerio.load(html);
   const cards = [];
   $('.media.thread').each((_, el) => {
     const subjectAnchor = $(el).find('.style3_subject a');
     if (!subjectAnchor.length) return;
-
     const vod_id = subjectAnchor.attr('href');
     let vod_pic = $(el).find('a > img.avatar-3')?.attr('src') || '';
     if (vod_pic && !vod_pic.startsWith('http')) {
       vod_pic = `${SITE_URL}/${vod_pic}`;
     }
-
     cards.push({
       vod_id: vod_id,
       vod_name: subjectAnchor.text().trim(),
@@ -91,82 +86,7 @@ function parseListHtml(html) {
       ext: { url: vod_id },
     });
   });
-  log(`解析到 ${cards.length} 条数据`);
   return cards;
-}
-
-// ★★★★★【搭载我们共同打磨的V14解析引擎 (已修正)】★★★★★
-function parseDetailHtml(html) {
-  const $ = cheerio.load(html);
-  const mainMessage = $(".message[isfirst='1']");
-  if (!mainMessage.length) {
-    log("❌ 错误：找不到主内容区域 .message[isfirst='1']");
-    return "暂无有效网盘链接";
-  }
-
-  // ★★★★★【最终修正】★★★★★
-  // 移除了此处错误的二次检查逻辑，这是导致回帖成功后依然白屏的根本原因。
-  // if (mainMessage.text().includes("回复")) { ... }
-  // ★★★★★★★★★★★★★★★★★★★
-
-  log("页面内容已完全显示，开始使用V14终极引擎解析...");
-  
-  const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
-  const finalResultsMap = new Map();
-  let lastTitle = '';
-
-  mainMessage.children().each((_, element) => {
-      const el = $(element);
-      const text = el.text().trim();
-      
-      if (text === '夸克' || text === '阿里') {
-          lastTitle = text;
-          log(`识别到上下文标题: ${lastTitle}`);
-          return;
-      }
-
-      let lastLinkNode = null;
-
-      el.contents().each((_, node) => {
-          const nodeType = node.type;
-          const nodeText = $(node).text();
-
-          if (nodeType === 'tag' && node.name === 'a' && supportedHosts.some(host => $(node).attr('href').includes(host))) {
-              lastLinkNode = $(node);
-              const href = lastLinkNode.attr('href');
-              if (!finalResultsMap.has(href)) {
-                  let fileName = lastTitle || (href.includes('quark.cn') ? '夸克' : '阿里');
-                  finalResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
-                  log(`初步识别链接: 文件名=${fileName}, 链接=${href}`);
-              }
-          }
-          else if (nodeType === 'text' && nodeText.includes('提取码')) {
-              const passMatch = nodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-              if (passMatch && passMatch[1] && lastLinkNode) {
-                  const accessCode = passMatch[1].trim();
-                  const href = lastLinkNode.attr('href');
-                  const existingRecord = finalResultsMap.get(href);
-                  if (existingRecord) {
-                      existingRecord.accessCode = accessCode;
-                      log(`成功关联提取码: 链接=${href}, 提取码=${accessCode}`);
-                  }
-                  lastLinkNode = null;
-              }
-          }
-      });
-
-      if (el.find('a').length > 0) {
-          lastTitle = '';
-      }
-  });
-
-  const dataPackages = [];
-  finalResultsMap.forEach(record => {
-      dataPackages.push(`${record.fileName}$${record.pureLink}|${record.accessCode}`);
-  });
-
-  log(`解析完成, 共生成 ${dataPackages.length} 个有效数据包`);
-  return dataPackages.join("$$$") || "暂无有效网盘链接";
 }
 
 // --- 3. App 接口实现 ---
@@ -174,7 +94,7 @@ function parseDetailHtml(html) {
 async function getConfig() {
   return jsonify({
     ver: 1,
-    title: '网盘资源社(最终版)',
+    title: '网盘资源社(终极版)',
     site: SITE_URL,
     cookie: SITE_COOKIE,
     tabs: [
@@ -189,18 +109,16 @@ async function getConfig() {
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, id } = ext;
-  
   let url = `${SITE_URL}/${id}`;
   if (parseInt(page) > 1) {
       url = url.replace('.htm', `-${page}.htm`);
   }
-  
   const html = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } }).then(res => res.data);
   const cards = parseListHtml(html);
-  
   return jsonify({ list: cards });
 }
 
+// ★★★★★【逻辑回归：所有解析均在getTracks内完成】★★★★★
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -208,9 +126,10 @@ async function getTracks(ext) {
 
   const detailUrl = `${SITE_URL}/${url}`;
   let html = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } }).then(res => res.data);
-  
-  // --- 自动回帖核心逻辑 ---
-  if (html.includes("回复") && (html.includes("才能查看") || html.includes("后可见"))) {
+
+  // --- 单一入口检测与自动回帖 ---
+  const isContentHidden = html.includes("回复") && (html.includes("才能查看") || html.includes("后可见"));
+  if (isContentHidden) {
       log("检测到回复可见，启动自动回帖流程...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
@@ -225,35 +144,75 @@ async function getTracks(ext) {
       }
   }
 
-  const playUrlString = parseDetailHtml(html);
-
+  // --- V14解析引擎，就地执行 ---
+  const $ = cheerio.load(html);
+  const mainMessage = $(".message[isfirst='1']");
   const tracks = [];
-  if (playUrlString && !["暂无有效网盘链接", "需要回复才能查看"].includes(playUrlString)) {
-    playUrlString.split('$$$').forEach((pkg) => {
-      if (!pkg.trim()) return;
-      const parts = pkg.split('$');
-      if (parts.length < 2) return;
 
-      const fileName = parts[0];
-      const [pureLink, accessCode = ''] = parts[1].split('|');
+  if (mainMessage.length) {
+    log("页面内容已完全显示，开始使用V14终极引擎解析...");
+    const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
+    const finalResultsMap = new Map();
+    let lastTitle = '';
 
-      // ★★★★★【执行您的最终指令：拼接URL】★★★★★
-      let finalPan = pureLink;
-      if (accessCode) {
-          const separator = pureLink.includes('?') ? '&' : '?';
-          finalPan = `${pureLink}${separator}pwd=${accessCode}`;
-      }
+    mainMessage.children().each((_, element) => {
+        const el = $(element);
+        const text = el.text().trim();
 
-      tracks.push({
-        name: fileName,
-        pan: finalPan,      // 输出拼接好的、带?pwd=的URL
-        ext: { pwd: '' },    // 您指定的ext格式
-      });
+        if (text === '夸克' || text === '阿里') {
+            lastTitle = text;
+            return;
+        }
+
+        let lastLinkNode = null;
+        el.contents().each((_, node) => {
+            const nodeType = node.type;
+            const nodeText = $(node).text();
+
+            if (nodeType === 'tag' && node.name === 'a' && supportedHosts.some(host => $(node).attr('href').includes(host))) {
+                lastLinkNode = $(node);
+                const href = lastLinkNode.attr('href');
+                if (!finalResultsMap.has(href)) {
+                    let fileName = lastTitle || (href.includes('quark.cn') ? '夸克' : '阿里');
+                    finalResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
+                }
+            }
+            else if (nodeType === 'text' && nodeText.includes('提取码')) {
+                const passMatch = nodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
+                if (passMatch && passMatch[1] && lastLinkNode) {
+                    const accessCode = passMatch[1].trim();
+                    const href = lastLinkNode.attr('href');
+                    const existingRecord = finalResultsMap.get(href);
+                    if (existingRecord) {
+                        existingRecord.accessCode = accessCode;
+                    }
+                    lastLinkNode = null;
+                }
+            }
+        });
+
+        if (el.find('a').length > 0) {
+            lastTitle = '';
+        }
+    });
+
+    finalResultsMap.forEach(record => {
+        let finalPan = record.pureLink;
+        if (record.accessCode) {
+            const separator = finalPan.includes('?') ? '&' : '?';
+            finalPan = `${finalPan}${separator}pwd=${record.accessCode}`;
+        }
+        tracks.push({
+          name: record.fileName,
+          pan: finalPan,
+          ext: { pwd: '' },
+        });
     });
   }
 
   if (tracks.length === 0) {
-    const message = playUrlString || '获取资源失败或帖子无内容';
+    let message = '获取资源失败或帖子无内容';
+    if (isContentHidden) message = '自动回帖后仍未找到资源';
     tracks.push({ name: message, pan: '', ext: {} });
   }
 
@@ -264,24 +223,24 @@ async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
   if (!text) return jsonify({ list: [] });
-  
+
   const url = `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`;
   const html = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } }).then(res => res.data);
   const cards = parseListHtml(html);
-  
+
   return jsonify({ list: cards });
 }
 
 // --- 4. 兼容旧版 App 接口 ---
 async function init() { return getConfig(); }
-async function home() { 
-  const c = await getConfig(); 
+async function home() {
+  const c = await getConfig();
   const config = JSON.parse(c);
-  return jsonify({ class: config.tabs, filters: {} }); 
+  return jsonify({ class: config.tabs, filters: {} });
 }
-async function category(tid, pg, filter, ext) { 
+async function category(tid, pg, filter, ext) {
   const id = ext.id || tid;
-  return getCards({ id: id, page: pg }); 
+  return getCards({ id: id, page: pg });
 }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id, flags) { return jsonify({ url: id }); }
