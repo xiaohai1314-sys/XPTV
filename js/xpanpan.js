@@ -1,16 +1,15 @@
 /**
- * 网盘资源社 App 插件前端代码 (V20 - 基于确凿证据的终极版)
+ * 网盘资源社 App 插件前端代码 (V22 - UX优化版)
  *
  * 功能:
- * - 【正确获取数据】在代码所有角落，100%采用您指出的、正确的`const { data } = await $fetch(...)`语法，从根源上解决所有数据获取失败的问题。
- * - 【精准复刻回帖】像素级复刻您亲手捕获的cURL命令，确保自动回帖请求与真实浏览器行为完全一致。
- * - 【引擎与指令集成】搭载我们共同打磨的V14解析引擎，并严格执行您“拼接URL”的最终指令。
- * - 【最终承诺】这是为了一次性解决所有已知问题而设计的、完全遵照您所有指示和确凿证据的最终版本。
+ * - 【UX优化】解决了首次进入帖子时，因后台自动回帖导致页面长时间空白的问题。
+ * - 【即时反馈】当检测到需要回帖时，脚本会立刻返回提示语（如“已在后台自动回帖，请退出后重新进入”），同时在后台完成回帖任务。
+ * - 【逻辑对标】完全对标成功范例的交互逻辑，提供流畅的用户体验。
+ * - 【根源修复】保留了所有已验证的修复（正确的$fetch语法、V14解析引擎等）。
  */
 
 // --- 1. 配置区 ---
 const SITE_URL = 'https://www.wpzysq.com';
-// ★★★★★【采用您cURL命令中最新的有效Cookie】★★★★★
 const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
@@ -18,7 +17,7 @@ const cheerio = createCheerio();
 // --- 2. 核心工具函数 ---
 
 function log(msg) {
-  try { $log(`[网盘资源社插件] ${msg}`); } 
+  try { $log(`[网盘资源社插件] ${msg}`); }
   catch (_) { console.log(`[网盘资源社插件] ${msg}`); }
 }
 
@@ -27,17 +26,16 @@ function argsify(ext) {
     return ext || {};
 }
 
-function jsonify(data) { 
-    return JSON.stringify(data); 
+function jsonify(data) {
+    return JSON.stringify(data);
 }
 
-// ★★★★★【像素级复刻您捕获的cURL命令】★★★★★
 async function performReply(threadId) {
     log(`正在尝试为帖子 ${threadId} 自动回帖...`);
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const message = "感谢分享"; // 使用您cURL中的消息
+    const message = "感谢分享";
     const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
-    
+
     try {
         const { data } = await $fetch.post(replyUrl, formData, {
             headers: {
@@ -51,8 +49,7 @@ async function performReply(threadId) {
                 'x-requested-with': 'XMLHttpRequest'
             }
         });
-        
-        // 使用最可靠的判断方式：返回的数据中是否包含我们发送的消息
+
         if (data && data.includes(message)) {
             log(`回帖成功, 内容: "${message}"`);
             return true;
@@ -76,7 +73,7 @@ function parseListHtml(html) {
     if (!subjectAnchor.length) return;
     const vod_id = subjectAnchor.attr('href');
     let vod_pic = $(el).find('a > img.avatar-3')?.attr('src') || '';
-    if (vod_pic && !vod_pic.startsWith('http' )) {
+    if (vod_pic && !vod_pic.startsWith('http')) {
       vod_pic = `${SITE_URL}/${vod_pic}`;
     }
     cards.push({
@@ -95,7 +92,7 @@ function parseListHtml(html) {
 async function getConfig() {
   return jsonify({
     ver: 1,
-    title: '网盘资源社(终极版)',
+    title: '网盘资源社(UX优化版)',
     site: SITE_URL,
     cookie: SITE_COOKIE,
     tabs: [
@@ -114,42 +111,36 @@ async function getCards(ext) {
   if (parseInt(page) > 1) {
       url = url.replace('.htm', `-${page}.htm`);
   }
-  // ★★★★★【100%采用正确的$fetch写法】★★★★★
   const { data: html } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
   const cards = parseListHtml(html);
   return jsonify({ list: cards });
 }
 
-// ★★★★★【逻辑回归：所有解析均在getTracks内完成】★★★★★
+
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
   if (!url) return jsonify({ list: [] });
 
   const detailUrl = `${SITE_URL}/${url}`;
-  // ★★★★★【100%采用正确的$fetch写法】★★★★★
-  let { data: html } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
-  
-  // --- 单一入口检测与自动回帖 ---
+  const { data: html } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
+
+  // --- ★★★ UX优化核心逻辑 ★★★ ---
   const isContentHidden = html.includes("回复后") && (html.includes("再查看") || html.includes("后可见"));
   if (isContentHidden) {
-      log("检测到回复可见，启动自动回帖流程...");
+      log("检测到回复可见，启动后台自动回帖...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
-          const replied = await performReply(threadIdMatch[1]);
-          if (replied) {
-              log("回帖成功，等待1秒后重新获取页面内容...");
-              await $utils.sleep(1000);
-              // ★★★★★【100%采用正确的$fetch写法】★★★★★
-              const { data: newHtml } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
-              html = newHtml; // 使用新获取的HTML
-          } else {
-              return jsonify({ list: [{ title: '提示', tracks: [{ name: "自动回帖失败，请检查Cookie", pan: '', ext: {} }] }] });
-          }
+          // 只执行回帖，不等待，也不重新获取页面
+          performReply(threadIdMatch[1]);
       }
+      // 无论回帖是否开始，立刻返回提示信息
+      log("立即返回提示信息，让用户刷新。");
+      const tracks = [{ name: "已在后台自动回帖，请退出后重新进入", pan: '', ext: {} }];
+      return jsonify({ list: [{ title: '提示', tracks }] });
   }
 
-  // --- V14解析引擎，就地执行 ---
+  // --- V14解析引擎，仅在内容可见时执行 ---
   const $ = cheerio.load(html);
   const mainMessage = $(".message[isfirst='1']");
   const tracks = [];
@@ -163,7 +154,7 @@ async function getTracks(ext) {
     mainMessage.children().each((_, element) => {
         const el = $(element);
         const text = el.text().trim();
-        
+
         if (text === '夸克' || text === '阿里') {
             lastTitle = text;
             return;
@@ -216,9 +207,7 @@ async function getTracks(ext) {
   }
 
   if (tracks.length === 0) {
-    let message = '获取资源失败或帖子无内容';
-    if (isContentHidden) message = '自动回帖后仍未找到资源';
-    tracks.push({ name: message, pan: '', ext: {} });
+    tracks.push({ name: '获取资源失败或帖子无内容', pan: '', ext: {} });
   }
 
   return jsonify({ list: [{ title: '资源列表', tracks }] });
@@ -228,25 +217,24 @@ async function search(ext) {
   ext = argsify(ext);
   const text = ext.text || '';
   if (!text) return jsonify({ list: [] });
-  
+
   const url = `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`;
-  // ★★★★★【100%采用正确的$fetch写法】★★★★★
   const { data: html } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
   const cards = parseListHtml(html);
-  
+
   return jsonify({ list: cards });
 }
 
 // --- 4. 兼容旧版 App 接口 ---
 async function init() { return getConfig(); }
-async function home() { 
-  const c = await getConfig(); 
+async function home() {
+  const c = await getConfig();
   const config = JSON.parse(c);
-  return jsonify({ class: config.tabs, filters: {} }); 
+  return jsonify({ class: config.tabs, filters: {} });
 }
-async function category(tid, pg, filter, ext) { 
+async function category(tid, pg, filter, ext) {
   const id = ext.id || tid;
-  return getCards({ id: id, page: pg }); 
+  return getCards({ id: id, page: pg });
 }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id, flags) { return jsonify({ url: id }); }
