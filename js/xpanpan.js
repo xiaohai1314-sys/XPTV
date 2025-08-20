@@ -1,18 +1,10 @@
 /**
- * 网盘资源社 App 插件前端代码 (V21 - 逻辑重构最终版)
- * 
- * 更新日志:
- * - V21: 将经过V20.4浏览器版本最终验证的“逻辑重构”解析方案，完整移植到 getTracks 函数中。
- *   - 【核心升级】: 采用“链接优先，向后查找”原则，彻底取代了旧的、有问题的状态机和密码广播机制。
- *   - 【精准定位】: 对每个链接，只检查其后紧邻的文本是否有提取码，从根本上杜绝了密码错配和误伤。
- *   - 【自带密码优先】: 优先识别并使用链接URL中自带的密码，如果存在，则不再向后查找。
- *   - 【环境适配】: 所有逻辑均使用 Cheerio API 实现，确保在App插件环境中稳定运行。
- *   - 【兼容性】: 新逻辑能够正确处理所有已知情况，包括链接自带密码、链接后跟密码、以及之前导致问题的复杂布局。
+ * 网盘资源社 App 插件前端代码 (V20 - 基于确凿证据的终极版-提示语版)
  */
 
 const SITE_URL = 'https://www.wpzysq.com';
 const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
 function log(msg) {
@@ -67,7 +59,7 @@ function parseListHtml(html) {
     if (!subjectAnchor.length) return;
     const vod_id = subjectAnchor.attr('href');
     let vod_pic = $(el).find('a > img.avatar-3')?.attr('src') || '';
-    if (vod_pic && !vod_pic.startsWith('http'  )) {
+    if (vod_pic && !vod_pic.startsWith('http' )) {
       vod_pic = `${SITE_URL}/${vod_pic}`;
     }
     cards.push({
@@ -108,7 +100,6 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// ★★★★★【V21 核心修改区域：getTracks 函数】★★★★★
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -122,6 +113,7 @@ async function getTracks(ext) {
       log("检测到回复可见，提示用户刷新...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
+          // 先执行回帖（后台），但立即返回提示，避免空白
           performReply(threadIdMatch[1]);
           return jsonify({
               list: [{
@@ -135,73 +127,67 @@ async function getTracks(ext) {
   const $ = cheerio.load(html);
   const mainMessage = $(".message[isfirst='1']");
   const tracks = [];
-  const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com', 'pan.baidu.com'];
-  
-  log("页面内容已完全显示，开始使用V21重构引擎进行解析...");
 
-  // 1. 直接查找主楼层中所有可能的链接
-  const allLinks = mainMessage.find('a');
+  if (mainMessage.length) {
+    log("页面内容已完全显示，开始解析...");
+    const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
+    const finalResultsMap = new Map();
+    let lastTitle = '';
 
-  allLinks.each((_, linkNode) => {
-      const link = $(linkNode);
-      const href = link.attr('href');
+    mainMessage.children().each((_, element) => {
+        const el = $(element);
+        const text = el.text().trim();
+        
+        if (text === '夸克' || text === '阿里') {
+            lastTitle = text;
+            return;
+        }
 
-      // 2. 检查是否是支持的网盘链接
-      if (!href || !supportedHosts.some(host => href.includes(host))) {
-          return; // continue
-      }
+        let lastLinkNode = null;
+        el.contents().each((_, node) => {
+            const nodeType = node.type;
+            const nodeText = $(node).text();
 
-      let accessCode = '';
-      let pureLink = href;
+            if (nodeType === 'tag' && node.name === 'a' && supportedHosts.some(host => $(node).attr('href').includes(host))) {
+                lastLinkNode = $(node);
+                const href = lastLinkNode.attr('href');
+                if (!finalResultsMap.has(href)) {
+                    let fileName = lastTitle || (href.includes('quark.cn') ? '夸克' : '阿里');
+                    finalResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
+                }
+            }
+            else if (nodeType === 'text' && nodeText.includes('提取码')) {
+                const passMatch = nodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
+                if (passMatch && passMatch[1] && lastLinkNode) {
+                    const accessCode = passMatch[1].trim();
+                    const href = lastLinkNode.attr('href');
+                    const existingRecord = finalResultsMap.get(href);
+                    if (existingRecord) {
+                        existingRecord.accessCode = accessCode;
+                    }
+                    lastLinkNode = null;
+                }
+            }
+        });
 
-      // 3. 【自带密码优先】检查链接本身是否已包含密码
-      const pwdMatch = href.match(/[?&](?:pwd|password)=([a-zA-Z0-9]+)/);
-      if (pwdMatch && pwdMatch[1]) {
-          accessCode = pwdMatch[1];
-          pureLink = href.substring(0, pwdMatch.index);
-          log(`在链接 ${href} 中直接找到自带密码: ${accessCode}`);
-      } else {
-          // 4. 【向后查找】如果链接不带密码，则检查紧跟其后的文本节点
-          // Cheerio中，使用 .get(0).nextSibling 模拟原生DOM操作
-          let nextNode = link.get(0)?.nextSibling;
-          // 容忍中间有空格等空文本节点
-          while (nextNode && nextNode.type === 'text' && nextNode.data.trim() === '') {
-              nextNode = nextNode.nextSibling;
-          }
+        if (el.find('a').length > 0) {
+            lastTitle = '';
+        }
+    });
 
-          if (nextNode && nextNode.type === 'text') {
-              const text = nextNode.data;
-              const passMatch = text.match(/(?:提取码|访问码|取码)\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-              if (passMatch && passMatch[1]) {
-                  accessCode = passMatch[1].trim();
-                  log(`在链接 ${href} 后面的文本中找到密码: ${accessCode}`);
-              }
-          }
-      }
-
-      // 5. 组合最终结果
-      let fileName = link.text().trim() || (href.includes('quark.cn') ? '夸克' : (href.includes('baidu.com') ? '百度' : '阿里'));
-      let finalPan = pureLink;
-
-      if (accessCode) {
-          if (pureLink.includes('baidu.com')) {
-              // 百度盘链接特殊处理，不直接拼接，App侧可能会有专门处理
-              finalPan = `${pureLink} 提取码: ${accessCode}`;
-          } else {
-              const separator = pureLink.includes('?') ? '&' : '?';
-              finalPan = `${pureLink}${separator}pwd=${accessCode}`;
-          }
-      }
-      
-      // 6. 避免重复添加
-      if (!tracks.some(t => t.pan.startsWith(pureLink))) {
-           tracks.push({
-              name: fileName,
-              pan: finalPan,
-              ext: { pwd: accessCode }, // 将提取码也存入ext中备用
-          });
-      }
-  });
+    finalResultsMap.forEach(record => {
+        let finalPan = record.pureLink;
+        if (record.accessCode) {
+            const separator = finalPan.includes('?') ? '&' : '?';
+            finalPan = `${finalPan}${separator}pwd=${record.accessCode}`;
+        }
+        tracks.push({
+          name: record.fileName,
+          pan: finalPan,
+          ext: { pwd: '' },
+        });
+    });
+  }
 
   if (tracks.length === 0) {
     let message = '获取资源失败或帖子无内容';
