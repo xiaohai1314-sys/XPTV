@@ -12,7 +12,7 @@
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-const TMDB_API_KEY = "替换为你的TMDB_API_KEY"; 
+const TMDB_API_KEY = "853fa9fc1ae6789b1f834930738129e6"; 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
 // appConfig 与 v21 原版完全一致
