@@ -1,11 +1,11 @@
 /**
- * 网盘资源社 App 插件前端代码 (V22 - UX优化版)
+ * 网盘资源社 App 插件前端代码 (最终版 - UX修正)
  *
  * 功能:
- * - 【UX优化】解决了首次进入帖子时，因后台自动回帖导致页面长时间空白的问题。
- * - 【即时反馈】当检测到需要回帖时，脚本会立刻返回提示语（如“已在后台自动回帖，请退出后重新进入”），同时在后台完成回帖任务。
- * - 【逻辑对标】完全对标成功范例的交互逻辑，提供流畅的用户体验。
- * - 【根源修复】保留了所有已验证的修复（正确的$fetch语法、V14解析引擎等）。
+ * - 【UX修正】根据您的最终指示，恢复至“提示-刷新”模式，彻底解决首次进入帖子时页面长时间空白的问题。
+ * - 【即时反馈】当检测到需要回帖时，脚本会立刻返回提示语，同时在后台完成回帖任务。
+ * - 【逻辑回归】完全对标成功范例的交互逻辑，提供流畅的用户体验。
+ * - 【根源修复】保留所有已验证的修复（正确的$fetch语法、V1t4解析引擎等）。
  */
 
 // --- 1. 配置区 ---
@@ -92,7 +92,7 @@ function parseListHtml(html) {
 async function getConfig() {
   return jsonify({
     ver: 1,
-    title: '网盘资源社(UX优化版)',
+    title: '网盘资源社(最终版)',
     site: SITE_URL,
     cookie: SITE_COOKIE,
     tabs: [
@@ -125,13 +125,13 @@ async function getTracks(ext) {
   const detailUrl = `${SITE_URL}/${url}`;
   const { data: html } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
 
-  // --- ★★★ UX优化核心逻辑 ★★★ ---
+  // --- ★★★ 恢复至您认可的“提示-刷新”模式 ★★★ ---
   const isContentHidden = html.includes("回复后") && (html.includes("再查看") || html.includes("后可见"));
   if (isContentHidden) {
       log("检测到回复可见，启动后台自动回帖...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
-          // 只执行回帖，不等待，也不重新获取页面
+          // 在后台执行回帖，不阻塞主流程
           performReply(threadIdMatch[1]);
       }
       // 无论回帖是否开始，立刻返回提示信息
@@ -140,7 +140,7 @@ async function getTracks(ext) {
       return jsonify({ list: [{ title: '提示', tracks }] });
   }
 
-  // --- V14解析引擎，仅在内容可见时执行 ---
+  // --- V14解析引擎，仅在内容已解锁时执行 ---
   const $ = cheerio.load(html);
   const mainMessage = $(".message[isfirst='1']");
   const tracks = [];
