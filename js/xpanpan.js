@@ -1,11 +1,11 @@
 /**
- * 网盘资源社 App 插件前端代码 (已修复)
+ * 网盘资源社 App 插件前端代码 (最终修正版)
  *
  * 修复说明:
- * - [核心修复] 将不兼容的浏览器工具 DOMParser 和 fetch 替换为 App 环境专用的 cheerio 和 $fetch，解决列表无法加载的问题。
- * - [功能补全] 新增了自动回帖功能，当检测到“回复可见”时，脚本会自动在后台完成回复并重新加载内容。
- * - [逻辑保留] 完整保留并适配了原脚本的“V14终极解析引擎”，确保详情页解析逻辑不变。
- * - [体验优化] 实现了一键直达，无需手动操作即可查看需要回复的资源。
+ * - [最终修正] 移除了 parseDetailHtml 函数中一个多余且错误的“回复”关键词检测，该检测导致回帖成功后内容依然被屏蔽，是造成帖子空白的根本原因。
+ * - [核心修复] 保留了将 DOMParser 替换为 cheerio 的核心改动。
+ * - [功能补全] 保留了完整的自动回帖功能。
+ * - [逻辑保留] 保留了V14终极解析引擎。
  */
 
 // --- 1. 配置区 ---
@@ -50,7 +50,7 @@ async function fetchHtml(url) {
   }
 }
 
-// 新增：自动回帖函数
+// 自动回帖函数
 async function performReply(threadId) {
     log(`正在为帖子 ${threadId} 自动回帖...`);
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
@@ -80,7 +80,7 @@ async function performReply(threadId) {
 }
 
 
-// 使用 cheerio 修复列表解析
+// 列表解析
 function parseListHtml(html) {
   const $ = cheerio.load(html);
   const cards = [];
@@ -106,7 +106,7 @@ function parseListHtml(html) {
   return cards;
 }
 
-// 使用 cheerio 修复并适配V14解析引擎
+// V14解析引擎 (已移除错误判断)
 function parseDetailHtml(html) {
   const $ = cheerio.load(html);
   const mainMessage = $(".message[isfirst='1']");
@@ -115,11 +115,9 @@ function parseDetailHtml(html) {
     return "暂无有效网盘链接";
   }
 
-  // 注意：这里的回复检测仅作为初始判断，实际的回帖触发在 getTracks 中
-  if (mainMessage.text().includes("回复")) {
-      log("⚠️ 检测到需要回复才能查看内容。");
-      return "需要回复才能查看";
-  }
+  // ★★★★★【关键修正】★★★★★
+  // 此处移除了错误的 if (mainMessage.text().includes("回复")) 判断
+  // ★★★★★★★★★★★★★★★★★★★
 
   log("页面内容已完全显示，开始使用V14终极引擎解析...");
   
@@ -182,7 +180,7 @@ function parseDetailHtml(html) {
 async function getConfig() {
   return jsonify({
     ver: 1,
-    title: '网盘资源社(已修复)',
+    title: '网盘资源社(最终修正)',
     site: SITE_URL,
     cookie: SITE_COOKIE,
     tabs: [
@@ -245,7 +243,6 @@ async function getTracks(ext) {
       const fileName = parts[0];
       const [pureLink, accessCode = ''] = parts[1].split('|');
       
-      // -- 恢复为您原来的链接组合方式 --
       let finalPan = pureLink;
       if (accessCode) {
           const separator = pureLink.includes('?') ? '&' : '?';
