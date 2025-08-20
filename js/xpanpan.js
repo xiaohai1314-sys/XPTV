@@ -218,7 +218,7 @@ async function getTracks(ext) {
   let html = await fetchHtml(detailUrl);
   
   // --- 自动回帖核心逻辑 ---
-  if (html.includes("回复可见")) {
+  if (html.includes("回复")) {
       log("检测到回复可见，启动自动回帖流程...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
@@ -244,10 +244,17 @@ async function getTracks(ext) {
 
       const fileName = parts[0];
       const [pureLink, accessCode = ''] = parts[1].split('|');
+      
+      // -- 恢复为您原来的链接组合方式 --
+      let finalPan = pureLink;
+      if (accessCode) {
+          const separator = pureLink.includes('?') ? '&' : '?';
+          finalPan = `${pureLink}${separator}pwd=${accessCode}`;
+      }
 
       tracks.push({
         name: fileName,
-        pan: accessCode ? `${pureLink}|${accessCode}` : pureLink, // 保持格式
+        pan: finalPan,
         ext: { pwd: accessCode },
       });
     });
