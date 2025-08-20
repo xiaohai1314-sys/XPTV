@@ -131,7 +131,7 @@ async function getTracks(ext) {
   let { data: html } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
   
   // --- 单一入口检测与自动回帖 ---
-  const isContentHidden = html.includes("回复") && (html.includes("才能查看") || html.includes("后可见"));
+  const isContentHidden = html.includes("回复") && (html.includes("再查看") || html.includes("后可见"));
   if (isContentHidden) {
       log("检测到回复可见，启动自动回帖流程...");
       const threadIdMatch = url.match(/thread-(\d+)/);
