@@ -13,7 +13,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 // 🔑 这里替换为你的 TMDB API Key
-const TMDB_API_KEY = "替换为你的TMDB_API_KEY"; 
+const TMDB_API_KEY = "853fa9fc1ae6789b1f834930738129e6"; 
 
 // TMDB 查询函数
 async function fetchPosterFromTMDB(title) {
