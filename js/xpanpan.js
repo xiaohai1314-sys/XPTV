@@ -1,17 +1,14 @@
 /**
- * 网盘资源社 App 插件前端代码 (V23 - 最终健壮版)
- * 
- * 更新日志:
- * - V23: 旨在解决所有已知复杂情况，包括链接与提取码不在同一行的问题，同时确保链接组合的正确性。
- *   - 【核心升级】: 引入“跨行状态”管理，能够处理链接和提取码不在同一HTML元素（如换行）的情况。
- *   - 【链接优先】: 优先识别链接，并将其暂存到“待匹配密码列表”，等待后续的提取码匹配。
- *   - 【智能匹配】: 当在后续元素中发现提取码时，会尝试与“待匹配密码列表”中的最后一个链接进行匹配。
- *   - 【精确组合】: 确保所有网盘链接（包括夸克、阿里、百度）的最终组合格式正确，特别是百度网盘的特殊处理。
- *   - 【全面健壮】: 兼容所有之前版本能处理的场景，并解决了提取码换行、多链接单密码等复杂情况。
+ * 网盘资源社 App 插件前端代码 (V21 - 稳定解析修复版)
+ * * 修复日志:
+ * - 重写 getTracks 函数核心解析逻辑，彻底解决提取码与链接错误关联的问题。
+ * - 新逻辑不再使用不稳定的“记忆最后链接”状态，而是采用更可靠的“链接中心”解析模式。
+ * - 对每个有效链接，脚本会精确查找其后紧邻的文本节点，从中提取配对的提取码。
+ * - 提升了对复杂或不规范HTML布局的兼容性。
  */
 
 const SITE_URL = 'https://www.wpzysq.com';
-const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%22%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
+const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
@@ -108,7 +105,9 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// ★★★★★【V23 核心修改区域：getTracks 函数 - 最终健壮版】★★★★★
+// ====================================================================
+// =================== 【核心逻辑修复区】 ==============================
+// ====================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -122,6 +121,7 @@ async function getTracks(ext) {
       log("检测到回复可见，提示用户刷新...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
+          // 先执行回帖（后台），但立即返回提示，避免空白
           performReply(threadIdMatch[1]);
           return jsonify({
               list: [{
@@ -135,133 +135,70 @@ async function getTracks(ext) {
   const $ = cheerio.load(html);
   const mainMessage = $(".message[isfirst='1']");
   const tracks = [];
-  const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com', 'pan.baidu.com'];
-  
-  log("页面内容已完全显示，开始使用V23最终健壮引擎进行解析...");
 
-  const finalResultsMap = new Map(); // 使用Map来存储和去重最终结果
-  let lastTitle = ''; // 用于上下文命名
+  if (mainMessage.length) {
+    log("页面内容已完全显示，开始使用 V21 稳定引擎解析...");
+    const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
+    const finalResultsMap = new Map();
 
-  // ★ V23 核心：用于跨行匹配的“待匹配密码的链接列表”
-  // 存储的是 { href, fileName }，等待后续的提取码
-  let pendingLinksForPassword = []; 
+    // 核心改进：直接查找所有符合条件的 a 标签，然后处理每个链接的上下文
+    mainMessage.find('a').each((_, element) => {
+        const link = $(element);
+        const href = link.attr('href');
 
-  // 遍历主消息内容的所有直接子元素（通常是 <p>, <div>, <span> 等）
-  mainMessage.children().each((_, element) => {
-      const el = $(element);
-      const currentElementText = el.text().trim();
+        // 1. 验证是否是目标链接
+        if (!href || !supportedHosts.some(host => href.includes(host))) {
+            return; // continue
+        }
 
-      // 1. 检查当前元素是否是上下文标题（如“夸克”、“阿里”）
-      if (currentElementText === '夸克' || currentElementText === '阿里' || currentElementText === '百度') {
-          lastTitle = currentElementText;
-          pendingLinksForPassword = []; // 遇到新标题，清空待匹配列表
-          return;
-      }
+        // 如果链接已处理，则跳过，避免重复
+        if (finalResultsMap.has(href)) {
+            return; // continue
+        }
 
-      // 2. 在当前元素内部查找所有链接
-      const linksInCurrentElement = [];
-      el.find('a').each((_idx, linkNode) => {
-          const link = $(linkNode);
-          const href = link.attr('href');
+        let accessCode = '';
+        let fileName = link.text().trim(); // 默认使用链接文本作为文件名
 
-          if (!href || !supportedHosts.some(host => href.includes(host))) {
-              return;
-          }
+        // 2. 查找提取码：检查链接节点之后紧邻的文本节点
+        // Cheerio/JQuery 中没有直接的 nextSibling，但可以通过 .get(0).next 获取原生节点
+        const nativeElement = link.get(0);
+        if (nativeElement && nativeElement.next && nativeElement.next.type === 'text') {
+            const nextNodeText = nativeElement.next.data || '';
+            const passMatch = nextNodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
+            if (passMatch && passMatch[1]) {
+                accessCode = passMatch[1].trim();
+                log(`成功关联提取码: ${href} -> ${accessCode}`);
+            }
+        }
+        
+        // 3. 优化文件名：如果链接文本为空，尝试使用上下文标题（如 "夸克", "阿里"）
+        if (!fileName) {
+            const parentText = link.parent().text().trim();
+            if (parentText.startsWith('夸克')) fileName = '夸克';
+            else if (parentText.startsWith('阿里')) fileName = '阿里';
+            else fileName = href.includes('quark.cn') ? '夸克' : '阿里'; // 最后备选方案
+        }
 
-          // 如果这个链接已经处理过，跳过
-          if (finalResultsMap.has(href)) {
-              return;
-          }
+        // 4. 存入最终结果
+        finalResultsMap.set(href, { pureLink: href, accessCode: accessCode, fileName });
+    });
 
-          let accessCode = '';
-          let pureLink = href;
 
-          // 2.1. 优先从链接URL中提取密码
-          const pwdMatchInHref = href.match(/[?&](?:pwd|password)=([a-zA-Z0-9]+)/);
-          if (pwdMatchInHref && pwdMatchInHref[1]) {
-              accessCode = pwdMatchInHref[1];
-              pureLink = href.substring(0, pwdMatchInHref.index); // 得到纯净链接
-              log(`[V23] 链接自带密码: ${href} -> ${accessCode}`);
-          } else {
-              // 2.2. 如果链接不带密码，检查紧邻的下一个文本节点
-              let nextNode = linkNode.nextSibling;
-              while (nextNode && nextNode.type === 'text' && nextNode.data.trim() === '') {
-                  nextNode = nextNode.nextSibling;
-              }
-              if (nextNode && nextNode.type === 'text') {
-                  const passMatch = nextNode.data.match(/(?:提取码|访问码|取码)\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-                  if (passMatch && passMatch[1]) {
-                      accessCode = passMatch[1].trim();
-                      log(`[V23] 链接后紧跟密码: ${href} -> ${accessCode}`);
-                  }
-              }
-          }
-          
-          let fileName = link.text().trim() || lastTitle || (href.includes('quark.cn') ? '夸克' : (href.includes('baidu.com') ? '百度' : '阿里'));
-          
-          // 将当前处理的链接加入结果Map
-          finalResultsMap.set(href, { pureLink, accessCode, fileName });
-          // 如果这个链接还没有密码，加入待匹配列表
-          if (!accessCode) {
-              pendingLinksForPassword.push({ href, fileName });
-          }
-          linksInCurrentElement.push(href); // 记录当前元素中发现的链接
-      });
-
-      // 3. 在当前元素内部查找提取码文本
-      const passMatchInElement = currentElementText.match(/(?:提取码|访问码|取码)\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-      if (passMatchInElement && passMatchInElement[1]) {
-          const foundAccessCode = passMatchInElement[1].trim();
-          log(`[V23] 在当前元素中找到提取码: ${foundAccessCode}`);
-
-          // 3.1. 如果当前元素中发现了链接，将密码赋给这些链接中尚未有密码的
-          if (linksInCurrentElement.length > 0) {
-              linksInCurrentElement.forEach(href => {
-                  const record = finalResultsMap.get(href);
-                  if (record && !record.accessCode) {
-                      record.accessCode = foundAccessCode;
-                      log(`[V23] 匹配当前元素内链接: ${record.fileName} -> ${foundAccessCode}`);
-                  }
-              });
-              pendingLinksForPassword = []; // 当前元素内有链接和密码，清空待匹配列表
-          } 
-          // 3.2. 如果当前元素没有链接，但有提取码，尝试匹配“待匹配密码的链接列表”中的最后一个
-          else if (pendingLinksForPassword.length > 0) {
-              const lastPendingLink = pendingLinksForPassword.pop(); // 取出最后一个待匹配链接
-              const record = finalResultsMap.get(lastPendingLink.href);
-              if (record && !record.accessCode) {
-                  record.accessCode = foundAccessCode;
-                  log(`[V23] 跨行匹配待匹配链接: ${record.fileName} -> ${foundAccessCode}`);
-              }
-              // 匹配成功后，清空待匹配列表，防止一个密码匹配多个跨行链接
-              pendingLinksForPassword = []; 
-          }
-      }
-
-      // 如果当前元素包含链接，重置上下文标题
-      if (linksInCurrentElement.length > 0) {
-          lastTitle = '';
-      }
-  });
-
-  // 将Map中的最终结果转换为App插件所需的格式
-  finalResultsMap.forEach(record => {
-      let finalPan = record.pureLink;
-      if (record.accessCode) {
-          if (record.pureLink.includes('baidu.com')) {
-              // 百度盘链接特殊处理，App端可能需要识别“提取码:”这个文本
-              finalPan = `${record.pureLink} 提取码: ${record.accessCode}`;
-          } else {
-              const separator = finalPan.includes('?') ? '&' : '?';
-              finalPan = `${finalPan}${separator}pwd=${record.accessCode}`;
-          }
-      }
-      tracks.push({
-        name: record.fileName,
-        pan: finalPan,
-        ext: { pwd: record.accessCode || '' }, // 确保ext.pwd始终存在
-      });
-  });
+    finalResultsMap.forEach(record => {
+        let finalPan = record.pureLink;
+        if (record.accessCode) {
+            // 确保正确拼接pwd参数
+            const urlObject = new URL(finalPan);
+            urlObject.searchParams.set('pwd', record.accessCode);
+            finalPan = urlObject.toString();
+        }
+        tracks.push({
+          name: record.fileName,
+          pan: finalPan,
+          ext: { pwd: record.accessCode }, // ext 中也保存一份
+        });
+    });
+  }
 
   if (tracks.length === 0) {
     let message = '获取资源失败或帖子无内容';
@@ -271,6 +208,9 @@ async function getTracks(ext) {
 
   return jsonify({ list: [{ title: '资源列表', tracks }] });
 }
+// ====================================================================
+// =================== 【核心逻辑修复区结束】 ==========================
+// ====================================================================
 
 async function search(ext) {
   ext = argsify(ext);
