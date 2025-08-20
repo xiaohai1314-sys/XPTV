@@ -216,7 +216,7 @@ async function getTracks(ext) {
   let html = await fetchHtml(detailUrl);
   
   // --- 自动回帖核心逻辑 ---
-  if (html.includes("回复后")) {
+  if (html.includes("回复 后")) {
       log("检测到回复可见，启动自动回帖流程...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
