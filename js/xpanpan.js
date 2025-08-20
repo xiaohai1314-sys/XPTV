@@ -130,7 +130,7 @@ async function getTracks(ext) {
     let { data: html } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': SITE_COOKIE } });
     
     // ★★★★★【使用您发现的正确暗号】★★★★★
-    const isContentHidden = html.includes("回复") && html.includes("查看");
+    const isContentHidden = html.includes("回复后") && html.includes("再查看");
     if (isContentHidden) {
         log("检测到回复可见，启动自动回帖流程...");
         const threadIdMatch = url.match(/thread-(\d+)/);
