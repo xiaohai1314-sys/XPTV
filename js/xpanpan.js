@@ -100,6 +100,8 @@ function parseListHtml(html) {
       vod_pic: vod_pic,
       vod_remarks: $(el).find('.date')?.text().trim() || '',
       ext: { url: vod_id },
+
+      
     });
   });
   log(`解析到 ${cards.length} 条数据`);
@@ -116,7 +118,7 @@ function parseDetailHtml(html) {
   }
 
   // ★★★★★【关键修正】★★★★★
-  // 此处移除了错误的 if (mainMessage.text().includes("回复")) 判断
+  // 此处移除了错误的 if (mainMessage.text().includes("回复后")) 判断
   // ★★★★★★★★★★★★★★★★★★★
 
   log("页面内容已完全显示，开始使用V14终极引擎解析...");
@@ -216,7 +218,7 @@ async function getTracks(ext) {
   let html = await fetchHtml(detailUrl);
   
   // --- 自动回帖核心逻辑 ---
-  if (html.includes("回复 后")) {
+  if (html.includes("回复后")) {
       log("检测到回复可见，启动自动回帖流程...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
