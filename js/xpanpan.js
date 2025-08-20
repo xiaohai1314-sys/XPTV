@@ -1,8 +1,8 @@
 /**
- * 网盘资源社 App 插件前端代码 (V17 - 终极融合版)
+ * 网盘资源社 App 插件前端代码 (V18 - 最终融合版)
  *
  * 功能:
- * - 【最终框架】采用您提供的、经过验证的App环境框架，包含正确的`$fetch`, `cheerio`及您最认可的回帖逻辑。
+ * - 【最终框架】采用您指定的、经过验证的App环境框架，包含正确的`$fetch`, `cheerio`及您最认可的回帖逻辑。
  * - 【V14解析引擎】搭载我们共同打磨的“节点遍历”解析引擎，精准处理所有复杂布局。
  * - 【最终指令】严格执行您的核心要求，在`pan`字段中输出拼接好的`?pwd=`链接，并提供豁免符。
  * - 【最终承诺】这是为了一次性解决所有已知问题而设计的、完全遵照您指示的最终版本。
@@ -30,12 +30,16 @@ function jsonify(data) {
     return JSON.stringify(data); 
 }
 
-// ★★★★★【采用您认可的回帖逻辑】★★★★★
+function getRandomReply() {
+    const replies = ["感谢分享，资源太棒了", "找了好久，太谢谢了", "非常棒的资源！！！", "不错的帖子点赞！", "感谢楼主，下载来看看"];
+    return replies[Math.floor(Math.random() * replies.length)];
+}
+
+// ★★★★★【移植您指定的最终完美回帖引擎】★★★★★
 async function performReply(threadId) {
-    log(`正在为帖子 ${threadId} 自动回帖...`);
+    log(`正在尝试为帖子 ${threadId} 自动回帖...`);
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const replies = ["感谢分享，资源太棒了", "找了好久，太谢谢了", "非常棒的资源！"];
-    const message = replies[Math.floor(Math.random() * replies.length)];
+    const message = getRandomReply();
     const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
     try {
         const { data } = await $fetch.post(replyUrl, formData, {
@@ -44,21 +48,28 @@ async function performReply(threadId) {
                 'Cookie': SITE_COOKIE,
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
+                'Origin': SITE_URL,
                 'Referer': `${SITE_URL}/thread-${threadId}.htm`
             }
         });
+        
         if (data && data.includes(message)) {
-            log("回帖成功！");
+            log(`回帖成功, 内容: "${message}"`);
             return true;
+        } else {
+            log(`回帖失败: 服务器返回内容异常。`);
+            $utils.toastError("回帖失败：服务器返回异常", 3000);
+            return false;
         }
-        log("回帖失败或未返回预期内容。");
-        return false;
+
     } catch (e) {
         log(`回帖请求异常: ${e.message}`);
+        $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
         return false;
     }
 }
 
+// 使用 cheerio 修复列表解析
 function parseListHtml(html) {
   const $ = cheerio.load(html);
   const cards = [];
