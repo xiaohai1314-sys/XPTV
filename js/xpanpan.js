@@ -1,14 +1,17 @@
 /**
- * 网盘资源社 App 插件前端代码 (V21 - 稳定解析修复版)
- * * 修复日志:
- * - 重写 getTracks 函数核心解析逻辑，彻底解决提取码与链接错误关联的问题。
- * - 新逻辑不再使用不稳定的“记忆最后链接”状态，而是采用更可靠的“链接中心”解析模式。
- * - 对每个有效链接，脚本会精确查找其后紧邻的文本节点，从中提取配对的提取码。
- * - 提升了对复杂或不规范HTML布局的兼容性。
+ * 网盘资源社 App 插件前端代码 (V21 - 优化提取码匹配逻辑版)
+ *
+ * 更新日志:
+ * - 重写 getTracks 函数中的资源解析逻辑。
+ * - 解决“链接与提取码分离”导致匹配失败的问题。
+ * - 新逻辑会记住最近出现的链接，并将其与后面出现的提取码关联。
+ * - 增强了对“夸克”、“阿里”等标题的识别，使资源命名更准确。
+ * - 增加了对“访问码”、“密码”等关键词的识别，提高兼容性。
  */
 
 const SITE_URL = 'https://www.wpzysq.com';
-const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
+// 请注意：这里的Cookie是示例，可能需要您自行更新为您自己的有效Cookie
+const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%27D; __mxav__c1-WWwEoLo0=137';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
@@ -105,9 +108,6 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// ====================================================================
-// =================== 【核心逻辑修复区】 ==============================
-// ====================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -121,7 +121,6 @@ async function getTracks(ext) {
       log("检测到回复可见，提示用户刷新...");
       const threadIdMatch = url.match(/thread-(\d+)/);
       if (threadIdMatch && threadIdMatch[1]) {
-          // 先执行回帖（后台），但立即返回提示，避免空白
           performReply(threadIdMatch[1]);
           return jsonify({
               list: [{
@@ -137,65 +136,92 @@ async function getTracks(ext) {
   const tracks = [];
 
   if (mainMessage.length) {
-    log("页面内容已完全显示，开始使用 V21 稳定引擎解析...");
+    log("页面内容已完全显示，开始使用新逻辑解析...");
     const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
     const finalResultsMap = new Map();
+    let lastFoundLinkHref = null; // 关键变量：用来存储最近一个找到的链接
 
-    // 核心改进：直接查找所有符合条件的 a 标签，然后处理每个链接的上下文
-    mainMessage.find('a').each((_, element) => {
-        const link = $(element);
-        const href = link.attr('href');
+    // 遍历主内容区域的所有直接子元素
+    mainMessage.children().each((_, element) => {
+        const el = $(element);
 
-        // 1. 验证是否是目标链接
-        if (!href || !supportedHosts.some(host => href.includes(host))) {
-            return; // continue
-        }
+        // 在每个子元素内部，遍历所有节点（包括文本节点和元素节点）
+        el.contents().each((_, node) => {
+            const $node = $(node);
+            const nodeType = node.type;
 
-        // 如果链接已处理，则跳过，避免重复
-        if (finalResultsMap.has(href)) {
-            return; // continue
-        }
-
-        let accessCode = '';
-        let fileName = link.text().trim(); // 默认使用链接文本作为文件名
-
-        // 2. 查找提取码：检查链接节点之后紧邻的文本节点
-        // Cheerio/JQuery 中没有直接的 nextSibling，但可以通过 .get(0).next 获取原生节点
-        const nativeElement = link.get(0);
-        if (nativeElement && nativeElement.next && nativeElement.next.type === 'text') {
-            const nextNodeText = nativeElement.next.data || '';
-            const passMatch = nextNodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-            if (passMatch && passMatch[1]) {
-                accessCode = passMatch[1].trim();
-                log(`成功关联提取码: ${href} -> ${accessCode}`);
+            // --- 步骤1: 查找链接 ---
+            if (nodeType === 'tag' && node.name === 'a') {
+                const href = $node.attr('href');
+                if (href && supportedHosts.some(host => href.includes(host))) {
+                    if (!finalResultsMap.has(href)) {
+                        let fileName = $node.text().trim();
+                        if (!fileName) {
+                           fileName = href.includes('quark.cn') ? '夸克' : '阿里';
+                        }
+                        finalResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
+                        log(`发现链接: ${href}`);
+                    }
+                    // 无论链接是否已存在，都更新“最后一个链接”为当前链接
+                    lastFoundLinkHref = href;
+                }
+            } 
+            // --- 步骤2: 查找提取码 ---
+            else if (nodeType === 'text') {
+                const nodeText = $node.text();
+                // 使用更宽泛的正则匹配“提取码”、“访问码”、“密码”等
+                const passMatch = nodeText.match(/(?:提取码|访问码|密码)\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
+                if (passMatch && passMatch[1]) {
+                    const accessCode = passMatch[1].trim();
+                    // 如果在找到提取码之前，我们已经找到了一个链接
+                    if (lastFoundLinkHref) {
+                        const record = finalResultsMap.get(lastFoundLinkHref);
+                        // 确保该链接还没有配对过提取码
+                        if (record && !record.accessCode) {
+                            log(`为链接 ${lastFoundLinkHref} 找到提取码: ${accessCode}`);
+                            record.accessCode = accessCode;
+                            // 成功配对后，立即重置。这可以防止一个提取码被错误地应用到多个后续链接
+                            lastFoundLinkHref = null; 
+                        }
+                    }
+                }
             }
-        }
-        
-        // 3. 优化文件名：如果链接文本为空，尝试使用上下文标题（如 "夸克", "阿里"）
-        if (!fileName) {
-            const parentText = link.parent().text().trim();
-            if (parentText.startsWith('夸克')) fileName = '夸克';
-            else if (parentText.startsWith('阿里')) fileName = '阿里';
-            else fileName = href.includes('quark.cn') ? '夸克' : '阿里'; // 最后备选方案
-        }
-
-        // 4. 存入最终结果
-        finalResultsMap.set(href, { pureLink: href, accessCode: accessCode, fileName });
+        });
     });
 
+    // --- 步骤3: 优化资源名称 ---
+    // 再次遍历，检查"夸克"或"阿里"这类标题行，以获得更准确的资源名
+    mainMessage.children().each((_, element) => {
+        const el = $(element);
+        const text = el.text().trim();
+        const links = el.find('a');
 
+        // 如果一个元素内只有1个链接，并且文本以“夸克”或“阿里”开头
+        if (links.length === 1 && (text.startsWith('夸克') || text.startsWith('阿里'))) {
+             const href = links.first().attr('href');
+             if(finalResultsMap.has(href)) {
+                 const record = finalResultsMap.get(href);
+                 // 如果文件名还是默认的，就用更准确的标题更新它
+                 if (record.fileName === '夸克' || record.fileName === '阿里') {
+                    record.fileName = text.split('\n')[0].trim() || record.fileName; // 取第一行作为标题
+                    log(`更新链接 ${href} 的名称为: ${record.fileName}`);
+                 }
+             }
+        }
+    });
+
+    // --- 步骤4: 整理最终结果 ---
     finalResultsMap.forEach(record => {
         let finalPan = record.pureLink;
         if (record.accessCode) {
-            // 确保正确拼接pwd参数
-            const urlObject = new URL(finalPan);
-            urlObject.searchParams.set('pwd', record.accessCode);
-            finalPan = urlObject.toString();
+            // 自动拼接提取码到链接后面
+            const separator = finalPan.includes('?') ? '&' : '#'; // 使用#更通用
+            finalPan = `${finalPan}${separator}pwd=${record.accessCode}`;
         }
         tracks.push({
           name: record.fileName,
           pan: finalPan,
-          ext: { pwd: record.accessCode }, // ext 中也保存一份
+          ext: { pwd: record.accessCode }, // ext里也存一份
         });
     });
   }
@@ -208,9 +234,6 @@ async function getTracks(ext) {
 
   return jsonify({ list: [{ title: '资源列表', tracks }] });
 }
-// ====================================================================
-// =================== 【核心逻辑修复区结束】 ==========================
-// ====================================================================
 
 async function search(ext) {
   ext = argsify(ext);
