@@ -1,5 +1,11 @@
 /**
- * 网盘资源社 App 插件前端代码 (V20 - 基于确凿证据的终极版-提示语版)
+ * 网盘资源社 App 插件前端代码 (V21 - V16核心移植·最终版)
+ * 
+ * 更新日志:
+ * - 【核心移植】将V16浏览器测试版中已验证成功的“智能关联”核心逻辑，完美移植到本插件的getTracks函数中。
+ * - 【智能关联】新逻辑规定：只有当一个链接本身不包含pwd参数时，才会尝试为其关联后续的“提取码”文本，从根本上解决了错配问题。
+ * - 【双重保障】保留了“标准节点遍历”和“备用文本正则”的双引擎混合模式，确保了对所有已知页面布局的最大兼容性和鲁棒性。
+ * - 【最终成品】此版本是经过真实场景测试和关键逻辑修正后的最终稳定版。
  */
 
 const SITE_URL = 'https://www.wpzysq.com';
@@ -131,121 +137,95 @@ async function getTracks(ext) {
   const tracks = [];
 
   if (mainMessage.length) {
-    log("页面内容已完全显示，开始解析...");
-    const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com'];
-    const finalResultsMap = new Map();
+    // 【方案一：高精度节点遍历方案】
+    log("页面内容已完全显示，开始使用【标准方案：V16智能关联引擎】解析...");
+    const standardResultsMap = new Map();
+    const supportedHosts = ['quark.cn', 'aliyundrive.com', 'alipan.com', 'baidu.com'];
+    const contentElements = mainMessage.children();
     let lastTitle = '';
 
-    // 【原封不动的标准解析逻辑】
-    mainMessage.children().each((_, element) => {
+    contentElements.each((_, element) => {
         const el = $(element);
         const text = el.text().trim();
-        
-        if (text === '夸克' || text === '阿里') {
+        if (text === '夸克' || text === '阿里' || text === '百度') {
             lastTitle = text;
             return;
         }
-
+        const childNodes = el.contents();
         let lastLinkNode = null;
-        el.contents().each((_, node) => {
+        childNodes.each((_, node) => {
             const nodeType = node.type;
+            const nodeName = node.name;
             const nodeText = $(node).text();
+            const href = $(node).attr('href');
 
-            if (nodeType === 'tag' && node.name === 'a' && supportedHosts.some(host => $(node).attr('href').includes(host))) {
+            if (nodeType === 'tag' && nodeName === 'a' && href && supportedHosts.some(host => href.includes(host))) {
                 lastLinkNode = $(node);
-                const href = lastLinkNode.attr('href');
-                if (!finalResultsMap.has(href)) {
-                    let fileName = lastTitle || (href.includes('quark.cn') ? '夸克' : '阿里');
-                    finalResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
+                if (href.includes('pwd=')) {
+                    const linkBase = href.split('?')[0];
+                    if (!standardResultsMap.has(linkBase)) {
+                        standardResultsMap.set(linkBase, { pureLink: href, accessCode: null, fileName: '百度/其他网盘' });
+                    }
+                } else {
+                    if (!standardResultsMap.has(href)) {
+                        let fileName = lastTitle || (href.includes('quark.cn') ? '夸克' : '阿里');
+                        standardResultsMap.set(href, { pureLink: href, accessCode: '', fileName });
+                    }
                 }
-            }
-            else if (nodeType === 'text' && nodeText.includes('提取码')) {
+            } 
+            // ★★★ 核心修正逻辑 ★★★
+            else if (nodeType === 'text' && nodeText.includes('提取码') && lastLinkNode && !lastLinkNode.attr('href').includes('pwd=')) {
                 const passMatch = nodeText.match(/提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/i);
-                if (passMatch && passMatch[1] && lastLinkNode) {
+                if (passMatch && passMatch[1]) {
                     const accessCode = passMatch[1].trim();
-                    const href = lastLinkNode.attr('href');
-                    const existingRecord = finalResultsMap.get(href);
+                    const existingRecord = standardResultsMap.get(lastLinkNode.attr('href'));
                     if (existingRecord) {
                         existingRecord.accessCode = accessCode;
+                        log(`成功为 ${lastLinkNode.attr('href')} 关联到提取码: ${accessCode}`);
                     }
                     lastLinkNode = null;
                 }
             }
         });
-
-        if (el.find('a').length > 0) {
-            lastTitle = '';
-        }
+        if (el.find('a').length > 0) lastTitle = '';
     });
-
-    finalResultsMap.forEach(record => {
+    
+    standardResultsMap.forEach(record => {
         let finalPan = record.pureLink;
         if (record.accessCode) {
-            const separator = finalPan.includes('?') ? '&' : '?';
-            finalPan = `${finalPan}${separator}pwd=${record.accessCode}`;
+            finalPan += (finalPan.includes('?') ? '&' : '?') + `pwd=${record.accessCode}`;
         }
-        tracks.push({
-          name: record.fileName,
-          pan: finalPan,
-          ext: { pwd: '' },
+        tracks.push({ name: record.fileName, pan: finalPan, ext: {} });
+    });
+
+    // 【方案二：备用文本正则方案】
+    if (tracks.length === 0) {
+        log("🟡 标准方案未能提取到资源，自动启动【备用方案：文本正则引擎】...");
+        const mainText = mainMessage.text();
+        const linkAndCodeRegex = /(https?:\/\/(?:pan\.quark\.cn|aliyundrive\.com )\/s\/[a-zA-Z0-9]+)[\s\S]*?提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/gi;
+        let match;
+        while ((match = linkAndCodeRegex.exec(mainText)) !== null) {
+            const pureLink = match[1];
+            const accessCode = match[2];
+            if (pureLink && accessCode) {
+                const finalPan = `${pureLink}?pwd=${accessCode}`;
+                if (!tracks.some(r => r.pan.startsWith(pureLink))) {
+                    tracks.push({ name: "夸克/阿里网盘", pan: finalPan, ext: {}, "来源": "备用方案A" });
+                }
+            }
+        }
+
+        mainMessage.find('a').each((_, a) => {
+            const link = $(a).attr('href');
+            if (link && link.includes('pwd=')) {
+                const linkBase = link.split('?')[0];
+                if (!tracks.some(r => r.pan.startsWith(linkBase))) {
+                    tracks.push({ name: "百度/其他网盘", pan: link, ext: {}, "来源": "备用方案B" });
+                }
+            }
         });
-    });
-  }
-
-  // ====================【修改部分开始】====================
-  // 在不改变原有逻辑的基础上，增加一个“补丁”方案。
-  // 如果标准解析方案失败（tracks数组为空），则启动此备用方案。
-  if (tracks.length === 0 && mainMessage.length > 0 && !isContentHidden) {
-    log("标准解析方案未能提取到资源，正在启动备用解析方案...");
-
-    // 方案A: 针对“链接”和“提取码”在同一行或邻近的情况
-    const mainText = mainMessage.text();
-    // 正则表达式：匹配一个(夸克/阿里)链接，然后向后查找最近的“提取码”及其代码
-    const linkAndCodeRegex = /(https?:\/\/(?:pan\.quark\.cn|aliyundrive\.com )\/s\/[a-zA-Z0-9]+)[\s\S]*?提取码\s*[:：]?\s*([a-zA-Z0-9]{4,})/gi;
-    let match;
-    while ((match = linkAndCodeRegex.exec(mainText)) !== null) {
-        const pureLink = match[1];
-        const accessCode = match[2];
-        if (pureLink && accessCode) {
-            const finalPan = `${pureLink}?pwd=${accessCode}`;
-            // 检查是否已存在，避免重复添加
-            if (!tracks.some(t => t.pan.startsWith(pureLink))) {
-                tracks.push({
-                    name: pureLink.includes('quark.cn') ? '夸克网盘 (备用方案)' : '阿里网盘 (备用方案)',
-                    pan: finalPan,
-                    ext: {},
-                });
-                log(`备用方案A 提取成功: ${finalPan}`);
-            }
-        }
     }
-
-    // 方案B: 提取所有包含`pwd=`的完整链接（主要针对百度盘等情况）
-    const allLinks = [];
-    mainMessage.find('a').each((_, a) => {
-        const href = $(a).attr('href');
-        if (href) {
-            allLinks.push(href);
-        }
-    });
-
-    allLinks.forEach(link => {
-        if (link.includes('pwd=')) {
-            // 检查是否已存在，避免重复添加
-            const linkBase = link.split('?')[0];
-            if (!tracks.some(t => t.pan.startsWith(linkBase))) {
-                tracks.push({
-                    name: link.includes('baidu.com') ? '百度网盘 (备用方案)' : '网盘 (备用方案)',
-                    pan: link,
-                    ext: {},
-                });
-                log(`备用方案B 提取成功: ${link}`);
-            }
-        }
-    });
   }
-  // ====================【修改部分结束】====================
-
 
   if (tracks.length === 0) {
     let message = '获取资源失败或帖子无内容';
