@@ -17,7 +17,7 @@ const FALLBACK_PIC = "https://hdhive.com/logo.png";
 
 // ★★★★★【用户配置区 - Cookie】 ★★★★★
 // 请将下面的字符串替换为您从浏览器获取的完整Cookie
-const COOKIE = 'csrf_access_token=bad5d5c0-6da7-4a22-a591-b332afd1b767;token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1NTg1MDE0NSwianRpIjoiYTZmZmM4MDEtZWMzZC00Njc2LWI1MzEtMzEwYjhlNmQwMDU5IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6NDM4ODgsIm5iZiI6MTc1NTg1MDE0NSwiY3NyZiI6ImJhZDVkNWMwLTZkYTctNGEyMi1hNTkxLWIzMzJhZmQxYjc2NyIsImV4cCI6MTc1NjQ1NDk0NX0.juRkeQmlg78kdyQ29tZsyM06jPprnMsbxwuSGEYgh-k;';
+const COOKIE = 'csrf_access_token=ed91378d-05d4-452c-8b3b-2053ddd121a7;token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1NTg1MTg4MCwianRpIjoiZGYxZmE3MzItZjE4Mi00OWM3LTgxN2QtNzc5N2FkOGUyZGUzIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6NDM4ODgsIm5iZiI6MTc1NTg1MTg4MCwiY3NyZiI6ImVkOTEzNzhkLTA1ZDQtNDUyYy04YjNiLTIwNTNkZGQxMjFhNyIsImV4cCI6MTc1NjQ1NjY4MH0.e9uwSBnnMaeFmJ8TmTSWs4j6jwIOAf_NSoM4Yb1aV88;';
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
