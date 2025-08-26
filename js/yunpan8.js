@@ -1,5 +1,5 @@
 /**
- * 海绵小站前端插件 - v12.0 (最终格式化修复版)
+ * 海绵小站前端插件 - v12.1 (最终格式化修复版)
  *
  * 更新说明:
  * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
@@ -113,7 +113,7 @@ async function getTracks(ext) {
                 headers: { 'Content-Type': 'application/json' }
             });
 
-            const backendResult = response.data; 
+            const backendResult = response; 
 
             if (!backendResult || backendResult.success !== true) {
                 const errorMsg = `后端解锁失败: ${backendResult ? backendResult.message : '无有效响应'}`;
