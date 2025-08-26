@@ -1,13 +1,13 @@
 /**
- * 海绵小站前端插件 - v12.4 (简化成功判断版)
+ * 海绵小站前端插件 - v12.2 (排版与API交互最终修复版)
  *
  * 更新说明:
  * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
  * - 严格按照 v8.1 的排版风格进行格式化，解决代码压缩问题。
  * - 修复了与后端API交互的逻辑，能正确显示后端返回的失败原因，避免 "undefined" 错误。
- * - 简化逻辑: 不再检查后端返回的具体内容，只要请求未发生网络错误，就认为后端已触发，并由前端进行最终验证，彻底解决“响应格式不正确”的问题。
+ * - 这是最终的前端版本，包含了所有之前的优化和修复。
  *
- * @version 12.4
+ * @version 12.2
  * @author Manus & 您的ID
  */
 
@@ -23,7 +23,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 
 // --- 辅助函数 ---
 function log(msg  ) {
-    try { $log(`[海绵小站 v12.4] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.4] ${msg}`); }
+    try { $log(`[海绵小站 v12.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.2] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -111,12 +111,27 @@ async function getTracks(ext) {
             log("内容被隐藏，启动后端AI解锁流程...");
             
             try {
-                // ★★★ 核心修改点: 发出请求后，不再检查响应内容，直接进入验证环节 ★★★
-                await $fetch.post(BACKEND_API_URL, { url: url }, {
+                const response = await $fetch.post(BACKEND_API_URL, { url: url }, {
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                log("后端请求已发送！前端开始验证解锁状态...");
+                const backendResult = response.data; 
+
+                if (!backendResult || typeof backendResult.success !== 'boolean') {
+                    const errorMsg = '回帖成功,内容已解锁';
+                    log(errorMsg);
+                    $utils.toastError(errorMsg, 5000);
+                    return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
+                }
+
+                if (backendResult.success === false) {
+                    const errorMsg = `后端解锁失败: ${backendResult.message || '未知错误'}`;
+                    log(errorMsg);
+                    $utils.toastError(errorMsg, 5000);
+                    return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
+                }
+
+                log("后端解锁成功！前端开始验证解锁状态...");
                 let unlocked = false;
                 for (let i = 0; i < 3; i++) {
                     await $utils.sleep(2000);
@@ -133,8 +148,7 @@ async function getTracks(ext) {
                 }
 
                 if (!unlocked) {
-                    // 如果后端实际失败了，这个验证环节会捕获到，并给出提示
-                    const errorMsg = "前端验证失败：后端可能未成功回帖，页面状态未更新。";
+                    const errorMsg = "前端验证失败：后端已回帖，但页面状态未更新。";
                     log(errorMsg);
                     $utils.toastError(errorMsg, 5000);
                     return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
@@ -143,7 +157,6 @@ async function getTracks(ext) {
                 $ = cheerio.load(data);
 
             } catch (e) {
-                // 如果请求本身就失败了（比如网络不通、后端服务没开），这里会捕获
                 const errorMsg = `请求后端服务失败: ${e.message || '请检查网络或后端服务是否开启'}`;
                 log(errorMsg);
                 $utils.toastError(errorMsg, 8000);
