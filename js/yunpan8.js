@@ -16,7 +16,7 @@
 // 这是唯一需要您修改的地方。
 // 请将这里的 IP 地址替换为您运行后端服务的电脑的局域网IP地址。
 // 例如: "http://192.168.1.101:3000/reply"
-const BACKEND_API_URL = "http://192.168.x.x:3000/reply";
+const BACKEND_API_URL = "http://192.168.1.2:3000/reply";
 // ★★★★★★★★★★★★★★★★★★★
 
 const SITE_URL = "https://www.haimianxz.com";
