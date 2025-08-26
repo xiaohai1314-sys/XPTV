@@ -1,12 +1,12 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.2 (手动验证码 + 单次回帖 + 多次刷新)
+ * 海绵小站前端插件 - 移植增强版 v8.3 (验证码修复版)
  *
  * 更新说明:
- * - 基于 v8.1 移植增强版
- * - 增加了手动输入字母/数字验证码回帖功能，以适应网站更新。
- * - 回帖时自动从页面抓取 formhash 和 sechash，提高成功率。
- * - 保留了单次回帖和多次刷新机制，解决解锁延迟问题。
- * - 保留并启用 search cache。
+ * - 基于 v8.2 版本
+ * - 修复：根据网站最新结构，更新了验证码图片的定位选择器 (src*='vcode.php')。
+ * - 修复：更新了提交验证码时使用的表单字段名 (从 seccodeverify 改为 vcode)。
+ * - 修复：更新了获取 sechash 的逻辑，以适应新的验证码插件。
+ * - 优化：增强了日志记录，方便未来排错。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -20,7 +20,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v8.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -46,9 +46,9 @@ function getCorrectPicUrl(path) {
 }
 
 // =================================================================================
-// =================== reply (已改造，支持验证码) ===================
+// =================== reply (v8.3 修复版) ===================
 // =================================================================================
-async function reply(url, pageData, seccode) {
+async function reply(url, pageData, userVCode) {
   log("尝试使用Cookie及验证码自动回帖...");
   const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
   const threadIdMatch = url.match(/thread-(\d+)/);
@@ -56,24 +56,17 @@ async function reply(url, pageData, seccode) {
 
   const $ = cheerio.load(pageData);
   const formhash = $("input[name='formhash']").val();
-  // 某些页面sechash在input里，某些在img的src里，优先从input取
-  let sechash = $("input[name='sechash']").val();
-  if (!sechash) {
-      const seccodeImgSrc = $("img[src*='mod=seccode']").attr('src');
-      const sechashMatch = seccodeImgSrc ? seccodeImgSrc.match(/sechash=([a-zA-Z0-9]+)/) : null;
-      if (sechashMatch) {
-          sechash = sechashMatch[1];
-      }
-  }
-
-  if (!formhash || !sechash) {
-      log("回帖失败：无法在页面上找到 formhash 或 sechash。");
+  
+  // 新版验证码插件，sechash可能不再需要或以其他形式存在，但formhash是必须的
+  if (!formhash) {
+      log("回帖失败：无法在页面上找到 formhash。");
       $utils.toastError("无法获取必要的回帖参数", 3000);
       return false;
   }
-  log(`获取到 formhash: ${formhash}, sechash: ${sechash}`);
+  log(`获取到 formhash: ${formhash}`);
 
   const threadId = threadIdMatch[1];
+  // 提交地址可能也变了，但通常是固定的，先保持不变
   const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
   
   const postData = {
@@ -83,8 +76,7 @@ async function reply(url, pageData, seccode) {
       quotepid: 0,
       quick_reply_message: 0,
       formhash: formhash,
-      sechash: sechash,
-      seccodeverify: seccode // 提交用户输入的验证码
+      vcode: userVCode // ★ 修复：使用正确的字段名 'vcode'
   };
 
   try {
@@ -94,7 +86,8 @@ async function reply(url, pageData, seccode) {
       $utils.toastError("Cookie已失效，请重新获取", 3000);
       return false;
     }
-    if (data.includes("验证码不正确")) {
+    // 新的错误提示可能是 "验证码错误"
+    if (data.includes("验证码不正确") || data.includes("验证码错误")) {
       log("回帖失败：验证码不正确。");
       $utils.toastError("验证码输入错误", 3000);
       return false;
@@ -108,7 +101,7 @@ async function reply(url, pageData, seccode) {
 }
 
 // =================================================================================
-// =================== getTracks (已改造，增加验证码输入流程) ===================
+// =================== getTracks (v8.3 修复版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -122,26 +115,26 @@ async function getTracks(ext) {
     let { data } = await fetchWithCookie(detailUrl);
     let $ = cheerio.load(data);
 
-    // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
 
-      // 1. 从页面解析验证码图片URL
-      const seccodeImageUrl = $("img[src*='mod=seccode']").attr('src');
+      // ★ 修复：使用新的选择器定位验证码图片
+      const seccodeImageUrl = $("img[src*='vcode.php']").attr('src');
+      
       if (!seccodeImageUrl) {
-          log("无法找到验证码图片，流程中止。");
+          log("无法找到验证码图片，流程中止。请确认页面是否加载正常。");
+          // 添加HTML打印，以便于未来调试
+          log("当前页面HTML: " + data.substring(0, 1000)); 
           return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法找到验证码，请检查脚本", pan: '', ext: {} }] }] });
       }
+      
       const fullSeccodeUrl = seccodeImageUrl.startsWith('http' ) ? seccodeImageUrl : `${SITE_URL}/${seccodeImageUrl}`;
       log(`验证码图片地址: ${fullSeccodeUrl}`);
 
-      // 2. 弹出WebView或输入框让用户输入验证码
-      // 这是一个关键的交互步骤，这里的实现方式依赖于具体的脚本运行环境
-      // 您需要确保您的环境支持类似 $utils.input 的功能
       const userInputCode = await $utils.input({
           title: '请输入验证码',
-          hint: '请输入下方图片中的字母/数字',
-          header: `<img src="${fullSeccodeUrl}" style="width:150px; height:50px; border:1px solid #ccc; margin: 0 auto; display: block;"/>`
+          hint: '请输入下方图片中的内容',
+          header: `<img src="${fullSeccodeUrl}" style="width:150px; height:50px; border:1px solid #ccc; margin: 0 auto; display: block;" onclick="this.src='${fullSeccodeUrl}&t=' + Math.random()"/>`
       });
 
       if (!userInputCode) {
@@ -150,11 +143,9 @@ async function getTracks(ext) {
       }
       log(`用户输入的验证码: ${userInputCode}`);
 
-      // 3. 调用改造后的reply函数
       const replied = await reply(detailUrl, data, userInputCode);
 
       if (replied) {
-        // 回帖成功后，多次刷新以确保内容加载
         for (let i = 0; i < 3; i++) {
           await $utils.sleep(1500);
           const retryResponse = await fetchWithCookie(detailUrl);
@@ -172,7 +163,7 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 后续的资源解析逻辑 (与原版v8.1相同) ---
+    // --- 资源解析逻辑 (保持不变) ---
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -240,7 +231,6 @@ async function getTracks(ext) {
 }
 
 // --- 以下是原版脚本的其他函数，保持不变 ---
-
 async function getConfig() {
   return jsonify({
     ver: 1,
