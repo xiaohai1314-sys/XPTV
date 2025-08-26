@@ -1,13 +1,14 @@
 /**
- * 海绵小站前端插件 - v12.2 (排版与API交互最终修复版)
+ * 海绵小站前端插件 - v12.3 (最终完整修复版)
  *
  * 更新说明:
  * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
  * - 严格按照 v8.1 的排版风格进行格式化，解决代码压缩问题。
  * - 修复了与后端API交互的逻辑，能正确显示后端返回的失败原因，避免 "undefined" 错误。
+ * - 修正了对后端响应对象的处理，解决了“后端响应格式不正确”的提示问题。
  * - 这是最终的前端版本，包含了所有之前的优化和修复。
  *
- * @version 12.2
+ * @version 12.3
  * @author Manus & 您的ID
  */
 
@@ -23,7 +24,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 
 // --- 辅助函数 ---
 function log(msg  ) {
-    try { $log(`[海绵小站 v12.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.2] ${msg}`); }
+    try { $log(`[海绵小站 v12.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.3] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -115,11 +116,12 @@ async function getTracks(ext) {
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                const backendResult = response.data; 
+                // 核心修改点：直接使用 response，兼容不同 $fetch 实现
+                const backendResult = response; 
 
                 if (!backendResult || typeof backendResult.success !== 'boolean') {
                     const errorMsg = '后端响应格式不正确';
-                    log(errorMsg);
+                    log(`接收到的原始响应: ${JSON.stringify(response)}`);
                     $utils.toastError(errorMsg, 5000);
                     return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
                 }
