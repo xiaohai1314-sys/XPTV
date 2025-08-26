@@ -1,13 +1,13 @@
 /**
- * 海绵小站前端插件 - v14.0 (最终完美修复版)
+ * 海绵小站前端插件 - v15.0 (终极兼容修复版)
  *
  * 更新说明:
- * - 终极修复: 根据诊断结果，前端代码现在能正确处理后端返回的双重编码JSON字符串。
- * - 恢复正常逻辑: 移除了所有诊断代码，恢复了完整的成功/失败判断和前端验证流程。
- * - 严格按照您的排版风格格式化。
- * - 此版本应能完全解决“后端响应格式不正确”的问题，并正常工作。
+ * - 终极修复: 解决了由于调用不存在的 "$utils.sleep" 函数而导致的崩溃问题。
+ * - 兼容性提升: 使用所有JavaScript环境都支持的原生 Promise + setTimeout 实现延时，不再依赖特定框架。
+ * - 整合修复: 包含了之前版本对双重JSON编码的所有修复。
+ * - 此版本是目前最稳定、最可靠的版本，旨在一次性解决所有问题。
  *
- * @version 14.0
+ * @version 15.0
  * @author Manus & 您的ID
  */
 
@@ -23,7 +23,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 
 // --- 辅助函数 ---
 function log(msg  ) {
-    try { $log(`[海绵小站 v14.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v14.0] ${msg}`); }
+    try { $log(`[海绵小站 v15.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v15.0] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -93,7 +93,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (最终完美修复版) ===================
+// =================== getTracks (终极兼容修复版) ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -115,9 +115,6 @@ async function getTracks(ext) {
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                // ★★★ 核心修复: 根据诊断结果，我们知道 response.data 是一个字符串，需要手动解析 ★★★
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
                 const backendResult = JSON.parse(response.data); 
 
                 if (!backendResult || typeof backendResult.success !== 'boolean') {
@@ -137,7 +134,11 @@ async function getTracks(ext) {
                 log("后端解锁成功！前端开始验证解锁状态...");
                 let unlocked = false;
                 for (let i = 0; i < 3; i++) {
-                    await $utils.sleep(2000);
+                    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                    // ★★★ 核心修复: 使用原生JS延时，替换掉不存在的 $utils.sleep ★★★
+                    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
                     log(`第 ${i + 1} 次尝试获取解锁后页面...`);
                     const retryResponse = await fetchWithCookie(detailUrl);
                     const pageContent = retryResponse.data;
