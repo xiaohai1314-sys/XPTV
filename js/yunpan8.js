@@ -1,12 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.3 (验证码修复版)
+ * 海绵小站前端插件 - 移植增强版 v8.4 (xptv 适配版)
  *
  * 更新说明:
- * - 基于 v8.2 版本
- * - 修复：根据网站最新结构，更新了验证码图片的定位选择器 (src*='vcode.php')。
- * - 修复：更新了提交验证码时使用的表单字段名 (从 seccodeverify 改为 vcode)。
- * - 修复：更新了获取 sechash 的逻辑，以适应新的验证码插件。
- * - 优化：增强了日志记录，方便未来排错。
+ * - 基于 v8.3 版本
+ * - 修复：将弹窗输入函数由 "$utils.input" 修改为 "input"，以适配 xptv (小苹果TV) 等电视盒子环境。
+ * - 优化：调整了 input 函数的参数结构，增加了 img 属性来显示验证码图片，符合通用电视插件规范。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -20,14 +18,15 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 v8.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.3] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v8.4] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.includes("xxxxxxxx")) {
-    $utils.toastError("请先在插件脚本中配置Cookie", 3000);
+    // 在电视环境下，toast可能不存在或名称不同，使用log作为备用
+    try { $utils.toastError("请先在插件脚本中配置Cookie", 3000); } catch(e) { log("错误：请先在插件脚本中配置Cookie"); }
     throw new Error("Cookie not configured.");
   }
   const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
@@ -46,7 +45,7 @@ function getCorrectPicUrl(path) {
 }
 
 // =================================================================================
-// =================== reply (v8.3 修复版) ===================
+// =================== reply (v8.4 适配版) ===================
 // =================================================================================
 async function reply(url, pageData, userVCode) {
   log("尝试使用Cookie及验证码自动回帖...");
@@ -57,16 +56,14 @@ async function reply(url, pageData, userVCode) {
   const $ = cheerio.load(pageData);
   const formhash = $("input[name='formhash']").val();
   
-  // 新版验证码插件，sechash可能不再需要或以其他形式存在，但formhash是必须的
   if (!formhash) {
       log("回帖失败：无法在页面上找到 formhash。");
-      $utils.toastError("无法获取必要的回帖参数", 3000);
+      try { $utils.toastError("无法获取必要的回帖参数", 3000); } catch(e) { log("错误：无法获取必要的回帖参数"); }
       return false;
   }
   log(`获取到 formhash: ${formhash}`);
 
   const threadId = threadIdMatch[1];
-  // 提交地址可能也变了，但通常是固定的，先保持不变
   const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
   
   const postData = {
@@ -76,20 +73,19 @@ async function reply(url, pageData, userVCode) {
       quotepid: 0,
       quick_reply_message: 0,
       formhash: formhash,
-      vcode: userVCode // ★ 修复：使用正确的字段名 'vcode'
+      vcode: userVCode
   };
 
   try {
     const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
     if (data.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
-      $utils.toastError("Cookie已失效，请重新获取", 3000);
+      try { $utils.toastError("Cookie已失效，请重新获取", 3000); } catch(e) { log("错误：Cookie已失效"); }
       return false;
     }
-    // 新的错误提示可能是 "验证码错误"
     if (data.includes("验证码不正确") || data.includes("验证码错误")) {
       log("回帖失败：验证码不正确。");
-      $utils.toastError("验证码输入错误", 3000);
+      try { $utils.toastError("验证码输入错误", 3000); } catch(e) { log("错误：验证码输入错误"); }
       return false;
     }
     log("回帖成功！");
@@ -101,7 +97,7 @@ async function reply(url, pageData, userVCode) {
 }
 
 // =================================================================================
-// =================== getTracks (v8.3 修复版) ===================
+// =================== getTracks (v8.4 适配版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -118,24 +114,22 @@ async function getTracks(ext) {
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
 
-      // ★ 修复：使用新的选择器定位验证码图片
       const seccodeImageUrl = $("img[src*='vcode.php']").attr('src');
       
       if (!seccodeImageUrl) {
-          log("无法找到验证码图片，流程中止。请确认页面是否加载正常。");
-          // 添加HTML打印，以便于未来调试
-          log("当前页面HTML: " + data.substring(0, 1000)); 
+          log("无法找到验证码图片，流程中止。");
           return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法找到验证码，请检查脚本", pan: '', ext: {} }] }] });
       }
       
       const fullSeccodeUrl = seccodeImageUrl.startsWith('http' ) ? seccodeImageUrl : `${SITE_URL}/${seccodeImageUrl}`;
       log(`验证码图片地址: ${fullSeccodeUrl}`);
 
-      const userInputCode = await $utils.input({
+      // ★ 修复：使用 xptv 环境通用的 input 函数
+      const userInputCode = await input(jsonify({
           title: '请输入验证码',
           hint: '请输入下方图片中的内容',
-          header: `<img src="${fullSeccodeUrl}" style="width:150px; height:50px; border:1px solid #ccc; margin: 0 auto; display: block;" onclick="this.src='${fullSeccodeUrl}&t=' + Math.random()"/>`
-      });
+          img: fullSeccodeUrl // 使用 img 属性传递图片URL
+      }));
 
       if (!userInputCode) {
           log("用户取消输入验证码。");
