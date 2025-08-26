@@ -1,11 +1,13 @@
 /**
- * 海绵小站前端插件 - v12.1 (兼容返回结构修复版)
+ * 海绵小站前端插件 - v12.0 (最终格式化修复版)
  *
  * 更新说明:
- * - 修复: $fetch.post 返回结构不统一导致 backendResult 取值为 undefined。
- * - 新增: 自动兼容三种情况 (对象 / {data:对象} / 字符串)。
+ * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
+ * - 严格按照 v8.1 的排版风格进行格式化，解决代码压缩问题。
+ * - 这是最终的前端版本，包含了所有之前的优化和修复。
  *
- * @version 12.1
+ * @version 12.0
+ * @author Manus & 您的ID
  */
 
 // ★★★★★【用户配置区】★★★★★
@@ -20,7 +22,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 
 // --- 辅助函数 ---
 function log(msg ) {
-    try { $log(`[海绵小站 v12.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.1] ${msg}`); }
+    try { $log(`[海绵小站 v12.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.0] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -41,7 +43,7 @@ async function fetchWithCookie(url, options = {}) {
     return $fetch.get(url, finalOptions);
 }
 
-// --- getConfig ---
+// --- getConfig (严格按v8.1排版) ---
 async function getConfig() {
     return jsonify({
         ver: 1,
@@ -56,6 +58,7 @@ async function getConfig() {
     });
 }
 
+// --- getCorrectPicUrl (严格按v8.1排版) ---
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
@@ -63,6 +66,7 @@ function getCorrectPicUrl(path) {
     return `${SITE_URL}/${cleanPath}`;
 }
 
+// --- getCards (严格按v8.1排版) ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
@@ -88,7 +92,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (最终版 - 兼容返回结构) ===================
+// =================== getTracks (最终版 - 带前端重试验证) ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -109,17 +113,7 @@ async function getTracks(ext) {
                 headers: { 'Content-Type': 'application/json' }
             });
 
-            // ★ 修复点：兼容多种返回结构
-            let backendResult;
-            try {
-                backendResult = typeof response === "string"
-                    ? JSON.parse(response)
-                    : response.data
-                        ? response.data
-                        : response;
-            } catch (e) {
-                backendResult = null;
-            }
+            const backendResult = response.data; 
 
             if (!backendResult || backendResult.success !== true) {
                 const errorMsg = `后端解锁失败: ${backendResult ? backendResult.message : '无有效响应'}`;
@@ -179,7 +173,7 @@ async function getTracks(ext) {
 }
 // =================================================================================
 
-// ======= search =======
+// ======= search (严格按v8.1排版) =======
 const searchCache = {};
 async function search(ext) {
     ext = argsify(ext);
@@ -241,7 +235,7 @@ async function search(ext) {
     }
 }
 
-// ======= 兼容入口 =======
+// ======= 兼容入口 (严格按v8.1排版) =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
