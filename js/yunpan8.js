@@ -1,15 +1,14 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.1 (单次回帖 + 多次刷新 + 保留search cache)
+ * 海绵小站前端插件 - 移植增强版 v8.2 (集成手动验证码输入)
  *
  * 更新说明:
- * - 基于 v8.0 移植增强版
- * - 回帖只执行一次
- * - 增加回帖后多次刷新机制 (最多3次，每次1.5秒)，解决第一次进入时未立即解锁的问题
- * - 保留并启用 search cache
+ * - 基于 v8.1 版本
+ * - 新增：当回帖需要验证码时，会调用App原生对话框，请求用户手动输入。
+ * - 优化：增强了回帖逻辑的健壮性，能处理验证码流程。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
@@ -17,7 +16,7 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg) { try { $log(`[海绵小站 v8.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.1] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -35,23 +34,102 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
+// =================================================================================
+// =================== reply (v2 - 集成手动验证码输入) ===================
+// =================================================================================
 async function reply(url) {
-  log("尝试使用Cookie自动回帖...");
+  log("尝试自动回帖...");
   const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
   const threadIdMatch = url.match(/thread-(\d+)/);
   if (!threadIdMatch) return false;
+
   const threadId = threadIdMatch[1];
   const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-  const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
+  
+  let postData = {
+    doctype: 1,
+    return_html: 1,
+    message: getRandomText(replies),
+    quotepid: 0,
+    quick_reply_message: 0
+  };
+
   try {
-    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
+    let { data } = await fetchWithCookie(postUrl, {
+      method: 'POST',
+      body: postData,
+      headers: { 'Referer': url }
+    });
+
+    if (data.includes("vcode.php")) {
+      log("检测到需要输入验证码，请求用户手动输入...");
+      const $ = cheerio.load(data);
+      const vcodeImgSrc = $("img[src*='vcode.php']").attr('src');
+      
+      if (!vcodeImgSrc) {
+        log("无法找到验证码图片，回帖失败。");
+        $utils.toastError("无法找到验证码图片", 3000);
+        return false;
+      }
+      
+      const vcodeImgUrl = getCorrectPicUrl(vcodeImgSrc);
+      
+      // 【关键】调用App原生对话框，请求用户输入。
+      // 这里的API `window.$utils.prompt` 是一个假设，您需要根据您App的实际情况修改。
+      // 它应该能显示图片，并返回用户输入的文本。
+      const userInputCode = await window.$utils.prompt({
+          title: '请输入验证码',
+          message: '网站需要验证才能回帖，请输入下图中的字母：',
+          image: vcodeImgUrl, // 传递图片URL
+          input: {
+              placeholder: '请输入4位验证码',
+              text: ''
+          },
+          actions: [{
+              title: '确定'
+          }, {
+              title: '取消',
+              type: 'cancel'
+          }]
+      });
+      
+      if (userInputCode && userInputCode.text) {
+        log(`用户输入的验证码为: ${userInputCode.text}`);
+        postData.vcode = userInputCode.text;
+
+        log("使用用户输入的验证码再次尝试回帖...");
+        const finalResponse = await fetchWithCookie(postUrl, {
+          method: 'POST',
+          body: postData,
+          headers: { 'Referer': url }
+        });
+        data = finalResponse.data;
+      } else {
+        log("用户取消输入验证码，操作中止。");
+        $utils.toast("用户取消操作", 2000);
+        return false;
+      }
+    }
+
     if (data.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
       $utils.toastError("Cookie已失效，请重新获取", 3000);
       return false;
     }
+    if (data.includes("验证码错误")) {
+      log("回帖失败：用户输入的验证码不正确。");
+      $utils.toastError("验证码错误，请重试", 3000);
+      return false;
+    }
+    if (data.includes("发表太快了")) {
+      log("回帖失败：操作过于频繁。");
+      $utils.toastError("操作太快了，请稍后再试", 3000);
+      return false;
+    }
+
     log("回帖成功！");
     return true;
+
   } catch (e) {
     log(`回帖请求异常: ${e.message}`);
     return false;
@@ -74,8 +152,8 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http')) return path;
-  const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+  if (path.startsWith('http' )) return path;
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
 
@@ -103,9 +181,6 @@ async function getCards(ext) {
   }
 }
 
-// =================================================================================
-// =================== getTracks (单次回帖 + 多次刷新版) ===================
-// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -118,12 +193,10 @@ async function getTracks(ext) {
     let { data } = await fetchWithCookie(detailUrl);
     let $ = cheerio.load(data);
 
-    // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
       const replied = await reply(detailUrl);
       if (replied) {
-        // 单次回帖，多次刷新
         for (let i = 0; i < 3; i++) {
           await $utils.sleep(1500);
           const retryResponse = await fetchWithCookie(detailUrl);
@@ -137,7 +210,7 @@ async function getTracks(ext) {
         }
         $ = cheerio.load(data);
       } else {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法自动回帖，请检查Cookie或手动操作", pan: '', ext: {} }] }] });
       }
     }
 
@@ -180,7 +253,7 @@ async function getTracks(ext) {
           const found = purify(text);
           if (found) { code = found; break; }
         }
-        if (!text.includes("http") && !text.includes("/") && !text.includes(":")) {
+        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) {
           const found = purify(text);
           if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
         }
@@ -206,9 +279,7 @@ async function getTracks(ext) {
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
-// =================================================================================
 
-// ======= search（带 cache）=======
 const searchCache = {};
 async function search(ext) {
   ext = argsify(ext);
@@ -216,7 +287,6 @@ async function search(ext) {
   const page = ext.page || 1;
   if (!text) return jsonify({ list: [] });
 
-  // 命中不同关键词时重置缓存
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -224,12 +294,10 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
-  // 命中页缓存
   if (searchCache.data && searchCache.data[page - 1]) {
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
-  // 页越界保护
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
@@ -254,7 +322,6 @@ async function search(ext) {
       });
     });
 
-    // 计算分页总数
     let pagecount = 0;
     $('ul.pagination a.page-link').each((_, link) => {
       const p = parseInt($(link).text().trim());
@@ -263,7 +330,6 @@ async function search(ext) {
 
     const total = cards.length;
 
-    // 写入缓存
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
@@ -276,7 +342,6 @@ async function search(ext) {
   }
 }
 
-// ======= 兼容入口 =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
