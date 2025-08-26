@@ -1,12 +1,12 @@
 /**
- * 海绵小站前端插件 - v11.0 (最终格式化修复版)
+ * 海绵小站前端插件 - v12.0 (最终格式化修复版)
  *
  * 更新说明:
- * - 修复了一个致命的逻辑错误：正确解析来自后端的网络响应。
+ * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
  * - 严格按照 v8.1 的排版风格进行格式化，解决代码压缩问题。
- * - 这是基于 v10.0 的最终修复，包含了所有之前的优化。
+ * - 这是最终的前端版本，包含了所有之前的优化和修复。
  *
- * @version 11.0
+ * @version 12.0
  * @author Manus & 您的ID
  */
 
@@ -22,7 +22,7 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1
 
 // --- 辅助函数 ---
 function log(msg ) {
-    try { $log(`[海绵小站 v11.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.0] ${msg}`); }
+    try { $log(`[海绵小站 v12.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.0] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -92,7 +92,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (最终修复版) ===================
+// =================== getTracks (最终版 - 带前端重试验证) ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -122,10 +122,29 @@ async function getTracks(ext) {
                 return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
             }
 
-            log("后端解锁成功，重新加载页面获取资源...");
-            await $utils.sleep(1500);
-            const retryResponse = await fetchWithCookie(detailUrl);
-            data = retryResponse.data;
+            log("后端解锁成功！前端开始验证解锁状态...");
+            let unlocked = false;
+            for (let i = 0; i < 3; i++) {
+                await $utils.sleep(2000);
+                log(`第 ${i + 1} 次尝试获取解锁后页面...`);
+                const retryResponse = await fetchWithCookie(detailUrl);
+                const pageContent = retryResponse.data;
+                if (!pageContent.includes("回复后")) {
+                    log("验证成功！页面已解锁。");
+                    data = pageContent;
+                    unlocked = true;
+                    break;
+                }
+                log("页面仍未解锁，继续等待和重试...");
+            }
+
+            if (!unlocked) {
+                const errorMsg = "前端验证失败：后端已回帖，但页面状态未更新。";
+                log(errorMsg);
+                $utils.toastError(errorMsg, 5000);
+                return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
+            }
+            
             $ = cheerio.load(data);
         } else {
             log("内容无需解锁，直接解析。");
