@@ -1,12 +1,12 @@
 /**
- * 海绵小站前端插件 - v16.0 (终极无等待版)
+ * 海绵小站前端插件 - v12.0 (最终格式化修复版)
  *
  * 更新说明:
- * - 终极修复: 移除了所有形式的延时等待代码 (包括 setTimeout)，以适应不允许任何延时操作的极端运行环境。
- * - 改变策略: 后端请求发送后，不再自动验证，而是直接提示用户手动刷新。这是在当前环境下唯一可靠的方案。
- * - 稳定性第一: 此版本以杜绝任何运行时崩溃为最高优先级。
+ * - 终极修复: 在前端接收到后端成功信号后，增加多次刷新重试机制。
+ * - 严格按照 v8.1 的排版风格进行格式化，解决代码压缩问题。
+ * - 这是最终的前端版本，包含了所有之前的优化和修复。
  *
- * @version 16.0
+ * @version 12.0
  * @author Manus & 您的ID
  */
 
@@ -15,14 +15,14 @@ const BACKEND_API_URL = "http://192.168.1.2:3000/reply";
 // ★★★★★★★★★★★★★★★★★★★
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1Cf9uUtOiR0_2B_2Ff6Pxdv4W1aXzNIGTH;";
 
 // --- 辅助函数 ---
-function log(msg  ) {
-    try { $log(`[海绵小站 v16.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v16.0] ${msg}`); }
+function log(msg ) {
+    try { $log(`[海绵小站 v12.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v12.0] ${msg}`); }
 }
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {};
@@ -61,7 +61,7 @@ async function getConfig() {
 // --- getCorrectPicUrl (严格按v8.1排版) ---
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http'  )) return path;
+    if (path.startsWith('http' )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -92,7 +92,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (终极无等待版) ===================
+// =================== getTracks (最终版 - 带前端重试验证) ===================
 // =================================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -109,25 +109,43 @@ async function getTracks(ext) {
         if ($("div.alert.alert-warning").text().includes("回复后")) {
             log("内容被隐藏，启动后端AI解锁流程...");
             
-            try {
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                // ★★★ 核心修改: 发送请求，然后直接提示用户手动刷新，不进行任何等待 ★★★
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                $fetch.post(BACKEND_API_URL, { url: url }, {
-                    headers: { 'Content-Type': 'application/json' }
-                });
+            const response = await $fetch.post(BACKEND_API_URL, { url: url }, {
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-                const message = "后端解锁中... 请等待5秒后，下拉刷新页面！";
-                log(message);
-                $utils.toast(message, 5000); // 使用一个普通的toast提示
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: message, pan: '', ext: {} }] }] });
+            const backendResult = response.data; 
 
-            } catch (e) {
-                const errorMsg = `请求后端服务失败: ${e.message || '请检查网络或后端服务是否开启'}`;
+            if (!backendResult || backendResult.success !== true) {
+                const errorMsg = `后端解锁失败: ${backendResult ? backendResult.message : '无有效响应'}`;
                 log(errorMsg);
-                $utils.toastError(errorMsg, 8000);
+                $utils.toastError(errorMsg, 5000);
                 return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
             }
+
+            log("后端解锁成功！前端开始验证解锁状态...");
+            let unlocked = false;
+            for (let i = 0; i < 3; i++) {
+                await $utils.sleep(2000);
+                log(`第 ${i + 1} 次尝试获取解锁后页面...`);
+                const retryResponse = await fetchWithCookie(detailUrl);
+                const pageContent = retryResponse.data;
+                if (!pageContent.includes("回复后")) {
+                    log("验证成功！页面已解锁。");
+                    data = pageContent;
+                    unlocked = true;
+                    break;
+                }
+                log("页面仍未解锁，继续等待和重试...");
+            }
+
+            if (!unlocked) {
+                const errorMsg = "前端验证失败：后端已回帖，但页面状态未更新。";
+                log(errorMsg);
+                $utils.toastError(errorMsg, 5000);
+                return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
+            }
+            
+            $ = cheerio.load(data);
         } else {
             log("内容无需解锁，直接解析。");
         }
@@ -140,7 +158,7 @@ async function getTracks(ext) {
         const numMap = {'零':'0','〇':'0','一':'1','壹':'1','依':'1','二':'2','贰':'2','三':'3','叁':'3','四':'4','肆':'4','五':'5','伍':'5','吴':'5','吾':'5','无':'5','武':'5','悟':'5','舞':'5','物':'5','乌':'5','屋':'5','唔':'5','雾':'5','勿':'5','误':'5','污':'5','务':'5','午':'5','捂':'5','戊':'5','毋':'5','邬':'5','兀':'5','六':'6','陆':'6','七':'7','柒':'7','八':'8','捌':'8','九':'9','玖':'9','久':'9','酒':'9','Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5','Ⅵ':'6','Ⅶ':'7','Ⅷ':'8','Ⅸ':'9','①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10','０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9'};
         const charMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
         function purify(raw) { const codeMatch = raw.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/); const extracted = codeMatch ? codeMatch[1].trim() : raw.trim(); let converted = ''; for (const c of extracted) { converted += numMap[c] || charMap[c] || c; } const finalMatch = converted.match(/^[a-zA-Z0-9]+/); return finalMatch ? finalMatch[0].toLowerCase() : null; }
-        linkNodes.each((_, node) => { const link = $(node).attr("href"); let code = null; let el = $(node).closest("p, div, h3"); if (!el.length) el = $(node); const searchEls = [el]; let next = el.next(); for (let i = 0; i < 3 && next.length; i++) { searchEls.push(next); next = next.next(); } for (const e of searchEls) { const text = e.text().trim(); if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } } if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } } } const existing = resultsMap.get(link); if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); } });
+        linkNodes.each((_, node) => { const link = $(node).attr("href"); let code = null; let el = $(node).closest("p, div, h3"); if (!el.length) el = $(node); const searchEls = [el]; let next = el.next(); for (let i = 0; i < 3 && next.length; i++) { searchEls.push(next); next = next.next(); } for (const e of searchEls) { const text = e.text().trim(); if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } } if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } } } const existing = resultsMap.get(link); if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); } });
         const tracks = [];
         resultsMap.forEach(record => { const finalPan = record.code ? `${record.link}（访问码：${record.code}）` : record.link; tracks.push({ name: "网盘", pan: finalPan, ext: { pwd: record.code || '' } }); });
         if (tracks.length === 0) tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
