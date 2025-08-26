@@ -1,10 +1,12 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.2 (集成手动验证码输入)
+ * 海绵小站前端插件 - 移植增强版 v8.2 (手动验证码 + 单次回帖 + 多次刷新)
  *
  * 更新说明:
- * - 基于 v8.1 版本
- * - 新增：当回帖需要验证码时，会调用App原生对话框，请求用户手动输入。
- * - 优化：增强了回帖逻辑的健壮性，能处理验证码流程。
+ * - 基于 v8.1 移植增强版
+ * - 增加了手动输入字母/数字验证码回帖功能，以适应网站更新。
+ * - 回帖时自动从页面抓取 formhash 和 sechash，提高成功率。
+ * - 保留了单次回帖和多次刷新机制，解决解锁延迟问题。
+ * - 保留并启用 search cache。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -13,16 +15,18 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区 - Cookie】 ★★★★★
-const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;";
+// 请在这里填入您自己的Cookie字符串
+const COOKIE = "bbs_sid=xxxxxxxx;bbs_token=xxxxxxxx;";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
+// --- 辅助函数 ---
 function log(msg ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
+  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.includes("xxxxxxxx")) {
     $utils.toastError("请先在插件脚本中配置Cookie", 3000);
     throw new Error("Cookie not configured.");
   }
@@ -34,153 +38,78 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
+function getCorrectPicUrl(path) {
+  if (!path) return FALLBACK_PIC;
+  if (path.startsWith('http' )) return path;
+  const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+  return `${SITE_URL}/${cleanPath}`;
+}
+
 // =================================================================================
-// =================== reply (v2 - 集成手动验证码输入) ===================
+// =================== reply (已改造，支持验证码) ===================
 // =================================================================================
-async function reply(url) {
-  log("尝试自动回帖...");
+async function reply(url, pageData, seccode) {
+  log("尝试使用Cookie及验证码自动回帖...");
   const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
   const threadIdMatch = url.match(/thread-(\d+)/);
   if (!threadIdMatch) return false;
 
+  const $ = cheerio.load(pageData);
+  const formhash = $("input[name='formhash']").val();
+  // 某些页面sechash在input里，某些在img的src里，优先从input取
+  let sechash = $("input[name='sechash']").val();
+  if (!sechash) {
+      const seccodeImgSrc = $("img[src*='mod=seccode']").attr('src');
+      const sechashMatch = seccodeImgSrc ? seccodeImgSrc.match(/sechash=([a-zA-Z0-9]+)/) : null;
+      if (sechashMatch) {
+          sechash = sechashMatch[1];
+      }
+  }
+
+  if (!formhash || !sechash) {
+      log("回帖失败：无法在页面上找到 formhash 或 sechash。");
+      $utils.toastError("无法获取必要的回帖参数", 3000);
+      return false;
+  }
+  log(`获取到 formhash: ${formhash}, sechash: ${sechash}`);
+
   const threadId = threadIdMatch[1];
   const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
   
-  let postData = {
-    doctype: 1,
-    return_html: 1,
-    message: getRandomText(replies),
-    quotepid: 0,
-    quick_reply_message: 0
+  const postData = {
+      doctype: 1,
+      return_html: 1,
+      message: getRandomText(replies),
+      quotepid: 0,
+      quick_reply_message: 0,
+      formhash: formhash,
+      sechash: sechash,
+      seccodeverify: seccode // 提交用户输入的验证码
   };
 
   try {
-    let { data } = await fetchWithCookie(postUrl, {
-      method: 'POST',
-      body: postData,
-      headers: { 'Referer': url }
-    });
-
-    if (data.includes("vcode.php")) {
-      log("检测到需要输入验证码，请求用户手动输入...");
-      const $ = cheerio.load(data);
-      const vcodeImgSrc = $("img[src*='vcode.php']").attr('src');
-      
-      if (!vcodeImgSrc) {
-        log("无法找到验证码图片，回帖失败。");
-        $utils.toastError("无法找到验证码图片", 3000);
-        return false;
-      }
-      
-      const vcodeImgUrl = getCorrectPicUrl(vcodeImgSrc);
-      
-      // 【关键】调用App原生对话框，请求用户输入。
-      // 这里的API `window.$utils.prompt` 是一个假设，您需要根据您App的实际情况修改。
-      // 它应该能显示图片，并返回用户输入的文本。
-      const userInputCode = await window.$utils.prompt({
-          title: '请输入验证码',
-          message: '网站需要验证才能回帖，请输入下图中的字母：',
-          image: vcodeImgUrl, // 传递图片URL
-          input: {
-              placeholder: '请输入4位验证码',
-              text: ''
-          },
-          actions: [{
-              title: '确定'
-          }, {
-              title: '取消',
-              type: 'cancel'
-          }]
-      });
-      
-      if (userInputCode && userInputCode.text) {
-        log(`用户输入的验证码为: ${userInputCode.text}`);
-        postData.vcode = userInputCode.text;
-
-        log("使用用户输入的验证码再次尝试回帖...");
-        const finalResponse = await fetchWithCookie(postUrl, {
-          method: 'POST',
-          body: postData,
-          headers: { 'Referer': url }
-        });
-        data = finalResponse.data;
-      } else {
-        log("用户取消输入验证码，操作中止。");
-        $utils.toast("用户取消操作", 2000);
-        return false;
-      }
-    }
-
+    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
     if (data.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
       $utils.toastError("Cookie已失效，请重新获取", 3000);
       return false;
     }
-    if (data.includes("验证码错误")) {
-      log("回帖失败：用户输入的验证码不正确。");
-      $utils.toastError("验证码错误，请重试", 3000);
+    if (data.includes("验证码不正确")) {
+      log("回帖失败：验证码不正确。");
+      $utils.toastError("验证码输入错误", 3000);
       return false;
     }
-    if (data.includes("发表太快了")) {
-      log("回帖失败：操作过于频繁。");
-      $utils.toastError("操作太快了，请稍后再试", 3000);
-      return false;
-    }
-
     log("回帖成功！");
     return true;
-
   } catch (e) {
     log(`回帖请求异常: ${e.message}`);
     return false;
   }
 }
 
-async function getConfig() {
-  return jsonify({
-    ver: 1,
-    title: '海绵小站',
-    site: SITE_URL,
-    tabs: [
-      { name: '电影', ext: { id: 'forum-1' } },
-      { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } },
-      { name: '综艺', ext: { id: 'forum-5' } },
-    ],
-  });
-}
-
-function getCorrectPicUrl(path) {
-  if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http' )) return path;
-  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
-  return `${SITE_URL}/${cleanPath}`;
-}
-
-async function getCards(ext) {
-  ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${SITE_URL}/${id}-${page}.htm`;
-  try {
-    const { data } = await fetchWithCookie(url);
-    const $ = cheerio.load(data);
-    const cards = [];
-    $("ul.threadlist > li.media.thread").each((_, item) => {
-      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-      cards.push({
-        vod_id: $(item).find(".subject a")?.attr("href") || "",
-        vod_name: $(item).find(".subject a")?.text().trim() || "",
-        vod_pic: getCorrectPicUrl(picPath),
-        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
-        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
-      });
-    });
-    return jsonify({ list: cards });
-  } catch (e) {
-    return jsonify({ list: [] });
-  }
-}
-
+// =================================================================================
+// =================== getTracks (已改造，增加验证码输入流程) ===================
+// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -193,10 +122,39 @@ async function getTracks(ext) {
     let { data } = await fetchWithCookie(detailUrl);
     let $ = cheerio.load(data);
 
+    // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
-      const replied = await reply(detailUrl);
+
+      // 1. 从页面解析验证码图片URL
+      const seccodeImageUrl = $("img[src*='mod=seccode']").attr('src');
+      if (!seccodeImageUrl) {
+          log("无法找到验证码图片，流程中止。");
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法找到验证码，请检查脚本", pan: '', ext: {} }] }] });
+      }
+      const fullSeccodeUrl = seccodeImageUrl.startsWith('http' ) ? seccodeImageUrl : `${SITE_URL}/${seccodeImageUrl}`;
+      log(`验证码图片地址: ${fullSeccodeUrl}`);
+
+      // 2. 弹出WebView或输入框让用户输入验证码
+      // 这是一个关键的交互步骤，这里的实现方式依赖于具体的脚本运行环境
+      // 您需要确保您的环境支持类似 $utils.input 的功能
+      const userInputCode = await $utils.input({
+          title: '请输入验证码',
+          hint: '请输入下方图片中的字母/数字',
+          header: `<img src="${fullSeccodeUrl}" style="width:150px; height:50px; border:1px solid #ccc; margin: 0 auto; display: block;"/>`
+      });
+
+      if (!userInputCode) {
+          log("用户取消输入验证码。");
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: "用户取消操作", pan: '', ext: {} }] }] });
+      }
+      log(`用户输入的验证码: ${userInputCode}`);
+
+      // 3. 调用改造后的reply函数
+      const replied = await reply(detailUrl, data, userInputCode);
+
       if (replied) {
+        // 回帖成功后，多次刷新以确保内容加载
         for (let i = 0; i < 3; i++) {
           await $utils.sleep(1500);
           const retryResponse = await fetchWithCookie(detailUrl);
@@ -210,10 +168,11 @@ async function getTracks(ext) {
         }
         $ = cheerio.load(data);
       } else {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法自动回帖，请检查Cookie或手动操作", pan: '', ext: {} }] }] });
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "回帖失败，无法获取资源", pan: '', ext: {} }] }] });
       }
     }
 
+    // --- 后续的资源解析逻辑 (与原版v8.1相同) ---
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -280,6 +239,46 @@ async function getTracks(ext) {
   }
 }
 
+// --- 以下是原版脚本的其他函数，保持不变 ---
+
+async function getConfig() {
+  return jsonify({
+    ver: 1,
+    title: '海绵小站',
+    site: SITE_URL,
+    tabs: [
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
+    ],
+  });
+}
+
+async function getCards(ext) {
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  const url = `${SITE_URL}/${id}-${page}.htm`;
+  try {
+    const { data } = await fetchWithCookie(url);
+    const $ = cheerio.load(data);
+    const cards = [];
+    $("ul.threadlist > li.media.thread").each((_, item) => {
+      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
+      cards.push({
+        vod_id: $(item).find(".subject a")?.attr("href") || "",
+        vod_name: $(item).find(".subject a")?.text().trim() || "",
+        vod_pic: getCorrectPicUrl(picPath),
+        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
+      });
+    });
+    return jsonify({ list: cards });
+  } catch (e) {
+    return jsonify({ list: [] });
+  }
+}
+
 const searchCache = {};
 async function search(ext) {
   ext = argsify(ext);
@@ -342,6 +341,7 @@ async function search(ext) {
   }
 }
 
+// --- 兼容入口 ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
