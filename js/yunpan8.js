@@ -1,42 +1,33 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.4 (xptv 适配版)
+ * 海绵小站前端插件 - v9.1 (后端AI回帖 + 原版资源解析)
  *
- * 更新说明:
- * - 基于 v8.3 版本
- * - 修复：将弹窗输入函数由 "$utils.input" 修改为 "input"，以适配 xptv (小苹果TV) 等电视盒子环境。
- * - 优化：调整了 input 函数的参数结构，增加了 img 属性来显示验证码图片，符合通用电视插件规范。
+ * 功能:
+ * - 依赖一个在本地网络运行的后端服务来处理自动回帖。
+ * - 保留了 v8.1 版本中完整、强大的资源和访问码解析逻辑。
+ * - 实现了完整的浏览、搜索、详情查看功能。
+ *
+ * @version 9.1
+ * @author Manus
  */
+
+// ★★★★★【用户配置区】★★★★★
+// 这是唯一需要您修改的地方。
+// 请将这里的 IP 地址替换为您运行后端服务的电脑的局域网IP地址。
+// 例如: "http://192.168.1.101:3000/reply"
+const BACKEND_API_URL = "http://192.168.1.2:3000/reply"; 
+// ★★★★★★★★★★★★★★★★★★★
 
 const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
-
-// ★★★★★【用户配置区 - Cookie】 ★★★★★
-// 请在这里填入您自己的Cookie字符串
-const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1Cf9uUtOiR0_2B_2Ff6Pxdv4W1aXzNIGTH;";
-// ★★★★★★★★★★★★★★★★★★★★★★★★★
+// 前端Cookie仅用于基础浏览 ，回帖认证由后端处理
+const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1Cf9uUtOiR0_2B_2Ff6Pxdv4W1aXzNIGTH;"; 
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[海绵小站 v8.4] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.4] ${msg}`); } }
+function log(msg) { try { $log(`[海绵小站 v9.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.includes("xxxxxxxx")) {
-    // 在电视环境下，toast可能不存在或名称不同，使用log作为备用
-    try { $utils.toastError("请先在插件脚本中配置Cookie", 3000); } catch(e) { log("错误：请先在插件脚本中配置Cookie"); }
-    throw new Error("Cookie not configured.");
-  }
-  const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
-  const finalOptions = { ...options, headers };
-  if (options.method === 'POST') {
-    return $fetch.post(url, options.body, finalOptions);
-  }
-  return $fetch.get(url, finalOptions);
-}
-
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
   if (path.startsWith('http' )) return path;
@@ -44,120 +35,44 @@ function getCorrectPicUrl(path) {
   return `${SITE_URL}/${cleanPath}`;
 }
 
-// =================================================================================
-// =================== reply (v8.4 适配版) ===================
-// =================================================================================
-async function reply(url, pageData, userVCode) {
-  log("尝试使用Cookie及验证码自动回帖...");
-  const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-  const threadIdMatch = url.match(/thread-(\d+)/);
-  if (!threadIdMatch) return false;
+// --- 核心功能 ---
 
-  const $ = cheerio.load(pageData);
-  const formhash = $("input[name='formhash']").val();
-  
-  if (!formhash) {
-      log("回帖失败：无法在页面上找到 formhash。");
-      try { $utils.toastError("无法获取必要的回帖参数", 3000); } catch(e) { log("错误：无法获取必要的回帖参数"); }
-      return false;
-  }
-  log(`获取到 formhash: ${formhash}`);
-
-  const threadId = threadIdMatch[1];
-  const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-  
-  const postData = {
-      doctype: 1,
-      return_html: 1,
-      message: getRandomText(replies),
-      quotepid: 0,
-      quick_reply_message: 0,
-      formhash: formhash,
-      vcode: userVCode
-  };
-
-  try {
-    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
-    if (data.includes("您尚未登录")) {
-      log("回帖失败：Cookie已失效或不正确。");
-      try { $utils.toastError("Cookie已失效，请重新获取", 3000); } catch(e) { log("错误：Cookie已失效"); }
-      return false;
-    }
-    if (data.includes("验证码不正确") || data.includes("验证码错误")) {
-      log("回帖失败：验证码不正确。");
-      try { $utils.toastError("验证码输入错误", 3000); } catch(e) { log("错误：验证码输入错误"); }
-      return false;
-    }
-    log("回帖成功！");
-    return true;
-  } catch (e) {
-    log(`回帖请求异常: ${e.message}`);
-    return false;
-  }
-}
-
-// =================================================================================
-// =================== getTracks (v8.4 适配版) ===================
-// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext;
+  const { url } = ext; // url 是 "thread-12345.htm"
   if (!url) return jsonify({ list: [] });
 
   const detailUrl = `${SITE_URL}/${url}`;
   log(`开始处理详情页: ${detailUrl}`);
 
   try {
-    let { data } = await fetchWithCookie(detailUrl);
+    let { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
     let $ = cheerio.load(data);
 
     if ($("div.alert.alert-warning").text().includes("回复后")) {
-      log("内容被隐藏，启动回帖流程...");
+      log("内容被隐藏，调用后端AI回帖服务...");
+      $utils.toast("检测到隐藏内容，正在后台自动解锁...", 5000);
 
-      const seccodeImageUrl = $("img[src*='vcode.php']").attr('src');
-      
-      if (!seccodeImageUrl) {
-          log("无法找到验证码图片，流程中止。");
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: "无法找到验证码，请检查脚本", pan: '', ext: {} }] }] });
+      const backendResponse = await $fetch.post(BACKEND_API_URL, { url: url }, {
+          headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!backendResponse.success) {
+        const errorMsg = `解锁失败: ${backendResponse.message}`;
+        log(errorMsg);
+        $utils.toastError(errorMsg, 5000);
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
       }
       
-      const fullSeccodeUrl = seccodeImageUrl.startsWith('http' ) ? seccodeImageUrl : `${SITE_URL}/${seccodeImageUrl}`;
-      log(`验证码图片地址: ${fullSeccodeUrl}`);
-
-      // ★ 修复：使用 xptv 环境通用的 input 函数
-      const userInputCode = await input(jsonify({
-          title: '请输入验证码',
-          hint: '请输入下方图片中的内容',
-          img: fullSeccodeUrl // 使用 img 属性传递图片URL
-      }));
-
-      if (!userInputCode) {
-          log("用户取消输入验证码。");
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: "用户取消操作", pan: '', ext: {} }] }] });
-      }
-      log(`用户输入的验证码: ${userInputCode}`);
-
-      const replied = await reply(detailUrl, data, userInputCode);
-
-      if (replied) {
-        for (let i = 0; i < 3; i++) {
-          await $utils.sleep(1500);
-          const retryResponse = await fetchWithCookie(detailUrl);
-          data = retryResponse.data;
-          if (!data.includes("回复后")) {
-            log(`第 ${i + 1} 次刷新后成功解锁资源`);
-            break;
-          } else {
-            log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`);
-          }
-        }
-        $ = cheerio.load(data);
-      } else {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "回帖失败，无法获取资源", pan: '', ext: {} }] }] });
-      }
+      log("后端解锁成功，重新加载页面...");
+      $utils.toast("解锁成功！正在加载资源...", 2000);
+      await $utils.sleep(1500); // 等待一下，确保服务器状态更新
+      const retryResponse = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
+      data = retryResponse.data;
+      $ = cheerio.load(data);
     }
 
-    // --- 资源解析逻辑 (保持不变) ---
+    // ★★★★★ 保留的 v8.1 完整资源解析逻辑 ★★★★★
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -217,14 +132,18 @@ async function getTracks(ext) {
 
     if (tracks.length === 0) tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
     return jsonify({ list: [{ title: '云盘', tracks }] });
+    // ★★★★★ 资源解析逻辑结束 ★★★★★
 
   } catch (e) {
-    log(`getTracks错误: ${e.message}`);
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
+    const errorMsg = `操作失败: ${e.message}. 请检查后端服务是否在电脑上正常运行，且IP配置正确。`;
+    log(errorMsg);
+    $utils.toastError(errorMsg, 8000);
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: errorMsg, pan: '', ext: {} }] }] });
   }
 }
 
-// --- 以下是原版脚本的其他函数，保持不变 ---
+// --- 其他兼容函数 (保持不变) ---
+
 async function getConfig() {
   return jsonify({
     ver: 1,
@@ -244,7 +163,7 @@ async function getCards(ext) {
   const { page = 1, id } = ext;
   const url = `${SITE_URL}/${id}-${page}.htm`;
   try {
-    const { data } = await fetchWithCookie(url);
+    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
     const $ = cheerio.load(data);
     const cards = [];
     $("ul.threadlist > li.media.thread").each((_, item) => {
@@ -259,6 +178,7 @@ async function getCards(ext) {
     });
     return jsonify({ list: cards });
   } catch (e) {
+    log(`getCards错误: ${e.message}`);
     return jsonify({ list: [] });
   }
 }
@@ -290,7 +210,7 @@ async function search(ext) {
     : `${SITE_URL}/search-${encodeURIComponent(text)}-1-0-${page}.htm`;
 
   try {
-    const { data } = await fetchWithCookie(url);
+    const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
     const $ = cheerio.load(data);
     const cards = [];
 
