@@ -16,7 +16,7 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区 - Cookie】 ★★★★★
 // 请在这里填入您自己的Cookie字符串
-const COOKIE = "bbs_sid=xxxxxxxx;bbs_token=xxxxxxxx;";
+const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=zMnlkGz9EkrmRT33Qx1Cf9uUtOiR0_2B_2Ff6Pxdv4W1aXzNIGTH;";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 辅助函数 ---
