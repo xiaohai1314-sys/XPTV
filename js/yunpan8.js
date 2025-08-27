@@ -1,10 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v9.1 (本地后端驱动 + 原始排版)
+ * 海绵小站前端插件 - v9.2 (最终完美版 - 异步触发 + 严格排版)
  *
  * 更新说明:
- * - 采用稳定的“本地后端API”方案解决自动回帖问题。
+ * - 解决前端等待API响应超时的问题。
+ * - 采用“触发后刷新”策略，完美模拟手动成功的操作。
  * - 脚本排版和函数顺序严格遵循原始版本，便于维护。
- * - 链接和密码的提取逻辑完全保留，未做任何改动。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -16,11 +16,10 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
-const YOUR_API_ENDPOINT = "http://192.168.10.111:3000/process-thread"; 
-// 例如: "http://192.168.1.108:3000/process-thread"
+const YOUR_API_ENDPOINT = "http://YOUR_COMPUTER_IP:3000/process-thread"; 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v9.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v9.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -38,9 +37,8 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
-// 注意：下面的 reply 函数在新的逻辑中已不再被 getTracks 调用，但为保持结构完整性而保留。
 // =================================================================================
-// =================== reply (此函数已废弃) ===================
+// =================== reply (此函数已废弃) v1.0 ===================
 // =================================================================================
 async function reply(url) {
   // 此函数在新架构下已不再使用，所有逻辑均由后端处理。
@@ -94,7 +92,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (本地后端驱动版) ===================
+// =================== getTracks (最终异步触发版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -110,36 +108,49 @@ async function getTracks(ext) {
 
     // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
-      log("内容被隐藏，调用本地后端API处理...");
+      log("内容被隐藏，开始异步触发后端API...");
       
       if (YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
           $utils.toastError("请先在插件脚本中配置您电脑的IP地址！", 5000);
           return jsonify({ list: [{ title: '错误', tracks: [{ name: "前端插件未配置后端IP", pan: '', ext: {} }] }] });
       }
 
-      // 调用后端API，将所有复杂工作交给后端
-      const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
-          threadUrl: detailUrl,
-          cookie: COOKIE,
-          apiKey: SILICONFLOW_API_KEY
-      }, {
-          headers: { 'Content-Type': 'application/json' }
-      });
-
-      if (apiResponse.data && apiResponse.data.success) {
-          log("后端API处理成功！");
-          // 后端返回的数据已经是插件所需的完整格式，直接返回即可
-          return jsonify(apiResponse.data); 
-      } else {
-          const errorMessage = apiResponse.data ? apiResponse.data.message : "无法连接到本地后端。";
-          log(`后端API处理失败: ${errorMessage}`);
-          $utils.toastError(`API错误: ${errorMessage}`, 4000);
-          return jsonify({ list: [{ title: '错误', tracks: [{ name: `API错误: ${errorMessage}`, pan: '', ext: {} }] }] });
+      // ★★★ 核心逻辑：只触发，不等待 ★★★
+      try {
+        $fetch.post(YOUR_API_ENDPOINT, {
+            threadUrl: detailUrl,
+            cookie: COOKIE,
+            apiKey: SILICONFLOW_API_KEY
+        }, { headers: { 'Content-Type': 'application/json' } });
+        log("已向后端发送处理指令。");
+      } catch (e) {
+        log("忽略预期的前端请求超时错误，后端会继续执行。");
       }
+      
+      // ★★★ 核心逻辑：给后端足够的时间工作，然后刷新页面验收成果 ★★★
+      let unlocked = false;
+      for (let i = 0; i < 4; i++) {
+        await $utils.sleep(3000); 
+        log(`第 ${i + 1} 次刷新页面，检查后端工作成果...`);
+        const retryResponse = await fetchWithCookie(detailUrl);
+        data = retryResponse.data;
+        if (!data.includes("回复后")) {
+          log(`第 ${i + 1} 次刷新后成功解锁资源！`);
+          unlocked = true;
+          break;
+        } else {
+          log(`第 ${i + 1} 次刷新仍未解锁，继续等待...`);
+        }
+      }
+
+      if (!unlocked) {
+        log("多次刷新后仍未解锁，后端可能处理失败或网络延迟。");
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "自动回帖失败，请稍后重试", pan: '', ext: {} }] }] });
+      }
+      
+      $ = cheerio.load(data);
     }
 
-    // --- 如果无需回帖，则执行原始的提取逻辑 ---
-    log("无需回帖，使用原始逻辑直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -202,7 +213,7 @@ async function getTracks(ext) {
 
   } catch (e) {
     log(`getTracks错误: ${e.message}`);
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查网络和本地后端服务", pan: '', ext: {} }] }] });
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
 // =================================================================================
