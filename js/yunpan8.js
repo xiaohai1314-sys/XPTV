@@ -1,32 +1,33 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.1 + AI 验证码识别
+ * 海绵小站前端插件 - v9.3 (最终版 - 用户指导模式)
  *
  * 更新说明:
- * - 基于 v8.1 移植增强版
- * - 回帖只执行一次
- * - 增加回帖后多次刷新机制 (最多3次，每次1.5秒)，解决第一次进入时未立即解锁的问题
- * - 保留并启用 search cache
- * - 移植浏览器调试版 AI 验证码识别逻辑，用于自动回帖
+ * - 插件定位为“智能辅助工具”，为用户提供清晰的操作指引。
+ * - 检测到需要回帖时，调用后端API，并根据返回结果给用户明确提示。
+ * - 成功则提示用户手动刷新，失败则显示具体原因。
+ * - 彻底解决了前端超时和自动刷新失败的问题，用户体验清晰。
+ * - 严格保持原始脚本的排版和提取逻辑。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
-// ★★★★★【用户配置区 - Cookie & AI】 ★★★★★
+// ★★★★★【用户配置区】★★★★★
 const COOKIE = "bbs_sid=tj7uh7hde2tqsavkim15lhsuls;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
-// 如果需要AI验证码识别，则填写你的Siliconflow API Key
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
+// ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
+const YOUR_API_ENDPOINT = "http://192.168.1.2:3000/process-thread"; 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg) { try { $log(`[海绵小站 v8.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v9.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
+  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
     $utils.toastError("请先在插件脚本中配置Cookie", 3000);
     throw new Error("Cookie not configured.");
   }
@@ -38,80 +39,15 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
-// =================== 回帖逻辑（自动 + AI 验证码识别） ===================
+// =================================================================================
+// =================== reply (此函数已废弃) v1.0 ===================
+// =================================================================================
 async function reply(url) {
-  log("尝试使用Cookie自动回帖...");
-  const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-  const threadIdMatch = url.match(/thread-(\d+)/);
-  if (!threadIdMatch) return false;
-  const threadId = threadIdMatch[1];
-  const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-  const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
-
-  try {
-    // 如果配置了AI Key，则尝试使用AI识别验证码
-    if (SILICONFLOW_API_KEY) {
-      log("AI验证码识别模式启用");
-      const detailResponse = await fetchWithCookie(`${SITE_URL}/${url}`);
-      const $ = cheerio.load(detailResponse.data);
-      let captchaUrl = null;
-      const captchaImg = $('input[name="vcode"]').prev('span').find('img');
-      if (captchaImg.length) {
-        captchaUrl = captchaImg.attr('src');
-      }
-      if (captchaUrl) {
-        const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(SITE_URL + '/' + captchaUrl)}`;
-        const imgResp = await fetch(proxyUrl);
-        const blob = await imgResp.blob();
-        const base64Image = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-        log("图片转换成功，调用AI识别...");
-        const apiResp = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${SILICONFLOW_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: "Qwen/Qwen2.5-VL-72B-Instruct",
-            messages: [{
-              role: "user",
-              content: [
-                { type: "text", text: "直接返回图片中的4位字母或数字验证码 ，不要任何其他文字描述。" },
-                { type: "image_url", image_url: { url: base64Image } }
-              ]
-            }],
-            max_tokens: 10,
-          })
-        });
-        const aiData = await apiResp.json();
-        const vcode = aiData.choices[0].message.content.trim().replace(/[^a-zA-Z0-9]/g, '');
-        if (vcode) {
-          log(`AI识别验证码成功: ${vcode}`);
-          postData.vcode = vcode;
-        }
-      }
-    }
-
-    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
-    if (data.includes("您尚未登录")) {
-      log("回帖失败：Cookie已失效或不正确。");
-      $utils.toastError("Cookie已失效，请重新获取", 3000);
-      return false;
-    }
-    log("回帖成功！");
-    return true;
-  } catch (e) {
-    log(`回帖请求异常: ${e.message}`);
-    return false;
-  }
+  // 此函数在新架构下已不再使用，所有逻辑均由后端处理。
+  log("警告：reply函数被意外调用，此函数在新版中已废弃。");
+  return false;
 }
 
-// =================== 配置、首页、分类 ===================
 async function getConfig() {
   return jsonify({
     ver: 1,
@@ -128,7 +64,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http')) return path;
+  if (path.startsWith('http'  )) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -157,7 +93,9 @@ async function getCards(ext) {
   }
 }
 
-// =================== 详情页资源 ===================
+// =================================================================================
+// =================== getTracks (最终用户指导版) ===================
+// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -172,26 +110,40 @@ async function getTracks(ext) {
 
     // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
-      log("内容被隐藏，启动回帖流程...");
-      const replied = await reply(detailUrl);
-      if (replied) {
-        for (let i = 0; i < 3; i++) {
-          await $utils.sleep(1500);
-          const retryResponse = await fetchWithCookie(detailUrl);
-          data = retryResponse.data;
-          if (!data.includes("回复后")) {
-            log(`第 ${i + 1} 次刷新后成功解锁资源`);
-            break;
-          } else {
-            log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`);
-          }
+      log("内容被隐藏，调用本地后端API处理...");
+      
+      if (YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
+          $utils.toastError("请先在插件脚本中配置您电脑的IP地址！", 5000);
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: "前端插件未配置后端IP", pan: '', ext: {} }] }] });
+      }
+
+      try {
+        // ★★★ 核心逻辑：调用后端，并等待它的明确结果 ★★★
+        const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+            threadUrl: detailUrl,
+            cookie: COOKIE,
+            apiKey: SILICONFLOW_API_KEY
+        }, { headers: { 'Content-Type': 'application/json' } });
+
+        // 根据后端返回的成功或失败，给出不同提示
+        if (apiResponse.data && apiResponse.data.success) {
+            log("后端API回帖成功。");
+            $utils.toast("后端回帖成功！", 2000);
+            return jsonify({ list: [{ title: '提示', tracks: [{ name: "✅ 回帖成功，请手动刷新页面查看资源！", pan: '', ext: {} }] }] });
+        } else {
+            const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
+            log(`后端API返回失败: ${errorMessage}`);
+            return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
         }
-        $ = cheerio.load(data);
-      } else {
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
+      } catch (e) {
+        // 请求本身失败（例如连不上后端）
+        log(`无法连接到后端API: ${e.message}`);
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 无法连接后端，请检查网络和PC端服务", pan: '', ext: {} }] }] });
       }
     }
 
+    // --- 如果无需回帖，则执行原始的提取逻辑 ---
+    log("无需回帖，使用原始逻辑直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -231,7 +183,7 @@ async function getTracks(ext) {
           const found = purify(text);
           if (found) { code = found; break; }
         }
-        if (!text.includes("http") && !text.includes("/") && !text.includes(":")) {
+        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) {
           const found = purify(text);
           if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
         }
@@ -257,8 +209,9 @@ async function getTracks(ext) {
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
+// =================================================================================
 
-// =================== 搜索缓存 ===================
+// ======= search（带 cache）=======
 const searchCache = {};
 async function search(ext) {
   ext = argsify(ext);
@@ -308,6 +261,7 @@ async function search(ext) {
     });
 
     const total = cards.length;
+
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
@@ -320,7 +274,7 @@ async function search(ext) {
   }
 }
 
-// =================== 兼容入口 ===================
+// ======= 兼容入口 =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
