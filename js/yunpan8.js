@@ -14,7 +14,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;";
+const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
