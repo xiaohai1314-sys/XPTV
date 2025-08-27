@@ -7,10 +7,11 @@
  * - 回帖只执行一次，失败则中止。
  * - 保留回帖后多次刷新机制，解决解锁延迟问题。
  * - 保留并启用 search cache。
+ * - [修复] 更新了验证码图片的选择器以匹配网站最新结构。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
@@ -19,7 +20,7 @@ const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZ
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // 这是您提供的硅基流动API Key
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -58,8 +59,8 @@ async function reply(url) {
     const pageResponse = await fetchWithCookie(url);
     let $ = cheerio.load(pageResponse.data);
 
-    // 从回帖表单处找到验证码图片
-    const captchaImgTag = $('form[action*="post-create"] img[src*="vcode.htm"]');
+    // 从回帖表单处找到验证码图片 (★★★ 此处为修改点 ★★★)
+    const captchaImgTag = $('input[name="vcode"]').prev('span').find('img');
     if (captchaImgTag.length === 0) {
       log("未找到验证码图片，可能无需回帖或页面结构已变更。");
       return true; // 假设已解锁
@@ -76,7 +77,7 @@ async function reply(url) {
         {
           role: "user",
           content: [
-            { type: "text", text: "直接返回图片中的4位字母或数字验证码 ，不要任何其他文字描述。" },
+            { type: "text", text: "直接返回图片中的4位字母或数字验证码  ，不要任何其他文字描述。" },
             { type: "image_url", image_url: { url: captchaUrl } }
           ]
         }
@@ -170,7 +171,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http' )) return path;
+  if (path.startsWith('http'  )) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -278,7 +279,7 @@ async function getTracks(ext) {
           const found = purify(text);
           if (found) { code = found; break; }
         }
-        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) {
+        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) {
           const found = purify(text);
           if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
         }
