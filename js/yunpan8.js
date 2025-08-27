@@ -16,7 +16,7 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
-const YOUR_API_ENDPOINT = "http://YOUR_COMPUTER_IP:3000/process-thread"; 
+const YOUR_API_ENDPOINT = "http://192.168.10.111:3000/process-thread"; 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 function log(msg  ) { try { $log(`[海绵小站 v9.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.2] ${msg}`); } }
