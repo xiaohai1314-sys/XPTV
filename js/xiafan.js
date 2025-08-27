@@ -1,13 +1,13 @@
 /**
- * HDHive 影视资料库 - App插件脚本 (Server Action 直连版 V2.0 - UI调试版)
+ * HDHive 影视资料库 - App插件脚本 (Server Action 直连版 V2.1 - 最终兼容版)
  * 
  * 版本说明:
  * - 【最终架构】为 HDHive.com 量身打造，完全基于API和Server Action交互，告别HTML解析。
  * - 【精准实现】所有功能（分类、详情、搜索）均通过调用官方接口实现，速度快、数据准、稳定性高。
- * - 【核心详情】详情页采用“两步走”策略：先通过主API获取数字ID，再调用Server Action获取资源，并严格筛选四种指定网盘。
- * - 【缓存优化】完美集成了高级搜索缓存机制，切换关键词自动刷新，重复搜索和翻页实现秒开，体验流畅。
+ * - 【核心详情】详情页采用“两步走”策略：先通过主API获取数字ID，再调用Server Action获取资源。
+ * - 【缓存优化】集成了高级搜索缓存机制，体验流畅。
+ * - 【兼容性修复】移除了对 'URL' 对象的依赖，改为手动拼接URL字符串，以兼容老旧或不标准的App运行环境。
  * - 【配置核心】请务必在下方的【用户配置区】填入您自己的有效Cookie。
- * - 【调试增强】分类页加载失败时，会将错误信息显示为卡片，方便在无日志环境下排查问题。
  */
 
 // --- 配置区 ---
@@ -23,8 +23,8 @@ const COOKIE = 'csrf_access_token=bad5d5c0-6da7-4a22-a591-b332afd1b767;token=eyJ
 
 // --- 核心辅助函数 ---
 function log(msg ) { 
-    try { $log(`[HDHive 插件 V2.0] ${msg}`); } 
-    catch (_) { console.log(`[HDHive 插件 V2.0] ${msg}`); } 
+    try { $log(`[HDHive 插件 V2.1] ${msg}`); } 
+    catch (_) { console.log(`[HDHive 插件 V2.1] ${msg}`); } 
 }
 function argsify(ext) { 
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } 
@@ -36,35 +36,39 @@ function getTokenFromCookie(cookie, key) {
     return match ? match[1] : '';
 }
 
-// --- 网络请求 ---
+// --- 网络请求 (已修复兼容性问题) ---
 async function fetchApi(method, url, params = {}, body = null, additionalHeaders = {}) {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_HERE")) {
-        // $utils.toastError("请先在插件脚本中配置Cookie", 3000); // 在无日志环境下，错误会通过getCards返回
         throw new Error("Cookie not configured. 请在脚本中配置Cookie。");
     }
-    const finalUrl = new URL(url);
-    if (method === 'GET') {
-        Object.keys(params).forEach(key => finalUrl.searchParams.append(key, params[key]));
+
+    let finalUrl = url;
+    if (method === 'GET' && Object.keys(params).length > 0) {
+        const queryString = Object.keys(params)
+            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+            .join('&');
+        finalUrl += `?${queryString}`;
     }
+
     const csrfToken = getTokenFromCookie(COOKIE, 'csrf_access_token');
     const authToken = getTokenFromCookie(COOKIE, 'token');
     const headers = {
         'User-Agent': UA, 'Cookie': COOKIE, 'Authorization': `Bearer ${authToken}`,
         'x-csrf-token': csrfToken, 'Content-Type': 'application/json', ...additionalHeaders
     };
-    log(`请求: ${method} ${finalUrl.toString()}`);
+    log(`请求: ${method} ${finalUrl}`);
     const options = { headers };
     if (method === 'POST') {
         options.body = JSON.stringify(body);
-        return (await $fetch.post(finalUrl.toString(), options.body, options)).data;
+        return (await $fetch.post(finalUrl, options.body, options)).data;
     }
-    return (await $fetch.get(finalUrl.toString(), options)).data;
+    return (await $fetch.get(finalUrl, options)).data;
 }
 
 // --- 核心功能函数 ---
 
 async function getConfig() {
-  log("插件初始化 (Server Action 直连版 V2.0 - UI调试版)");
+  log("插件初始化 (Server Action 直连版 V2.1)");
   return jsonify({
     ver: 1, title: 'HDHive', site: SITE_URL,
     tabs: [
@@ -92,63 +96,16 @@ function parseJsonToCards(jsonData) {
     });
 }
 
-// [MODIFIED FOR DEBUGGING]
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, type } = ext;
-  let debugStage = '1. 开始执行'; // 调试阶段标记
-
   try {
-    debugStage = '2. 准备请求API';
-    const apiUrl = `${API_BASE_URL}/media`;
-    const apiParams = { type: type, page: page, per_page: 24 };
-    
-    debugStage = '3. 正在请求API...';
-    const jsonData = await fetchApi('GET', apiUrl, apiParams);
-    
-    if (!jsonData || (!jsonData.results && !jsonData.data)) {
-        debugStage = '4. API响应成功但无数据或格式错误';
-        const responsePreview = JSON.stringify(jsonData).substring(0, 100);
-        return jsonify({
-            list: [{
-                vod_id: 'debug_info',
-                vod_name: `[调试] API响应无数据`,
-                vod_pic: FALLBACK_PIC,
-                vod_remarks: `响应预览: ${responsePreview}`
-            }]
-        });
-    }
-    
-    if (jsonData.results && jsonData.results.length === 0) {
-        debugStage = '4. API响应了空列表';
-        return jsonify({
-            list: [{
-                vod_id: 'debug_info_empty',
-                vod_name: `[调试] 列表为空`,
-                vod_pic: FALLBACK_PIC,
-                vod_remarks: `API返回了0条数据，可能是最后一页`
-            }]
-        });
-    }
-
-    debugStage = '5. 正在解析数据';
+    const jsonData = await fetchApi('GET', `${API_BASE_URL}/media`, { type: type, page: page, per_page: 24 });
     const cards = parseJsonToCards(jsonData);
-    
-    debugStage = '6. 解析完成，返回卡片';
     return jsonify({ list: cards });
-
-  } catch (e) {
-    const errorMessage = e.message || '未知错误';
-    return jsonify({
-      list: [
-        {
-          vod_id: 'error_card',
-          vod_name: `[错误] ${errorMessage}`,
-          vod_pic: FALLBACK_PIC,
-          vod_remarks: `出错阶段: ${debugStage}`
-        }
-      ]
-    });
+  } catch(e) {
+    log(`获取分类列表异常: ${e.message}`);
+    return jsonify({ list: [] });
   }
 }
 
