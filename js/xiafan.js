@@ -1,11 +1,11 @@
 /**
- * HDHive 影视资料库 - App插件脚本 (V3.0 - HTML解析版)
+ * HDHive 影视资料库 - App插件脚本 (V3.1 - 最终稳定版)
  * 
  * 版本说明:
  * - 【全新架构】根据2025年后的网站更新，分类页不再请求API，改为直接请求HTML页面并解析内嵌数据。
  * - 【精准分类】分别从 /movie 和 /tv 路径获取电影和剧集数据，移除已失效的音乐分类。
+ * - 【健壮的网络请求】重构了fetchApi函数，使其能极其稳定地处理各种不规范的App网络请求返回值，解决了'html.match'的错误。
  * - 【保留核心】详情页和搜索功能逻辑暂时保留，继续使用API交互。
- * - 【兼容性】所有代码均考虑了老旧App运行环境的兼容性。
  * - 【配置核心】请务必在下方的【用户配置区】填入您自己的有效Cookie。
  */
 
@@ -22,8 +22,8 @@ const COOKIE = 'csrf_access_token=bad5d5c0-6da7-4a22-a591-b332afd1b767;token=eyJ
 
 // --- 核心辅助函数 ---
 function log(msg ) { 
-    try { $log(`[HDHive 插件 V3.0] ${msg}`); } 
-    catch (_) { console.log(`[HDHive 插件 V3.0] ${msg}`); } 
+    try { $log(`[HDHive 插件 V3.1] ${msg}`); } 
+    catch (_) { console.log(`[HDHive 插件 V3.1] ${msg}`); } 
 }
 function argsify(ext) { 
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } 
@@ -35,7 +35,7 @@ function getTokenFromCookie(cookie, key) {
     return match ? match[1] : '';
 }
 
-// --- 网络请求 (现在能处理JSON和TEXT两种响应) ---
+// [REBUILT] 全新重构的、极其健壮的网络请求函数
 async function fetchApi(method, url, params = {}, body = null, additionalHeaders = {}, responseType = 'json') {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_HERE")) {
         throw new Error("Cookie not configured. 请在脚本中配置Cookie。");
@@ -68,16 +68,24 @@ async function fetchApi(method, url, params = {}, body = null, additionalHeaders
         response = await $fetch.get(finalUrl, options);
     }
 
-    if (responseType === 'text') {
-        return response.text; // 返回HTML文本
+    // --- 核心修复逻辑 ---
+    if (!response) {
+        throw new Error("网络请求失败，App返回了空响应(undefined)。");
     }
-    return response.data; // 返回JSON数据
+
+    if (responseType === 'text') {
+        // 优先尝试 .text，如果不行，就认为 response 本身就是文本
+        return typeof response.text === 'string' ? response.text : response;
+    } else { // responseType === 'json'
+        // 优先尝试 .data，如果不行，就认为 response 本身就是JSON对象
+        return typeof response.data === 'object' ? response.data : response;
+    }
 }
 
 // --- 核心功能函数 ---
 
 async function getConfig() {
-  log("插件初始化 (V3.0 - HTML解析版)");
+  log("插件初始化 (V3.1 - 最终稳定版)");
   return jsonify({
     ver: 1, title: 'HDHive', site: SITE_URL,
     tabs: [
@@ -88,7 +96,6 @@ async function getConfig() {
 }
 
 function parseJsonToCards(jsonData) {
-    // 这个函数现在被两个地方调用，需要兼容两种数据结构
     const items = jsonData.results || (jsonData.data ? jsonData.data.data : []);
     if (!items || !Array.isArray(items)) return [];
     
@@ -105,39 +112,36 @@ function parseJsonToCards(jsonData) {
     });
 }
 
-// [REBUILT] 全新重构的 getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, type } = ext;
   try {
-    // 1. 根据类型确定请求的URL，并附带翻页参数
     const url = `${SITE_URL}/${type}`;
     const params = { page: page };
     
-    // 2. 请求HTML页面，明确要求返回文本
     const html = await fetchApi('GET', url, params, null, {}, 'text');
     
-    // 3. 从HTML中提取内嵌的JSON数据
-    // 通常数据会藏在 <script> 标签里，格式类似: <script id="__NEXT_DATA__" type="application/json">...</script>
+    // 增加一个检查，确保html是字符串
+    if (typeof html !== 'string') {
+        throw new Error(`请求返回的不是HTML文本，而是 ${typeof html} 类型。`);
+    }
+
     const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
     if (!match || !match[1]) {
         throw new Error("在HTML中未找到 __NEXT_DATA__ 数据岛。");
     }
     
     const nextData = JSON.parse(match[1]);
-    // 根据经验，真实数据通常在 props.pageProps 下
     const pageData = nextData.props.pageProps.data;
     if (!pageData) {
         throw new Error("在 __NEXT_DATA__ 中未找到 pageProps.data。");
     }
 
-    // 4. 使用旧的解析函数处理提取出的数据
     const cards = parseJsonToCards({ data: pageData });
     return jsonify({ list: cards });
 
   } catch(e) {
     log(`获取分类列表异常: ${e.message}`);
-    // 如果失败，返回一个包含错误信息的卡片用于调试
     return jsonify({ list: [{
         vod_id: 'error',
         vod_name: `[错误] ${e.message}`,
