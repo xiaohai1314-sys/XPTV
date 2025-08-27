@@ -1,12 +1,12 @@
 /**
- * HDHive 影视资料库 - App插件脚本 (Server Action 直连版 V2.2 - 深度调试版)
+ * HDHive 影视资料库 - App插件脚本 (Server Action 直连版 V2.3 - 极限调试版)
  * 
  * 版本说明:
  * - 【最终架构】为 HDHive.com 量身打造，完全基于API和Server Action交互，告别HTML解析。
  * - 【精准实现】所有功能（分类、详情、搜索）均通过调用官方接口实现，速度快、数据准、稳定性高。
  * - 【核心详情】详情页采用“两步走”策略：先通过主API获取数字ID，再调用Server Action获取资源。
  * - 【缓存优化】集成了高级搜索缓存机制，体验流畅。
- * - 【深度调试】当加载失败时，会将完整的错误对象信息显示为卡片，用于在无日志环境下进行最终诊断。
+ * - 【极限调试】针对不显示备注的App环境，将所有调试信息（阶段、响应预览）合并到卡片标题中显示。
  * - 【配置核心】请务必在下方的【用户配置区】填入您自己的有效Cookie。
  */
 
@@ -23,8 +23,8 @@ const COOKIE = 'csrf_access_token=bad5d5c0-6da7-4a22-a591-b332afd1b767;token=eyJ
 
 // --- 核心辅助函数 ---
 function log(msg ) { 
-    try { $log(`[HDHive 插件 V2.2] ${msg}`); } 
-    catch (_) { console.log(`[HDHive 插件 V2.2] ${msg}`); } 
+    try { $log(`[HDHive 插件 V2.3] ${msg}`); } 
+    catch (_) { console.log(`[HDHive 插件 V2.3] ${msg}`); } 
 }
 function argsify(ext) { 
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } 
@@ -68,7 +68,7 @@ async function fetchApi(method, url, params = {}, body = null, additionalHeaders
 // --- 核心功能函数 ---
 
 async function getConfig() {
-  log("插件初始化 (Server Action 直连版 V2.2 - 深度调试版)");
+  log("插件初始化 (Server Action 直连版 V2.3 - 极限调试版)");
   return jsonify({
     ver: 1, title: 'HDHive', site: SITE_URL,
     tabs: [
@@ -96,61 +96,60 @@ function parseJsonToCards(jsonData) {
     });
 }
 
-// [MODIFIED FOR DEEP DEBUGGING]
+// [MODIFIED FOR EXTREME DEBUGGING]
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, type } = ext;
-  let debugStage = '1. 开始执行';
+  let debugStage = '1.开始';
 
   try {
-    debugStage = '2. 准备请求API';
+    debugStage = '2.请求准备';
     const apiUrl = `${API_BASE_URL}/media`;
     const apiParams = { type: type, page: page, per_page: 24 };
     
-    debugStage = '3. 正在请求API...';
+    debugStage = '3.请求中';
     const jsonData = await fetchApi('GET', apiUrl, apiParams);
     
     if (!jsonData || (!jsonData.results && !jsonData.data)) {
-        debugStage = '4. API响应成功但无数据或格式错误';
-        const responsePreview = JSON.stringify(jsonData).substring(0, 100);
+        debugStage = '4.响应无数据';
+        const responsePreview = JSON.stringify(jsonData);
         return jsonify({
             list: [{
                 vod_id: 'debug_info',
-                vod_name: `[调试] API响应无数据`,
+                vod_name: `[调试] 阶段:${debugStage} 响应:${responsePreview}`, // 所有信息合并到标题
                 vod_pic: FALLBACK_PIC,
-                vod_remarks: `响应预览: ${responsePreview}`
+                vod_remarks: '' // 既然不显示，就留空
             }]
         });
     }
     
-    if (jsonData.results && jsonData.results.length === 0) {
-        debugStage = '4. API响应了空列表';
+    if ((jsonData.results && jsonData.results.length === 0) || (jsonData.data && jsonData.data.length === 0)) {
+        debugStage = '4.响应列表为空';
         return jsonify({
             list: [{
                 vod_id: 'debug_info_empty',
-                vod_name: `[调试] 列表为空`,
+                vod_name: `[调试] 列表为空，可能是最后一页`,
                 vod_pic: FALLBACK_PIC,
-                vod_remarks: `API返回了0条数据，可能是最后一页`
+                vod_remarks: ''
             }]
         });
     }
 
-    debugStage = '5. 正在解析数据';
+    debugStage = '5.解析';
     const cards = parseJsonToCards(jsonData);
     
-    debugStage = '6. 解析完成，返回卡片';
+    debugStage = '6.完成';
     return jsonify({ list: cards });
 
   } catch (e) {
-    // 关键改动：将完整的错误对象 e 转换成字符串
     const fullErrorString = JSON.stringify(e, Object.getOwnPropertyNames(e));
     return jsonify({
       list: [
         {
           vod_id: 'error_card',
-          vod_name: `[完整错误] ${fullErrorString}`, // 卡片标题显示完整的错误信息
+          vod_name: `[错误] 阶段:${debugStage} 信息:${fullErrorString}`, // 所有信息合并到标题
           vod_pic: FALLBACK_PIC,
-          vod_remarks: `出错阶段: ${debugStage}` // 卡片备注显示出错的环节
+          vod_remarks: ''
         }
       ]
     });
