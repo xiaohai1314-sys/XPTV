@@ -1,13 +1,11 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.2 (AI验证码 + 单次回帖 + 多次刷新)
+ * 海绵小站前端插件 - 移植增强版 v8.3 (Canvas移植最终版)
  *
  * 更新说明:
- * - 基于 v8.1 移植增强版
- * - 集成硅基流动(SiliconFlow) API，实现AI自动识别和填写验证码。
- * - 回帖只执行一次，失败则中止。
- * - 保留回帖后多次刷新机制，解决解锁延迟问题。
- * - 保留并启用 search cache。
- * - [修复] 更新了验证码图片的选择器以匹配网站最新结构。
+ * - 基于 v8.2 修复版，将浏览器验证成功的Canvas逻辑移植回App插件。
+ * - 修复了因网站防盗链或URL空格，导致API无法直接访问验证码图片的问题。
+ * - 新流程：获取验证码URL -> 下载图片数据 -> 转为Base64 -> 提交给AI识别。
+ * - 此版本解决了图片获取的根本问题，稳定性更高。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -16,14 +14,27 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;"; // ★★★ 请务必填入您自己的有效Cookie ★★★
-const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // 这是您提供的硅基流动API Key
+const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;"; // ★★★ 已填入您提供的Cookie ★★★
+const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // ★★★ 已填入您提供的API Key ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v8.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.2] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v8.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// 新增辅助函数：将图片数据转为Base64
+async function imageToBase64(url) {
+    log(`正在下载图片: ${url}`);
+    const response = await fetchWithCookie(url, { responseType: 'arraybuffer' });
+    if (!response.data) {
+        throw new Error("下载图片失败，未收到数据。");
+    }
+    const base64 = $utils.toBase64(response.data);
+    // 根据图片类型添加前缀，大多数验证码是png或jpeg
+    const mimeType = url.endsWith('.png') ? 'image/png' : 'image/jpeg'; 
+    return `data:${mimeType};base64,${base64}`;
+}
 
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
@@ -39,12 +50,11 @@ async function fetchWithCookie(url, options = {}) {
 }
 
 // =================================================================================
-// =================== reply (集成硅基流动API识别验证码) v1.0 ===================
+// =================== reply (Base64移植最终版) v2.0 ===================
 // =================================================================================
 async function reply(url) {
   log("尝试使用Cookie和AI自动回帖...");
 
-  // 检查核心配置
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
     $utils.toastError("请先在插件脚本中配置Cookie", 3000);
     throw new Error("Cookie not configured.");
@@ -59,17 +69,20 @@ async function reply(url) {
     const pageResponse = await fetchWithCookie(url);
     let $ = cheerio.load(pageResponse.data);
 
-    // 从回帖表单处找到验证码图片 (★★★ 此处为修改点 ★★★)
     const captchaImgTag = $('input[name="vcode"]').prev('span').find('img');
     if (captchaImgTag.length === 0) {
       log("未找到验证码图片，可能无需回帖或页面结构已变更。");
-      return true; // 假设已解锁
+      return true;
     }
     const captchaImgSrc = captchaImgTag.attr('src');
     const captchaUrl = getCorrectPicUrl(captchaImgSrc);
-    log(`已找到验证码图片: ${captchaUrl}`);
+    log(`已找到验证码图片URL: ${captchaUrl}`);
 
-    // --- 第2步: 调用硅基流动API识别验证码 ---
+    // --- 第2步: 下载图片并转为Base64 ---
+    const base64Image = await imageToBase64(captchaUrl);
+    log("图片已成功转换为Base64。");
+
+    // --- 第3步: 调用硅基流动API识别验证码 ---
     log("正在调用硅基流动API识别验证码...");
     const apiResponse = await $fetch.post("https://api.siliconflow.cn/v1/chat/completions", {
       model: "Qwen/Qwen2.5-VL-72B-Instruct",
@@ -78,7 +91,7 @@ async function reply(url) {
           role: "user",
           content: [
             { type: "text", text: "直接返回图片中的4位字母或数字验证码  ，不要任何其他文字描述。" },
-            { type: "image_url", image_url: { url: captchaUrl } }
+            { type: "image_url", image_url: { url: base64Image } } // ★★★ 核心修改：使用Base64数据 ★★★
           ]
         }
       ],
@@ -90,18 +103,15 @@ async function reply(url) {
       }
     });
 
-    // 从API响应中提取验证码文本
     let vcode = apiResponse.data.choices[0].message.content.trim().replace(/[^a-zA-Z0-9]/g, '');
-    if (!vcode || vcode.length < 4) { // 放宽长度限制，防止API返回不带空格的短码
-        log(`API返回内容可能不完整: "${apiResponse.data.choices[0].message.content}"，提取为: "${vcode}"`);
-    }
     if (!vcode) {
         $utils.toastError("验证码识别失败，API未返回有效字符", 3000);
+        log(`API返回内容可能不完整: "${apiResponse.data.choices[0].message.content}"`);
         return false;
     }
     log(`AI识别结果: ${vcode}`);
 
-    // --- 第3步: 构造并提交回帖表单 ---
+    // --- 第4步: 构造并提交回帖表单 ---
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
     const threadIdMatch = url.match(/thread-(\d+)/);
     if (!threadIdMatch) return false;
@@ -113,7 +123,7 @@ async function reply(url) {
       return_html: 1,
       quotepid: 0,
       message: getRandomText(replies),
-      vcode: vcode, // 使用识别出的验证码
+      vcode: vcode,
       quick_reply_message: 0
     };
 
@@ -124,7 +134,7 @@ async function reply(url) {
       headers: { 'Referer': url }
     });
 
-    // --- 第4步: 检查回帖结果 ---
+    // --- 第5步: 检查回帖结果 ---
     if (postResult.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
       $utils.toastError("Cookie已失效，请重新获取", 3000);
@@ -135,14 +145,12 @@ async function reply(url) {
       $utils.toastError("验证码错误，自动重试可能无用", 3000);
       return false;
     }
-    // 检查是否包含“成功”或“主题”等关键词来判断是否成功跳转
     if (postResult.includes("回帖成功") || postResult.includes("<title>主题")) {
         log("回帖成功！");
         return true;
     }
 
     log("回帖请求已发送，但未识别到明确的成功或失败信息。");
-    // 即使没有明确成功提示，也可能已经成功，所以返回true让后续流程继续尝试刷新
     return true;
 
   } catch (e) {
@@ -215,12 +223,10 @@ async function getTracks(ext) {
     let { data } = await fetchWithCookie(detailUrl);
     let $ = cheerio.load(data);
 
-    // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
-      const replied = await reply(detailUrl); // 调用我们新的AI回帖函数
+      const replied = await reply(detailUrl);
       if (replied) {
-        // 单次回帖，多次刷新
         for (let i = 0; i < 3; i++) {
           await $utils.sleep(1500);
           log(`回帖后进行第 ${i + 1} 次刷新...`);
@@ -315,7 +321,6 @@ async function search(ext) {
   const page = ext.page || 1;
   if (!text) return jsonify({ list: [] });
 
-  // 命中不同关键词时重置缓存
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -323,12 +328,10 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
-  // 命中页缓存
   if (searchCache.data && searchCache.data[page - 1]) {
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
-  // 页越界保护
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
@@ -353,7 +356,6 @@ async function search(ext) {
       });
     });
 
-    // 计算分页总数
     let pagecount = 0;
     $('ul.pagination a.page-link').each((_, link) => {
       const p = parseInt($(link).text().trim());
@@ -362,7 +364,6 @@ async function search(ext) {
 
     const total = cards.length;
 
-    // 写入缓存
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
