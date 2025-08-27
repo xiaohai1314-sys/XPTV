@@ -1,11 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.5 (最终稳定版)
+ * 海绵小站前端插件 - 移植增强版 v8.5-final (纯前端最终尝试版)
  *
  * 更新说明:
- * - 彻底解决App环境兼容性问题，不再依赖App环境下载和转换图片。
- * - 采用外部公共服务将验证码URL直接转换为Base64数据，稳定性极高。
- * - App插件只负责发送和接收文本信息，避免了所有不稳定的二进制操作。
- * - 这应该是解决此问题的最终方案。
+ * - 严格遵循原始脚本的提取逻辑，不做任何改动。
+ * - 自动回帖功能采用“外部服务转换Base64”的方案，这是纯前端最可靠的尝试。
+ * - 如果此版本仍然因环境超时而失败，则证明纯前端方案确实不可行。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -18,25 +17,10 @@ const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=5jxAYKEsRRLmEOSTucp
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v8.5] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.5] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v8.5-final] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.5-final] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-// 使用外部服务将图片URL转为Base64
-async function imageToBase64ViaService(url) {
-    log(`通过外部服务转换图片: ${url}`);
-    const serviceUrl = `https://tools.m7.workers.dev/url-to-base64?url=${encodeURIComponent(url )}`;
-    
-    // 这里使用$fetch，因为它只处理文本JSON，这是可靠的
-    const response = await $fetch.get(serviceUrl); 
-
-    if (response.data && response.data.base64) {
-        return response.data.base64;
-    } else {
-        throw new Error("外部Base64转换服务失败或返回无效数据。");
-    }
-}
 
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
@@ -51,8 +35,21 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
+// 使用外部服务将图片URL转为Base64
+async function imageToBase64ViaService(url) {
+    log(`通过外部服务转换图片: ${url}`);
+    const serviceUrl = `https://tools.m7.workers.dev/url-to-base64?url=${encodeURIComponent(url )}`;
+    const response = await $fetch.get(serviceUrl); 
+
+    if (response.data && response.data.base64) {
+        return response.data.base64;
+    } else {
+        throw new Error("外部Base64转换服务失败。");
+    }
+}
+
 // =================================================================================
-// =================== reply (外部服务最终版) v3.0 ===================
+// =================== reply (纯前端外部服务版) ===================
 // =================================================================================
 async function reply(url) {
   log("尝试使用Cookie和AI自动回帖...");
@@ -79,7 +76,6 @@ async function reply(url) {
     const captchaUrl = getCorrectPicUrl(captchaImgSrc);
     log(`已找到验证码图片URL: ${captchaUrl}`);
 
-    // ★★★ 核心修改：调用外部服务获取Base64 ★★★
     const base64Image = await imageToBase64ViaService(captchaUrl);
     log("已通过外部服务成功获取Base64数据。");
 
@@ -106,7 +102,6 @@ async function reply(url) {
     let vcode = apiResponse.data.choices[0].message.content.trim().replace(/[^a-zA-Z0-9]/g, '');
     if (!vcode) {
         $utils.toastError("验证码识别失败，API未返回有效字符", 3000);
-        log(`API返回内容可能不完整: "${apiResponse.data.choices[0].message.content}"`);
         return false;
     }
     log(`AI识别结果: ${vcode}`);
@@ -161,7 +156,6 @@ async function reply(url) {
   }
 }
 
-// --- 其他函数保持不变 ---
 async function getConfig() {
   return jsonify({
     ver: 1,
@@ -207,6 +201,10 @@ async function getCards(ext) {
   }
 }
 
+// =================================================================================
+// =================== getTracks (单次回帖 + 多次刷新版) ===================
+// ★★★ 此函数为原始版本，完全保留了您最初的提取逻辑 ★★★
+// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -219,10 +217,12 @@ async function getTracks(ext) {
     let { data } = await fetchWithCookie(detailUrl);
     let $ = cheerio.load(data);
 
+    // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
       log("内容被隐藏，启动回帖流程...");
-      const replied = await reply(detailUrl);
+      const replied = await reply(detailUrl); // 调用我们新的AI回帖函数
       if (replied) {
+        // 单次回帖，多次刷新
         for (let i = 0; i < 3; i++) {
           await $utils.sleep(1500);
           log(`回帖后进行第 ${i + 1} 次刷新...`);
@@ -307,7 +307,9 @@ async function getTracks(ext) {
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
+// =================================================================================
 
+// ======= search（带 cache）=======
 const searchCache = {};
 async function search(ext) {
   ext = argsify(ext);
@@ -370,6 +372,7 @@ async function search(ext) {
   }
 }
 
+// ======= 兼容入口 =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
