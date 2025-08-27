@@ -1,12 +1,11 @@
 /**
- * HDHive 影视资料库 - App插件脚本 (Server Action 直连版 V2.3 - 极限调试版)
+ * HDHive 影视资料库 - App插件脚本 (V3.0 - HTML解析版)
  * 
  * 版本说明:
- * - 【最终架构】为 HDHive.com 量身打造，完全基于API和Server Action交互，告别HTML解析。
- * - 【精准实现】所有功能（分类、详情、搜索）均通过调用官方接口实现，速度快、数据准、稳定性高。
- * - 【核心详情】详情页采用“两步走”策略：先通过主API获取数字ID，再调用Server Action获取资源。
- * - 【缓存优化】集成了高级搜索缓存机制，体验流畅。
- * - 【极限调试】针对不显示备注的App环境，将所有调试信息（阶段、响应预览）合并到卡片标题中显示。
+ * - 【全新架构】根据2025年后的网站更新，分类页不再请求API，改为直接请求HTML页面并解析内嵌数据。
+ * - 【精准分类】分别从 /movie 和 /tv 路径获取电影和剧集数据，移除已失效的音乐分类。
+ * - 【保留核心】详情页和搜索功能逻辑暂时保留，继续使用API交互。
+ * - 【兼容性】所有代码均考虑了老旧App运行环境的兼容性。
  * - 【配置核心】请务必在下方的【用户配置区】填入您自己的有效Cookie。
  */
 
@@ -23,8 +22,8 @@ const COOKIE = 'csrf_access_token=bad5d5c0-6da7-4a22-a591-b332afd1b767;token=eyJ
 
 // --- 核心辅助函数 ---
 function log(msg ) { 
-    try { $log(`[HDHive 插件 V2.3] ${msg}`); } 
-    catch (_) { console.log(`[HDHive 插件 V2.3] ${msg}`); } 
+    try { $log(`[HDHive 插件 V3.0] ${msg}`); } 
+    catch (_) { console.log(`[HDHive 插件 V3.0] ${msg}`); } 
 }
 function argsify(ext) { 
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } 
@@ -36,8 +35,8 @@ function getTokenFromCookie(cookie, key) {
     return match ? match[1] : '';
 }
 
-// --- 网络请求 (使用兼容性字符串拼接) ---
-async function fetchApi(method, url, params = {}, body = null, additionalHeaders = {}) {
+// --- 网络请求 (现在能处理JSON和TEXT两种响应) ---
+async function fetchApi(method, url, params = {}, body = null, additionalHeaders = {}, responseType = 'json') {
     if (!COOKIE || COOKIE.includes("YOUR_COOKIE_HERE")) {
         throw new Error("Cookie not configured. 请在脚本中配置Cookie。");
     }
@@ -54,33 +53,43 @@ async function fetchApi(method, url, params = {}, body = null, additionalHeaders
     const authToken = getTokenFromCookie(COOKIE, 'token');
     const headers = {
         'User-Agent': UA, 'Cookie': COOKIE, 'Authorization': `Bearer ${authToken}`,
-        'x-csrf-token': csrfToken, 'Content-Type': 'application/json', ...additionalHeaders
+        'x-csrf-token': csrfToken, ...additionalHeaders
     };
     log(`请求: ${method} ${finalUrl}`);
+    
     const options = { headers };
+    let response;
+
     if (method === 'POST') {
+        headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify(body);
-        return (await $fetch.post(finalUrl, options.body, options)).data;
+        response = await $fetch.post(finalUrl, options.body, options);
+    } else {
+        response = await $fetch.get(finalUrl, options);
     }
-    return (await $fetch.get(finalUrl, options)).data;
+
+    if (responseType === 'text') {
+        return response.text; // 返回HTML文本
+    }
+    return response.data; // 返回JSON数据
 }
 
 // --- 核心功能函数 ---
 
 async function getConfig() {
-  log("插件初始化 (Server Action 直连版 V2.3 - 极限调试版)");
+  log("插件初始化 (V3.0 - HTML解析版)");
   return jsonify({
     ver: 1, title: 'HDHive', site: SITE_URL,
     tabs: [
       { name: '电影', ext: { type: 'movie' } },
       { name: '剧集', ext: { type: 'tv' } },
-      { name: '音乐', ext: { type: 'music' } },
     ],
   });
 }
 
 function parseJsonToCards(jsonData) {
-    const items = jsonData.results || (jsonData.data ? jsonData.data : []);
+    // 这个函数现在被两个地方调用，需要兼容两种数据结构
+    const items = jsonData.results || (jsonData.data ? jsonData.data.data : []);
     if (!items || !Array.isArray(items)) return [];
     
     return items.map(item => {
@@ -96,63 +105,45 @@ function parseJsonToCards(jsonData) {
     });
 }
 
-// [MODIFIED FOR EXTREME DEBUGGING]
+// [REBUILT] 全新重构的 getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
   const { page = 1, type } = ext;
-  let debugStage = '1.开始';
-
   try {
-    debugStage = '2.请求准备';
-    const apiUrl = `${API_BASE_URL}/media`;
-    const apiParams = { type: type, page: page, per_page: 24 };
+    // 1. 根据类型确定请求的URL，并附带翻页参数
+    const url = `${SITE_URL}/${type}`;
+    const params = { page: page };
     
-    debugStage = '3.请求中';
-    const jsonData = await fetchApi('GET', apiUrl, apiParams);
+    // 2. 请求HTML页面，明确要求返回文本
+    const html = await fetchApi('GET', url, params, null, {}, 'text');
     
-    if (!jsonData || (!jsonData.results && !jsonData.data)) {
-        debugStage = '4.响应无数据';
-        const responsePreview = JSON.stringify(jsonData);
-        return jsonify({
-            list: [{
-                vod_id: 'debug_info',
-                vod_name: `[调试] 阶段:${debugStage} 响应:${responsePreview}`, // 所有信息合并到标题
-                vod_pic: FALLBACK_PIC,
-                vod_remarks: '' // 既然不显示，就留空
-            }]
-        });
+    // 3. 从HTML中提取内嵌的JSON数据
+    // 通常数据会藏在 <script> 标签里，格式类似: <script id="__NEXT_DATA__" type="application/json">...</script>
+    const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+    if (!match || !match[1]) {
+        throw new Error("在HTML中未找到 __NEXT_DATA__ 数据岛。");
     }
     
-    if ((jsonData.results && jsonData.results.length === 0) || (jsonData.data && jsonData.data.length === 0)) {
-        debugStage = '4.响应列表为空';
-        return jsonify({
-            list: [{
-                vod_id: 'debug_info_empty',
-                vod_name: `[调试] 列表为空，可能是最后一页`,
-                vod_pic: FALLBACK_PIC,
-                vod_remarks: ''
-            }]
-        });
+    const nextData = JSON.parse(match[1]);
+    // 根据经验，真实数据通常在 props.pageProps 下
+    const pageData = nextData.props.pageProps.data;
+    if (!pageData) {
+        throw new Error("在 __NEXT_DATA__ 中未找到 pageProps.data。");
     }
 
-    debugStage = '5.解析';
-    const cards = parseJsonToCards(jsonData);
-    
-    debugStage = '6.完成';
+    // 4. 使用旧的解析函数处理提取出的数据
+    const cards = parseJsonToCards({ data: pageData });
     return jsonify({ list: cards });
 
-  } catch (e) {
-    const fullErrorString = JSON.stringify(e, Object.getOwnPropertyNames(e));
-    return jsonify({
-      list: [
-        {
-          vod_id: 'error_card',
-          vod_name: `[错误] 阶段:${debugStage} 信息:${fullErrorString}`, // 所有信息合并到标题
-          vod_pic: FALLBACK_PIC,
-          vod_remarks: ''
-        }
-      ]
-    });
+  } catch(e) {
+    log(`获取分类列表异常: ${e.message}`);
+    // 如果失败，返回一个包含错误信息的卡片用于调试
+    return jsonify({ list: [{
+        vod_id: 'error',
+        vod_name: `[错误] ${e.message}`,
+        vod_pic: FALLBACK_PIC,
+        vod_remarks: '请检查脚本或网络'
+    }] });
   }
 }
 
