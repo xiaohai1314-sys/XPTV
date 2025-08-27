@@ -1,11 +1,12 @@
 /**
- * 海绵小站前端插件 - v9.4.1 (最终版 - 错误处理修正)
+ * 海绵小站前端插件 - v9.3 (最终版 - 用户指导模式)
  *
  * 更新说明:
- * - 基于被验证可行的 v9.4 版本。
- * - 完全保留用户原始的、正确的链接和密码提取逻辑。
- * - 仅修正当无法连接后端时，错误提示显示为 "undefined" 的小问题。
- * - 这是最稳定、最忠于原始逻辑的版本。
+ * - 插件定位为“智能辅助工具”，为用户提供清晰的操作指引。
+ * - 检测到需要回帖时，调用后端API，并根据返回结果给用户明确提示。
+ * - 成功则提示用户手动刷新，失败则显示具体原因。
+ * - 彻底解决了前端超时和自动刷新失败的问题，用户体验清晰。
+ * - 严格保持原始脚本的排版和提取逻辑。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -20,7 +21,7 @@ const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio
 const YOUR_API_ENDPOINT = "http://192.168.10.111:3000/process-thread"; 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v9.4.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.4.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v9.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -93,7 +94,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (v9.4 错误处理修正版) ===================
+// =================== getTracks (最终用户指导版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -112,41 +113,36 @@ async function getTracks(ext) {
       log("内容被隐藏，调用本地后端API处理...");
       
       if (YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
+          $utils.toastError("请先在插件脚本中配置您电脑的IP地址！", 5000);
           return jsonify({ list: [{ title: '提示', tracks: [{ name: "前端插件未配置后端IP", pan: '', ext: {} }] }] });
       }
 
       try {
+        // ★★★ 核心逻辑：调用后端，并等待它的明确结果 ★★★
         const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
             threadUrl: detailUrl,
             cookie: COOKIE,
             apiKey: SILICONFLOW_API_KEY
         }, { headers: { 'Content-Type': 'application/json' } });
 
-        const responseText = apiResponse.data;
-        log(`后端返回原始文本: ${responseText}`);
-
-        if (typeof responseText === 'string' && responseText.startsWith("SUCCESS")) {
+        // 根据后端返回的成功或失败，给出不同提示
+        if (apiResponse.data && apiResponse.data.success) {
             log("后端API回帖成功。");
             $utils.toast("后端回帖成功！", 2000);
             return jsonify({ list: [{ title: '提示', tracks: [{ name: "✅ 回帖成功，请手动刷新页面查看资源！", pan: '', ext: {} }] }] });
         } else {
-            const errorMessage = typeof responseText === 'string' ? responseText.replace(/^ERROR: /, '') : "未知响应格式";
+            const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
             log(`后端API返回失败: ${errorMessage}`);
             return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
         }
       } catch (e) {
-        log(`无法连接到后端API: ${e}`);
-        let errorText = "请检查网络和PC端服务";
-        if (e && e.response && e.response.data) {
-            errorText = e.response.data;
-        } else if (e && e.message) {
-            errorText = e.message;
-        }
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 无法连接后端: ${errorText}`, pan: '', ext: {} }] }] });
+        // 请求本身失败（例如连不上后端）
+        log(`无法连接到后端API: ${e.message}`);
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 无法连接后端，请检查网络和PC端服务", pan: '', ext: {} }] }] });
       }
     }
 
-    // --- 如果无需回帖，则执行您原始的、正确的提取逻辑 ---
+    // --- 如果无需回帖，则执行原始的提取逻辑 ---
     log("无需回帖，使用原始逻辑直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
@@ -223,7 +219,6 @@ async function search(ext) {
   const page = ext.page || 1;
   if (!text) return jsonify({ list: [] });
 
-  // 命中不同关键词时重置缓存
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -231,12 +226,10 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
-  // 命中页缓存
   if (searchCache.data && searchCache.data[page - 1]) {
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
-  // 页越界保护
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
@@ -261,7 +254,6 @@ async function search(ext) {
       });
     });
 
-    // 计算分页总数
     let pagecount = 0;
     $('ul.pagination a.page-link').each((_, link) => {
       const p = parseInt($(link).text().trim());
@@ -270,7 +262,6 @@ async function search(ext) {
 
     const total = cards.length;
 
-    // 写入缓存
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
