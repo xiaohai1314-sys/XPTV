@@ -1,10 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.5-final (纯前端最终尝试版)
+ * 海绵小站前端插件 - 移植增强版 v9.1 (本地后端驱动 + 原始排版)
  *
  * 更新说明:
- * - 严格遵循原始脚本的提取逻辑，不做任何改动。
- * - 自动回帖功能采用“外部服务转换Base64”的方案，这是纯前端最可靠的尝试。
- * - 如果此版本仍然因环境超时而失败，则证明纯前端方案确实不可行。
+ * - 采用稳定的“本地后端API”方案解决自动回帖问题。
+ * - 脚本排版和函数顺序严格遵循原始版本，便于维护。
+ * - 链接和密码的提取逻辑完全保留，未做任何改动。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -15,9 +15,12 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 // ★★★★★【用户配置区】★★★★★
 const COOKIE = "bbs_sid=u55b2g9go9dhrv2l8jbfi4ulbu;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
+// ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
+const YOUR_API_ENDPOINT = "http://192.168.10.111:3000/process-thread"; 
+// 例如: "http://192.168.1.108:3000/process-thread"
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v8.5-final] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.5-final] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v9.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -35,125 +38,14 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
-// 使用外部服务将图片URL转为Base64
-async function imageToBase64ViaService(url) {
-    log(`通过外部服务转换图片: ${url}`);
-    const serviceUrl = `https://tools.m7.workers.dev/url-to-base64?url=${encodeURIComponent(url )}`;
-    const response = await $fetch.get(serviceUrl); 
-
-    if (response.data && response.data.base64) {
-        return response.data.base64;
-    } else {
-        throw new Error("外部Base64转换服务失败。");
-    }
-}
-
+// 注意：下面的 reply 函数在新的逻辑中已不再被 getTracks 调用，但为保持结构完整性而保留。
 // =================================================================================
-// =================== reply (纯前端外部服务版) ===================
+// =================== reply (此函数已废弃) ===================
 // =================================================================================
 async function reply(url) {
-  log("尝试使用Cookie和AI自动回帖...");
-
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
-    $utils.toastError("请先在插件脚本中配置Cookie", 3000);
-    throw new Error("Cookie not configured.");
-  }
-  if (!SILICONFLOW_API_KEY || SILICONFLOW_API_KEY.includes("YOUR_API_KEY")) {
-    $utils.toastError("请先在插件脚本中配置硅基流动API Key", 3000);
-    throw new Error("API Key not configured.");
-  }
-
-  try {
-    const pageResponse = await fetchWithCookie(url);
-    let $ = cheerio.load(pageResponse.data);
-
-    const captchaImgTag = $('input[name="vcode"]').prev('span').find('img');
-    if (captchaImgTag.length === 0) {
-      log("未找到验证码图片，可能无需回帖或页面结构已变更。");
-      return true;
-    }
-    const captchaImgSrc = captchaImgTag.attr('src');
-    const captchaUrl = getCorrectPicUrl(captchaImgSrc);
-    log(`已找到验证码图片URL: ${captchaUrl}`);
-
-    const base64Image = await imageToBase64ViaService(captchaUrl);
-    log("已通过外部服务成功获取Base64数据。");
-
-    log("正在调用硅基流动API识别验证码...");
-    const apiResponse = await $fetch.post("https://api.siliconflow.cn/v1/chat/completions", {
-      model: "Qwen/Qwen2.5-VL-72B-Instruct",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "直接返回图片中的4位字母或数字验证码  ，不要任何其他文字描述。" },
-            { type: "image_url", image_url: { url: base64Image } }
-          ]
-        }
-      ],
-      max_tokens: 10,
-    }, {
-      headers: {
-        'Authorization': `Bearer ${SILICONFLOW_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    let vcode = apiResponse.data.choices[0].message.content.trim().replace(/[^a-zA-Z0-9]/g, '');
-    if (!vcode) {
-        $utils.toastError("验证码识别失败，API未返回有效字符", 3000);
-        return false;
-    }
-    log(`AI识别结果: ${vcode}`);
-
-    const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-    const threadIdMatch = url.match(/thread-(\d+)/);
-    if (!threadIdMatch) return false;
-
-    const threadId = threadIdMatch[1];
-    const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const postData = {
-      doctype: 1,
-      return_html: 1,
-      quotepid: 0,
-      message: getRandomText(replies),
-      vcode: vcode,
-      quick_reply_message: 0
-    };
-
-    log("正在提交回帖数据...");
-    const { data: postResult } = await fetchWithCookie(postUrl, {
-      method: 'POST',
-      body: postData,
-      headers: { 'Referer': url }
-    });
-
-    if (postResult.includes("您尚未登录")) {
-      log("回帖失败：Cookie已失效或不正确。");
-      $utils.toastError("Cookie已失效，请重新获取", 3000);
-      return false;
-    }
-    if (postResult.includes("验证码不正确")) {
-      log("回帖失败：AI识别的验证码不正确。");
-      $utils.toastError("验证码错误，自动重试可能无用", 3000);
-      return false;
-    }
-    if (postResult.includes("回帖成功") || postResult.includes("<title>主题")) {
-        log("回帖成功！");
-        return true;
-    }
-
-    log("回帖请求已发送，但未识别到明确的成功或失败信息。");
-    return true;
-
-  } catch (e) {
-    log(`回帖流程发生严重错误: ${e.message}`);
-    if (e.response && e.response.data) {
-        log(`错误详情: ${JSON.stringify(e.response.data)}`);
-    }
-    $utils.toastError("回帖失败，请查看日志", 3000);
-    return false;
-  }
+  // 此函数在新架构下已不再使用，所有逻辑均由后端处理。
+  log("警告：reply函数被意外调用，此函数在新版中已废弃。");
+  return false;
 }
 
 async function getConfig() {
@@ -202,8 +94,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (单次回帖 + 多次刷新版) ===================
-// ★★★ 此函数为原始版本，完全保留了您最初的提取逻辑 ★★★
+// =================== getTracks (本地后端驱动版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -219,29 +110,36 @@ async function getTracks(ext) {
 
     // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
-      log("内容被隐藏，启动回帖流程...");
-      const replied = await reply(detailUrl); // 调用我们新的AI回帖函数
-      if (replied) {
-        // 单次回帖，多次刷新
-        for (let i = 0; i < 3; i++) {
-          await $utils.sleep(1500);
-          log(`回帖后进行第 ${i + 1} 次刷新...`);
-          const retryResponse = await fetchWithCookie(detailUrl);
-          data = retryResponse.data;
-          if (!data.includes("回复后")) {
-            log(`第 ${i + 1} 次刷新后成功解锁资源`);
-            break;
-          } else {
-            log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`);
-          }
-        }
-        $ = cheerio.load(data);
+      log("内容被隐藏，调用本地后端API处理...");
+      
+      if (YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
+          $utils.toastError("请先在插件脚本中配置您电脑的IP地址！", 5000);
+          return jsonify({ list: [{ title: '错误', tracks: [{ name: "前端插件未配置后端IP", pan: '', ext: {} }] }] });
+      }
+
+      // 调用后端API，将所有复杂工作交给后端
+      const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+          threadUrl: detailUrl,
+          cookie: COOKIE,
+          apiKey: SILICONFLOW_API_KEY
+      }, {
+          headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (apiResponse.data && apiResponse.data.success) {
+          log("后端API处理成功！");
+          // 后端返回的数据已经是插件所需的完整格式，直接返回即可
+          return jsonify(apiResponse.data); 
       } else {
-        log("回帖流程失败，无法获取资源。");
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "自动回帖失败，无法获取资源", pan: '', ext: {} }] }] });
+          const errorMessage = apiResponse.data ? apiResponse.data.message : "无法连接到本地后端。";
+          log(`后端API处理失败: ${errorMessage}`);
+          $utils.toastError(`API错误: ${errorMessage}`, 4000);
+          return jsonify({ list: [{ title: '错误', tracks: [{ name: `API错误: ${errorMessage}`, pan: '', ext: {} }] }] });
       }
     }
 
+    // --- 如果无需回帖，则执行原始的提取逻辑 ---
+    log("无需回帖，使用原始逻辑直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -304,7 +202,7 @@ async function getTracks(ext) {
 
   } catch (e) {
     log(`getTracks错误: ${e.message}`);
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查网络和本地后端服务", pan: '', ext: {} }] }] });
   }
 }
 // =================================================================================
@@ -317,6 +215,7 @@ async function search(ext) {
   const page = ext.page || 1;
   if (!text) return jsonify({ list: [] });
 
+  // 命中不同关键词时重置缓存
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -324,10 +223,12 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
+  // 命中页缓存
   if (searchCache.data && searchCache.data[page - 1]) {
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
+  // 页越界保护
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
@@ -352,6 +253,7 @@ async function search(ext) {
       });
     });
 
+    // 计算分页总数
     let pagecount = 0;
     $('ul.pagination a.page-link').each((_, link) => {
       const p = parseInt($(link).text().trim());
@@ -360,6 +262,7 @@ async function search(ext) {
 
     const total = cards.length;
 
+    // 写入缓存
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
