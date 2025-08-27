@@ -1,11 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v8.3 (Canvas移植最终版)
+ * 海绵小站前端插件 - 移植增强版 v8.4 (诊断版)
  *
  * 更新说明:
- * - 基于 v8.2 修复版，将浏览器验证成功的Canvas逻辑移植回App插件。
- * - 修复了因网站防盗链或URL空格，导致API无法直接访问验证码图片的问题。
- * - 新流程：获取验证码URL -> 下载图片数据 -> 转为Base64 -> 提交给AI识别。
- * - 此版本解决了图片获取的根本问题，稳定性更高。
+ * - 这是一个诊断版本，旨在找出App环境中图片转Base64失败的具体原因。
+ * - 在 imageToBase64 函数中添加了极其详细的步骤日志。
+ * - 请运行此脚本后，务必查看App的运行日志，找到 [海绵小站 v8.4] 的输出。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -14,27 +13,58 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;"; // ★★★ 已填入您提供的Cookie ★★★
-const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // ★★★ 已填入您提供的API Key ★★★
+const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;";
+const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v8.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.3] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v8.4] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// 新增辅助函数：将图片数据转为Base64
+// 诊断版的 imageToBase64 函数
 async function imageToBase64(url) {
-    log(`正在下载图片: ${url}`);
-    const response = await fetchWithCookie(url, { responseType: 'arraybuffer' });
-    if (!response.data) {
-        throw new Error("下载图片失败，未收到数据。");
+    try {
+        log("imageToBase64: 开始执行...");
+        log(`imageToBase64: 准备下载图片，URL: ${url}`);
+        const response = await fetchWithCookie(url, { responseType: 'arraybuffer' });
+        log("imageToBase64: 图片下载请求已完成。");
+
+        if (!response || !response.data) {
+            log("imageToBase64: 错误！下载响应中没有 data 字段。");
+            throw new Error("下载图片失败，响应中无数据。");
+        }
+        log(`imageToBase64: 成功获取到响应数据。数据类型: ${typeof response.data}`);
+        
+        // 检查数据是否是某种形式的ArrayBuffer
+        if (response.data.byteLength !== undefined) {
+            log(`imageToBase64: 响应数据看起来像ArrayBuffer，长度: ${response.data.byteLength}`);
+        } else {
+            log(`imageToBase64: 警告！响应数据不是预期的ArrayBuffer。`);
+        }
+
+        log("imageToBase64: 准备调用 $utils.toBase64...");
+        const base64 = $utils.toBase64(response.data);
+        log("imageToBase64: $utils.toBase64 调用完成。");
+
+        if (!base64 || base64.length < 100) {
+            log(`imageToBase64: 错误！Base64转换结果过短，长度: ${base64.length}`);
+            throw new Error("Base64转换失败或结果无效。");
+        }
+        log(`imageToBase64: Base64转换成功，长度: ${base64.length}`);
+
+        const mimeType = url.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const result = `data:${mimeType};base64,${base64}`;
+        log("imageToBase64: 成功拼接Data URL。");
+        return result;
+
+    } catch (e) {
+        log(`imageToBase64: 内部发生严重错误: ${e.message}`);
+        // 将错误继续向上抛出，让reply函数捕获
+        throw e;
     }
-    const base64 = $utils.toBase64(response.data);
-    // 根据图片类型添加前缀，大多数验证码是png或jpeg
-    const mimeType = url.endsWith('.png') ? 'image/png' : 'image/jpeg'; 
-    return `data:${mimeType};base64,${base64}`;
 }
+
 
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
@@ -50,7 +80,7 @@ async function fetchWithCookie(url, options = {}) {
 }
 
 // =================================================================================
-// =================== reply (Base64移植最终版) v2.0 ===================
+// reply 函数保持不变，它会捕获 imageToBase64 抛出的错误
 // =================================================================================
 async function reply(url) {
   log("尝试使用Cookie和AI自动回帖...");
@@ -65,7 +95,6 @@ async function reply(url) {
   }
 
   try {
-    // --- 第1步: 获取页面内容和验证码图片URL ---
     const pageResponse = await fetchWithCookie(url);
     let $ = cheerio.load(pageResponse.data);
 
@@ -78,11 +107,9 @@ async function reply(url) {
     const captchaUrl = getCorrectPicUrl(captchaImgSrc);
     log(`已找到验证码图片URL: ${captchaUrl}`);
 
-    // --- 第2步: 下载图片并转为Base64 ---
     const base64Image = await imageToBase64(captchaUrl);
-    log("图片已成功转换为Base64。");
+    log("主流程: 图片已成功转换为Base64。");
 
-    // --- 第3步: 调用硅基流动API识别验证码 ---
     log("正在调用硅基流动API识别验证码...");
     const apiResponse = await $fetch.post("https://api.siliconflow.cn/v1/chat/completions", {
       model: "Qwen/Qwen2.5-VL-72B-Instruct",
@@ -91,7 +118,7 @@ async function reply(url) {
           role: "user",
           content: [
             { type: "text", text: "直接返回图片中的4位字母或数字验证码  ，不要任何其他文字描述。" },
-            { type: "image_url", image_url: { url: base64Image } } // ★★★ 核心修改：使用Base64数据 ★★★
+            { type: "image_url", image_url: { url: base64Image } }
           ]
         }
       ],
@@ -111,7 +138,6 @@ async function reply(url) {
     }
     log(`AI识别结果: ${vcode}`);
 
-    // --- 第4步: 构造并提交回帖表单 ---
     const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
     const threadIdMatch = url.match(/thread-(\d+)/);
     if (!threadIdMatch) return false;
@@ -134,7 +160,6 @@ async function reply(url) {
       headers: { 'Referer': url }
     });
 
-    // --- 第5步: 检查回帖结果 ---
     if (postResult.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
       $utils.toastError("Cookie已失效，请重新获取", 3000);
@@ -163,6 +188,7 @@ async function reply(url) {
   }
 }
 
+// --- 其他函数保持不变 ---
 async function getConfig() {
   return jsonify({
     ver: 1,
@@ -208,9 +234,6 @@ async function getCards(ext) {
   }
 }
 
-// =================================================================================
-// =================== getTracks (单次回帖 + 多次刷新版) ===================
-// =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
   const { url } = ext;
@@ -311,9 +334,7 @@ async function getTracks(ext) {
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
-// =================================================================================
 
-// ======= search（带 cache）=======
 const searchCache = {};
 async function search(ext) {
   ext = argsify(ext);
@@ -376,7 +397,6 @@ async function search(ext) {
   }
 }
 
-// ======= 兼容入口 =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
