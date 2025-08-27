@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=tj7uh7hde2tqsavkim15lhsuls;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
+const COOKIE = "bbs_sid=9fqubkjhegrcafo7f1jfaaccmf;bbs_token=IsQUsYNNyrmMMKoNQaQv0af1iKtYcn5HhF9ilJgQ_2Bs4gskk5;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
 const YOUR_API_ENDPOINT = "http://192.168.1.2:3000/process-thread"; 
