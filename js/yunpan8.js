@@ -1,33 +1,29 @@
 /**
- * 海绵小站前端插件 - v9.3 (最终版 - 用户指导模式)
+ * 海绵小站前端插件 - 移植增强版 v8.1 (单次回帖 + 多次刷新 + 保留search cache)
  *
  * 更新说明:
- * - 插件定位为“智能辅助工具”，为用户提供清晰的操作指引。
- * - 检测到需要回帖时，调用后端API，并根据返回结果给用户明确提示。
- * - 成功则提示用户手动刷新，失败则显示具体原因。
- * - 彻底解决了前端超时和自动刷新失败的问题，用户体验清晰。
- * - 严格保持原始脚本的排版和提取逻辑。
+ * - 基于 v8.0 移植增强版
+ * - 回帖只执行一次
+ * - 增加回帖后多次刷新机制 (最多3次，每次1.5秒)，解决第一次进入时未立即解锁的问题
+ * - 保留并启用 search cache
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
-// ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=9fqubkjhegrcafo7f1jfaaccmf;bbs_token=IsQUsYNNyrmMMKoNQaQv0af1iKtYcn5HhF9ilJgQ_2Bs4gskk5;";
-const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
-// ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
-const YOUR_API_ENDPOINT = "http://192.168.10.111:3000/process-thread"; 
+// ★★★★★【用户配置区 - Cookie】 ★★★★★
+const COOKIE = "bbs_sid=0dvsc5sqkfksjqcbula5tcdg12;bbs_token=6g8LdpIPr0v4UbEFTwZoEKLyYSs8DeO_2BFJ10W3u_2B5dJastNu;";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v9.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.3] ${msg}`); } }
+function log(msg) { try { $log(`[海绵小站 v8.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v8.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE") || COOKIE.length < 20) {
+  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
     $utils.toastError("请先在插件脚本中配置Cookie", 3000);
     throw new Error("Cookie not configured.");
   }
@@ -39,13 +35,27 @@ async function fetchWithCookie(url, options = {}) {
   return $fetch.get(url, finalOptions);
 }
 
-// =================================================================================
-// =================== reply (此函数已废弃) v1.0 ===================
-// =================================================================================
 async function reply(url) {
-  // 此函数在新架构下已不再使用，所有逻辑均由后端处理。
-  log("警告：reply函数被意外调用，此函数在新版中已废弃。");
-  return false;
+  log("尝试使用Cookie自动回帖...");
+  const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
+  const threadIdMatch = url.match(/thread-(\d+)/);
+  if (!threadIdMatch) return false;
+  const threadId = threadIdMatch[1];
+  const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
+  const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
+  try {
+    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
+    if (data.includes("您尚未登录")) {
+      log("回帖失败：Cookie已失效或不正确。");
+      $utils.toastError("Cookie已失效，请重新获取", 3000);
+      return false;
+    }
+    log("回帖成功！");
+    return true;
+  } catch (e) {
+    log(`回帖请求异常: ${e.message}`);
+    return false;
+  }
 }
 
 async function getConfig() {
@@ -64,7 +74,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http'  )) return path;
+  if (path.startsWith('http')) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -94,7 +104,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (最终用户指导版) ===================
+// =================== getTracks (单次回帖 + 多次刷新版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -110,40 +120,27 @@ async function getTracks(ext) {
 
     // --- 检测是否需要回帖 ---
     if ($("div.alert.alert-warning").text().includes("回复后")) {
-      log("内容被隐藏，调用本地后端API处理...");
-      
-      if (YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
-          $utils.toastError("请先在插件脚本中配置您电脑的IP地址！", 5000);
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: "前端插件未配置后端IP", pan: '', ext: {} }] }] });
-      }
-
-      try {
-        // ★★★ 核心逻辑：调用后端，并等待它的明确结果 ★★★
-        const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
-            threadUrl: detailUrl,
-            cookie: COOKIE,
-            apiKey: SILICONFLOW_API_KEY
-        }, { headers: { 'Content-Type': 'application/json' } });
-
-        // 根据后端返回的成功或失败，给出不同提示
-        if (apiResponse.data && apiResponse.data.success) {
-            log("后端API回帖成功。");
-            $utils.toast("后端回帖成功！", 2000);
-            return jsonify({ list: [{ title: '提示', tracks: [{ name: "✅ 回帖成功，请手动刷新页面查看资源！", pan: '', ext: {} }] }] });
-        } else {
-            const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
-            log(`后端API返回失败: ${errorMessage}`);
-            return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
+      log("内容被隐藏，启动回帖流程...");
+      const replied = await reply(detailUrl);
+      if (replied) {
+        // 单次回帖，多次刷新
+        for (let i = 0; i < 3; i++) {
+          await $utils.sleep(1500);
+          const retryResponse = await fetchWithCookie(detailUrl);
+          data = retryResponse.data;
+          if (!data.includes("回复后")) {
+            log(`第 ${i + 1} 次刷新后成功解锁资源`);
+            break;
+          } else {
+            log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`);
+          }
         }
-      } catch (e) {
-        // 请求本身失败（例如连不上后端）
-        log(`无法连接到后端API: ${e.message}`);
-        return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 无法连接后端，请检查网络和PC端服务", pan: '', ext: {} }] }] });
+        $ = cheerio.load(data);
+      } else {
+        return jsonify({ list: [{ title: '提示', tracks: [{ name: "Cookie无效或未配置，无法获取资源", pan: '', ext: {} }] }] });
       }
     }
 
-    // --- 如果无需回帖，则执行原始的提取逻辑 ---
-    log("无需回帖，使用原始逻辑直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -183,7 +180,7 @@ async function getTracks(ext) {
           const found = purify(text);
           if (found) { code = found; break; }
         }
-        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) {
+        if (!text.includes("http") && !text.includes("/") && !text.includes(":")) {
           const found = purify(text);
           if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
         }
@@ -219,6 +216,7 @@ async function search(ext) {
   const page = ext.page || 1;
   if (!text) return jsonify({ list: [] });
 
+  // 命中不同关键词时重置缓存
   if (searchCache.keyword !== text) {
     searchCache.keyword = text;
     searchCache.data = [];
@@ -226,10 +224,12 @@ async function search(ext) {
     searchCache.total = 0;
   }
 
+  // 命中页缓存
   if (searchCache.data && searchCache.data[page - 1]) {
     return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
   }
 
+  // 页越界保护
   if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
     return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
   }
@@ -254,6 +254,7 @@ async function search(ext) {
       });
     });
 
+    // 计算分页总数
     let pagecount = 0;
     $('ul.pagination a.page-link').each((_, link) => {
       const p = parseInt($(link).text().trim());
@@ -262,6 +263,7 @@ async function search(ext) {
 
     const total = cards.length;
 
+    // 写入缓存
     if (!searchCache.data) searchCache.data = [];
     searchCache.data[page - 1] = cards;
     searchCache.pagecount = pagecount;
