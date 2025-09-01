@@ -1,8 +1,8 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.1 (在线+网盘)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.1 (在线播放增强版)
  *
  * 版本历史:
- * v11.1: 【功能增强】在v11.0基础上，增加在线播放在线播放链接的提取功能。
+ * v11.1: 【在线播放增强版】增加在线播放线路的提取，并重构getPlayinfo以兼容两种链接类型。
  * v11.0: 【终极安全版】以v5.0为基石，仅替换search函数，与v11.0后端完美配合。
  * v10.0: (废弃) 错误的分析路径。
  * v9.0: (废弃) 前端“门卫”方案，治标不治本。
@@ -38,7 +38,7 @@ async function fetchOriginalSite(url) {
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (init, getConfig, getCards, getPlayinfo 与v5.0基本一致) ==================
+// ================== 核心实现 (init, getConfig, getCards 与v5.0完全一致) ==================
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
@@ -68,6 +68,9 @@ async function getCards(ext) {
     }
 }
 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ getTracks 函数已更新，以同时支持在线播放和网盘下载
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
@@ -77,49 +80,35 @@ async function getTracks(ext) {
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
 
-        // ================== 新增：在线播放在线播放解析逻辑 ==================
+        // 1. 提取在线播放线路
         const onlinePlayArea = $('#url');
         if (onlinePlayArea.length > 0) {
-            const playSourceNames = [];
-            // 1. 获取所有播放源的名称 (如: 如意, ikun, 淘片)
+            const playSources = [];
             onlinePlayArea.find('.py-tabs li').each((_, el) => {
-                // 清理名称，移除集数等无关信息
-                playSourceNames.push($(el).clone().children().remove().end().text().trim());
+                playSources.push($(el).clone().find('div').remove().end().text().trim());
             });
 
-            // 2. 遍历每个播放源的播放列表
             onlinePlayArea.find('.bd > ul.player').each((index, ul) => {
-                const sourceName = playSourceNames[index] || `播放源${index + 1}`;
+                const sourceName = playSources[index] || `在线线路${index + 1}`;
                 const groupTracks = [];
-                
-                // 3. 提取每一集的链接和标题
-                $(ul).find('li > a').each((_, a) => {
+                $(ul).find('li a').each((_, a) => {
                     const trackName = $(a).text().trim();
                     const trackUrl = $(a).attr('href');
                     if (trackName && trackUrl) {
-                        // 将在线播放在线播放链接包装成特定格式，以便后续处理
-                        groupTracks.push({
-                            name: trackName,
-                            // 注意：这里我们直接将播放页面的相对路径作为 "pan" 字段的值
-                            pan: trackUrl, 
-                            ext: { 
-                                // 增加一个type字段来区分是在线播放在线播放还是网盘
-                                type: 'online', 
-                                pwd: '' 
-                            } 
+                        // ★ 关键修改：使用新的 online_play_url 字段来存储在线播放链接
+                        groupTracks.push({ 
+                            name: trackName, 
+                            ext: { online_play_url: trackUrl } // 将链接放入 ext 对象中，更规范
                         });
                     }
                 });
-
                 if (groupTracks.length > 0) {
-                    tracks.push({ title: `▶️ ${sourceName} (在线)`, tracks: groupTracks });
+                    tracks.push({ title: sourceName, tracks: groupTracks });
                 }
             });
         }
-        // ================== 在线播放在线播放解析逻辑结束 ==================
 
-
-        // ================== 保留：原有的网盘下载解析逻辑 ==================
+        // 2. 提取网盘下载链接 (逻辑保持不变, pan 和 pwd 字段专用)
         const panDownloadArea = $('h2:contains("网盘下载")').parent();
         if (panDownloadArea.length > 0) {
             const panTypes = [];
@@ -138,22 +127,12 @@ async function getTracks(ext) {
                     let pwd = '';
                     const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
                     if (pwdMatch) pwd = pwdMatch[1];
-                    
-                    groupTracks.push({ 
-                        name: trackName, 
-                        pan: linkUrl, 
-                        ext: { 
-                            type: 'pan', // 增加type字段
-                            pwd: pwd 
-                        } 
-                    });
+                    // ★ 网盘链接继续使用 pan 和 pwd 字段
+                    groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
                 });
-                if (groupTracks.length > 0) {
-                    tracks.push({ title: `💿 ${panType} (网盘)`, tracks: groupTracks });
-                }
+                if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
             });
         }
-        // ================== 网盘下载解析逻辑结束 ==================
 
         return jsonify({ list: tracks });
     } catch (e) {
@@ -162,27 +141,36 @@ async function getTracks(ext) {
     }
 }
 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ getPlayinfo 函数已更新，以智能处理在线播放和网盘两种模式
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getPlayinfo(ext) {
     ext = argsify(ext);
-    
-    // 根据链接类型进行不同处理
-    if (ext.type === 'online') {
-        // 对于在线播放在线播放，我们假设需要进一步解析。
-        // 一个简单的实现是直接返回播放页面URL，让APP的WebView来加载。
-        // 如果需要提取真实的m3u8/mp4地址，这里的逻辑会复杂得多。
-        const playPageUrl = `${appConfig.site}${ext.pan}`;
-        log(`在线播放在线播放，返回播放页URL: ${playPageUrl}`);
-        return jsonify({ urls: [playPageUrl] });
 
-    } else { // 默认为 'pan' 或未指定类型
-        // 原有的网盘链接处理逻辑
+    // 优先处理在线播放链接
+    if (ext.online_play_url) {
+        log(`处理在线播放链接: ${ext.online_play_url}`);
+        // 假设APP能直接处理这个播放页面的URL，我们返回完整的播放页面URL
+        const finalUrl = `${appConfig.site}${ext.online_play_url}`;
+        // 返回一个可直接播放的URL，或由APP进一步解析的页面URL
+        return jsonify({ urls: [finalUrl] });
+    }
+    
+    // 其次处理网盘链接 (保持原有逻辑)
+    if (ext.pan) {
+        log(`处理网盘链接: ${ext.pan}`);
         const panLink = ext.pan;
         const password = ext.pwd;
         let finalUrl = panLink;
-        if (password) finalUrl += `\n提取码: ${password}`;
-        log(`网盘链接，返回格式化地址: ${finalUrl}`);
+        if (password) {
+            finalUrl += `\n提取码: ${password}`;
+        }
         return jsonify({ urls: [finalUrl] });
     }
+
+    // 如果两种链接都不存在，返回错误或空信息
+    log("❌ getPlayinfo调用错误: ext中未找到 'online_play_url' 或 'pan' 字段");
+    return jsonify({ urls: [] });
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
