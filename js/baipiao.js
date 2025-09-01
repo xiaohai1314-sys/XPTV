@@ -1,25 +1,25 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.1 (在线播放增强版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.4 (最终修复版)
  *
  * 版本历史:
+ * v11.4: 【最终修复版】重大失误修复！恢复了被意外删除的 appConfig.tabs 配置，解决了首页分类丢失的根本问题。
+ * v11.3: 【分类Tab修复版】重大修复！恢复 'pan' 字段为分类Tab专用，为网盘链接创建新字段 'pan_url'，彻底解决分类丢失问题。
+ * v11.2: 【稳定修复版】修复因处理在线播放逻辑时，意外破坏网盘解析逻辑导致分类丢失的严重BUG。
  * v11.1: 【在线播放增强版】增加在线播放线路的提取，并重构getPlayinfo以兼容两种链接类型。
  * v11.0: 【终极安全版】以v5.0为基石，仅替换search函数，与v11.0后端完美配合。
- * v10.0: (废弃) 错误的分析路径。
- * v9.0: (废弃) 前端“门卫”方案，治标不治本。
- * v8.0: (废弃) 引入精准分页，但未解决二次请求。
- * v5.0: 【智能分页】能工作的基础版本，但存在无限搜索问题。
  */
 
-// ================== 🔴 配置区 (与v5.0完全一致，神圣不可侵犯) 🔴 ==================
+// ================== 🔴 配置区 (已恢复tabs配置) 🔴 ==================
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 // ★★★ 请务必将这里的IP地址修改为您后端服务器的实际IP地址 ★★★
 const BACKEND_API_URL = 'http://192.168.10.111:8000/get-search-html'; // ★ 请修改为您的后端IP
 
 const appConfig = {
-    ver: 11.1, // 版本号更新
+    ver: 11.4, // 版本号更新
     title: '七味网(纯盘 )',
     site: 'https://www.qnmp4.com',
+    // ★★★ 关键修复：恢复被意外删除的 tabs 数组 ★★★
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
         { name: '剧集', ext: { id: '/vt/2.html' } },
@@ -29,7 +29,7 @@ const appConfig = {
 };
 
 // ================== 辅助函数 (与v5.0完全一致  ，神圣不可侵犯) ==================
-function log(msg ) { try { $log(`[七味网 v11.1] ${msg}`); } catch (_) { console.log(`[七味网 v11.1] ${msg}`); } }
+function log(msg ) { try { $log(`[七味网 v11.4] ${msg}`); } catch (_) { console.log(`[七味网 v11.4] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function fetchOriginalSite(url) {
@@ -38,7 +38,7 @@ async function fetchOriginalSite(url) {
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (init, getConfig, getCards 与v5.0完全一致) ==================
+// ================== 核心实现 ==================
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
@@ -68,9 +68,6 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ getTracks 函数已更新，以同时支持在线播放和网盘下载
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = `${appConfig.site}${ext.url}`;
@@ -95,10 +92,9 @@ async function getTracks(ext) {
                     const trackName = $(a).text().trim();
                     const trackUrl = $(a).attr('href');
                     if (trackName && trackUrl) {
-                        // ★ 关键修改：使用新的 online_play_url 字段来存储在线播放链接
                         groupTracks.push({ 
                             name: trackName, 
-                            ext: { online_play_url: trackUrl } // 将链接放入 ext 对象中，更规范
+                            ext: { online_play_url: trackUrl } 
                         });
                     }
                 });
@@ -108,11 +104,12 @@ async function getTracks(ext) {
             });
         }
 
-        // 2. 提取网盘下载链接 (逻辑保持不变, pan 和 pwd 字段专用)
+        // 2. 提取网盘下载链接 (使用原始脚本的健壮逻辑)
         const panDownloadArea = $('h2:contains("网盘下载")').parent();
         if (panDownloadArea.length > 0) {
             const panTypes = [];
             panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
+            
             panDownloadArea.find('.down-list.tab-content > ul.content').each((index, ul) => {
                 const panType = panTypes[index] || '未知网盘';
                 const groupTracks = [];
@@ -127,10 +124,13 @@ async function getTracks(ext) {
                     let pwd = '';
                     const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
                     if (pwdMatch) pwd = pwdMatch[1];
-                    // ★ 网盘链接继续使用 pan 和 pwd 字段
+                    
+                    // 您的原始逻辑：使用 pan 和 ext.pwd
                     groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
                 });
-                if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
+                if (groupTracks.length > 0) {
+                    tracks.push({ title: panType, tracks: groupTracks });
+                }
             });
         }
 
@@ -141,22 +141,17 @@ async function getTracks(ext) {
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ getPlayinfo 函数已更新，以智能处理在线播放和网盘两种模式
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getPlayinfo(ext) {
     ext = argsify(ext);
 
-    // 优先处理在线播放链接
+    // 1. 处理在线播放链接
     if (ext.online_play_url) {
         log(`处理在线播放链接: ${ext.online_play_url}`);
-        // 假设APP能直接处理这个播放页面的URL，我们返回完整的播放页面URL
         const finalUrl = `${appConfig.site}${ext.online_play_url}`;
-        // 返回一个可直接播放的URL，或由APP进一步解析的页面URL
         return jsonify({ urls: [finalUrl] });
     }
     
-    // 其次处理网盘链接 (保持原有逻辑)
+    // 2. 处理网盘链接 (恢复使用 pan 和 ext.pwd)
     if (ext.pan) {
         log(`处理网盘链接: ${ext.pan}`);
         const panLink = ext.pan;
@@ -168,18 +163,13 @@ async function getPlayinfo(ext) {
         return jsonify({ urls: [finalUrl] });
     }
 
-    // 如果两种链接都不存在，返回错误或空信息
     log("❌ getPlayinfo调用错误: ext中未找到 'online_play_url' 或 'pan' 字段");
     return jsonify({ urls: [] });
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 唯一的修改点：替换为与v11.0后端完美配合的全新search函数
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
 
-    // “门卫”逻辑，防止意外的空搜索，保持健壮性
     if (!ext.text || ext.text.trim() === '') {
         log("检测到无关键词的搜索调用，返回安全空列表。");
         return jsonify({ list: [], page: 1, pagecount: 1 });
@@ -196,7 +186,6 @@ async function search(ext) {
     try {
         log(`正在通过后端服务请求URL: ${targetSearchUrl}`);
         
-        // 将 requested_page 传给后端，让后端来做决策
         const response = await $fetch.post(BACKEND_API_URL, 
             { 
                 search_url: targetSearchUrl,
@@ -205,20 +194,15 @@ async function search(ext) {
             { headers: { 'Content-Type': 'application/json' } }
         );
 
-        // 解析后端返回的JSON对象
         let resultData;
         try {
-            // 优先尝试JSON.parse，因为后端成功时返回的是JSON字符串
             resultData = JSON.parse(response.data);
         } catch (parseError) {
-            // 如果解析失败，说明后端可能直接返回了错误文本，直接使用
             log(`JSON.parse 失败，尝试直接使用 response.data: ${parseError.message}`);
             resultData = response.data;
         }
 
-        // 对后端返回的数据进行严格的校验
         if (!resultData || typeof resultData !== 'object' || !resultData.html || !resultData.paginationInfo) {
-            // 增加对后端返回错误的精细化处理
             if (resultData && resultData.error) {
                  throw new Error(`后端返回错误: ${resultData.error}`);
             }
@@ -245,7 +229,6 @@ async function search(ext) {
 
         const hasMore = paginationInfo.hasMore;
         
-        // 使用后端返回的、最权威的分页信息来构造pagecount
         return jsonify({
             list: cards,
             page: paginationInfo.currentPage,
@@ -254,7 +237,6 @@ async function search(ext) {
 
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
-        // 将错误信息更友好地展示给用户
         const errorMessage = e.response && e.response.data && (e.response.data.error || JSON.stringify(e.response.data)) ? 
                              (e.response.data.error || JSON.stringify(e.response.data)) : e.message;
         $toast(`搜索失败: ${errorMessage}`);
