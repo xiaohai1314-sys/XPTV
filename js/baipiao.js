@@ -24,7 +24,7 @@ const appConfig = {
 };
 
 // ================== 公共函数 ==================
-function log(msg) { try { $log(`[七味网 v11.1] ${msg}`); } catch (_) { console.log(`[七味网 v11.1] ${msg}`); } }
+function log(msg ) { try { $log(`[七味网 v11.1] ${msg}`); } catch (_) { console.log(`[七味网 v11.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function fetchOriginalSite(url) {
