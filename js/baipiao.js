@@ -1,7 +1,8 @@
 /**
- * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.0 (终极安全版)
+ * 七味网(qwmkv.com) - 纯网盘提取脚本 - v11.1 (在线+网盘)
  *
  * 版本历史:
+ * v11.1: 【功能增强】在v11.0基础上，增加在线播放在线播放链接的提取功能。
  * v11.0: 【终极安全版】以v5.0为基石，仅替换search函数，与v11.0后端完美配合。
  * v10.0: (废弃) 错误的分析路径。
  * v9.0: (废弃) 前端“门卫”方案，治标不治本。
@@ -16,8 +17,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const BACKEND_API_URL = 'http://192.168.10.111:8000/get-search-html'; // ★ 请修改为您的后端IP
 
 const appConfig = {
-    ver: 11.0, // 版本号更新
-    title: '七味网(纯盘  )',
+    ver: 11.1, // 版本号更新
+    title: '七味网(纯盘 )',
     site: 'https://www.qnmp4.com',
     tabs: [
         { name: '电影', ext: { id: '/vt/1.html' } },
@@ -27,8 +28,8 @@ const appConfig = {
     ],
 };
 
-// ================== 辅助函数 (与v5.0完全一致 ，神圣不可侵犯) ==================
-function log(msg ) { try { $log(`[七味网 v11.0] ${msg}`); } catch (_) { console.log(`[七味网 v11.0] ${msg}`); } }
+// ================== 辅助函数 (与v5.0完全一致  ，神圣不可侵犯) ==================
+function log(msg ) { try { $log(`[七味网 v11.1] ${msg}`); } catch (_) { console.log(`[七味网 v11.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 async function fetchOriginalSite(url) {
@@ -37,7 +38,7 @@ async function fetchOriginalSite(url) {
     return $fetch.get(url, { headers });
 }
 
-// ================== 核心实现 (init, getConfig, getCards, getTracks, getPlayinfo 与v5.0完全一致，神圣不可侵犯) ==================
+// ================== 核心实现 (init, getConfig, getCards, getPlayinfo 与v5.0基本一致) ==================
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
 
@@ -75,28 +76,85 @@ async function getTracks(ext) {
         const $ = cheerio.load(html);
         const vod_name = $('div.main-ui-meta h1').text().replace(/\(\d+\)$/, '').trim();
         const tracks = [];
-        const panDownloadArea = $('h2:contains("网盘下载")').parent();
-        if (panDownloadArea.length === 0) return jsonify({ list: [] });
-        const panTypes = [];
-        panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
-        panDownloadArea.find('.down-list.tab-content > ul.content').each((index, ul) => {
-            const panType = panTypes[index] || '未知网盘';
-            const groupTracks = [];
-            $(ul).find('li.down-list2').each((_, li) => {
-                const $a = $(li).find('p.down-list3 a');
-                const linkUrl = $a.attr('href');
-                const originalTitle = $a.attr('title') || $a.text();
-                let spec = '';
-                const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
-                if (specMatch) spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
-                const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
-                let pwd = '';
-                const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
-                if (pwdMatch) pwd = pwdMatch[1];
-                groupTracks.push({ name: trackName, pan: linkUrl, ext: { pwd: pwd } });
+
+        // ================== 新增：在线播放在线播放解析逻辑 ==================
+        const onlinePlayArea = $('#url');
+        if (onlinePlayArea.length > 0) {
+            const playSourceNames = [];
+            // 1. 获取所有播放源的名称 (如: 如意, ikun, 淘片)
+            onlinePlayArea.find('.py-tabs li').each((_, el) => {
+                // 清理名称，移除集数等无关信息
+                playSourceNames.push($(el).clone().children().remove().end().text().trim());
             });
-            if (groupTracks.length > 0) tracks.push({ title: panType, tracks: groupTracks });
-        });
+
+            // 2. 遍历每个播放源的播放列表
+            onlinePlayArea.find('.bd > ul.player').each((index, ul) => {
+                const sourceName = playSourceNames[index] || `播放源${index + 1}`;
+                const groupTracks = [];
+                
+                // 3. 提取每一集的链接和标题
+                $(ul).find('li > a').each((_, a) => {
+                    const trackName = $(a).text().trim();
+                    const trackUrl = $(a).attr('href');
+                    if (trackName && trackUrl) {
+                        // 将在线播放在线播放链接包装成特定格式，以便后续处理
+                        groupTracks.push({
+                            name: trackName,
+                            // 注意：这里我们直接将播放页面的相对路径作为 "pan" 字段的值
+                            pan: trackUrl, 
+                            ext: { 
+                                // 增加一个type字段来区分是在线播放在线播放还是网盘
+                                type: 'online', 
+                                pwd: '' 
+                            } 
+                        });
+                    }
+                });
+
+                if (groupTracks.length > 0) {
+                    tracks.push({ title: `▶️ ${sourceName} (在线)`, tracks: groupTracks });
+                }
+            });
+        }
+        // ================== 在线播放在线播放解析逻辑结束 ==================
+
+
+        // ================== 保留：原有的网盘下载解析逻辑 ==================
+        const panDownloadArea = $('h2:contains("网盘下载")').parent();
+        if (panDownloadArea.length > 0) {
+            const panTypes = [];
+            panDownloadArea.find('.nav-tabs .title').each((_, el) => panTypes.push($(el).text().trim()));
+            panDownloadArea.find('.down-list.tab-content > ul.content').each((index, ul) => {
+                const panType = panTypes[index] || '未知网盘';
+                const groupTracks = [];
+                $(ul).find('li.down-list2').each((_, li) => {
+                    const $a = $(li).find('p.down-list3 a');
+                    const linkUrl = $a.attr('href');
+                    const originalTitle = $a.attr('title') || $a.text();
+                    let spec = '';
+                    const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|[\d\.]+G[B]?)/ig);
+                    if (specMatch) spec = [...new Set(specMatch.map(s => s.toUpperCase()))].join(' ').replace(/\s+/g, ' ');
+                    const trackName = spec ? `${vod_name} (${spec})` : `${vod_name} (${originalTitle.substring(0, 25)}...)`;
+                    let pwd = '';
+                    const pwdMatch = linkUrl.match(/pwd=(\w+)/) || originalTitle.match(/(?:提取码|访问码)[：: ]\s*(\w+)/i);
+                    if (pwdMatch) pwd = pwdMatch[1];
+                    
+                    groupTracks.push({ 
+                        name: trackName, 
+                        pan: linkUrl, 
+                        ext: { 
+                            type: 'pan', // 增加type字段
+                            pwd: pwd 
+                        } 
+                    });
+                });
+                if (groupTracks.length > 0) {
+                    tracks.push({ title: `💿 ${panType} (网盘)`, tracks: groupTracks });
+                }
+            });
+        }
+        // ================== 网盘下载解析逻辑结束 ==================
+
         return jsonify({ list: tracks });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
@@ -106,11 +164,25 @@ async function getTracks(ext) {
 
 async function getPlayinfo(ext) {
     ext = argsify(ext);
-    const panLink = ext.pan;
-    const password = ext.pwd;
-    let finalUrl = panLink;
-    if (password) finalUrl += `\n提取码: ${password}`;
-    return jsonify({ urls: [finalUrl] });
+    
+    // 根据链接类型进行不同处理
+    if (ext.type === 'online') {
+        // 对于在线播放在线播放，我们假设需要进一步解析。
+        // 一个简单的实现是直接返回播放页面URL，让APP的WebView来加载。
+        // 如果需要提取真实的m3u8/mp4地址，这里的逻辑会复杂得多。
+        const playPageUrl = `${appConfig.site}${ext.pan}`;
+        log(`在线播放在线播放，返回播放页URL: ${playPageUrl}`);
+        return jsonify({ urls: [playPageUrl] });
+
+    } else { // 默认为 'pan' 或未指定类型
+        // 原有的网盘链接处理逻辑
+        const panLink = ext.pan;
+        const password = ext.pwd;
+        let finalUrl = panLink;
+        if (password) finalUrl += `\n提取码: ${password}`;
+        log(`网盘链接，返回格式化地址: ${finalUrl}`);
+        return jsonify({ urls: [finalUrl] });
+    }
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
