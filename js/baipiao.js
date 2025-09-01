@@ -1,10 +1,10 @@
 /**
- * 七味网(qwmkv.com) - 网盘+在线播放提取脚本 - v11.2
+ * 七味网(qwmkv.com) - 网盘+在线播放提取脚本 - v11.3
  *
  * 基于 v11.0 (终极安全版) 修改：
  * - 保持所有配置、网盘逻辑完全不变
  * - 删除网盘缺失时的强制 return
- * - 新增“在线播放”分组，帖子无网盘时也能显示
+ * - 新增"在线播放"分组，帖子无网盘时也能显示
  */
 
 // ================== 🔴 配置区 (与v5.0完全一致，神圣不可侵犯) 🔴 ==================
@@ -99,12 +99,19 @@ async function getTracks(ext) {
             });
         }
 
-        // ========= ② 新增：在线播放分组 =========
-        $('h2:contains("在线播放")').each((_, h2) => {
-            const onlineBlock = $(h2).next('.bd');
-            if (onlineBlock.length > 0) {
+        // ========= ② 修复后：在线播放分组 =========
+        const onlineSection = $('#url .sBox');
+        if (onlineSection.length > 0) {
+            // 获取所有播放源标签名
+            const tabNames = [];
+            onlineSection.find('.py-tabs li').each((_, tab) => {
+                const tabText = $(tab).text().trim().split('\n')[0]; // 去掉数字部分
+                tabNames.push(tabText);
+            });
+            
+            onlineSection.find('.bd ul.player').each((index, ul) => {
                 const groupTracksOnline = [];
-                onlineBlock.find('ul.player li a').each((_, a) => {
+                $(ul).find('li a').each((_, a) => {
                     const $a = $(a);
                     const name = $a.text().trim();
                     const playUrl = $a.attr('href');
@@ -112,11 +119,13 @@ async function getTracks(ext) {
                         groupTracksOnline.push({ name, pan: playUrl, ext: { play: true } });
                     }
                 });
+                
                 if (groupTracksOnline.length > 0) {
-                    tracks.push({ title: '在线播放', tracks: groupTracksOnline });
+                    const tabName = tabNames[index] || `播放源${index + 1}`;
+                    tracks.push({ title: `在线播放-${tabName}`, tracks: groupTracksOnline });
                 }
-            }
-        });
+            });
+        }
 
         return jsonify({ list: tracks });
     } catch (e) {
