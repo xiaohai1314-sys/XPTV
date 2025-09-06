@@ -1,13 +1,13 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v27 (列表页海报+Cookie修正版)
  *
- * 最终修正说明:
+ * 修正说明:
  * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
- * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
+ * - 引入“协议无关”的去重逻辑。
  * - 保留“脏链接”以适应App的特殊工作机制。
- * - 修正所有已知的、由我引入的错误。
  * - 根据用户要求，直接在网络请求中添加 Cookie 以实现登录。
+ * - 修改为从列表页直接获取海报，其他逻辑原封不动。
  * =================================================================
  */
 
@@ -33,13 +33,12 @@ async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致 (已添加 Cookie)
+// getCards 函数已修改为从列表页获取海报
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
   const { data } = await $fetch.get(url, { 
     headers: { 
       'Referer': appConfig.site, 
@@ -49,20 +48,28 @@ async function getCards(ext) {
   });
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
-    if ($(each).find('.cms-lock-solid').length > 0) return;
-    const href = $(each).find('h2 a').attr('href');
-    const title = $(each).find('h2 a').text();
+    const $each = $(each); // 将 each 转换为 cheerio 对象
+    if ($each.find('.cms-lock-solid').length > 0) return;
+    const href = $each.find('h2 a').attr('href');
+    const title = $each.find('h2 a').text();
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const r = $(each).find('.summary').text();
-    const tag = $(each).find('.tag').text();
+    const r = $each.find('.summary').text();
+    const tag = $each.find('.tag').text();
     if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+
+    // --- 修改部分：尝试从列表项中直接获取海报 ---
+    let pic = $each.find('.videoInfo .cover').attr('src') || '';
+    if (pic && !pic.startsWith('http' )) {
+        pic = new URL(pic, appConfig.site).href;
+    }
+
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: '',
+      vod_pic: pic, // 使用从列表页获取到的海报
       vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -88,7 +95,6 @@ async function getTracks(ext) {
     const uniqueLinks = new Set(); // 用于去重的“登记簿”
 
     try {
-        // --- 修改部分：添加了 Cookie ---
         const { data } = await $fetch.get(url, { 
           headers: { 
             'Referer': appConfig.site, 
@@ -101,7 +107,6 @@ async function getTracks(ext) {
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        // --- 策略一：精准匹配 (已修正) ---
         const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
@@ -113,7 +118,6 @@ async function getTracks(ext) {
             uniqueLinks.add(agnosticUrl);
         }
 
-        // --- 策略二：<a>标签扫描 (已修正) ---
         $('a[href*="cloud.189.cn"]').each((_, el) => {
             const $el = $(el);
             let href = $el.attr('href');
@@ -133,7 +137,6 @@ async function getTracks(ext) {
             uniqueLinks.add(agnosticUrl);
         });
 
-        // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
         while ((match = urlPattern.exec(bodyText  )) !== null) {
             let panUrl = match[0].replace('http://', 'https://'  );
@@ -159,14 +162,13 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数与 v21 原版完全一致 (已添加 Cookie)
+// search 函数已修改为从列表页获取海报
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
   const { data } = await $fetch.get(url, { 
     headers: { 
       'User-Agent': UA,
@@ -175,15 +177,23 @@ async function search(ext) {
   });
   const $ = cheerio.load(data);
   $('.topicItem').each((_, el) => {
-    const a = $(el).find('h2 a');
+    const $el = $(el); // 将 el 转换为 cheerio 对象
+    const a = $el.find('h2 a');
     const href = a.attr('href');
     const title = a.text();
-    const tag = $(el).find('.tag').text();
+    const tag = $el.find('.tag').text();
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+
+    // --- 修改部分：尝试从列表项中直接获取海报 ---
+    let pic = $el.find('.videoInfo .cover').attr('src') || '';
+    if (pic && !pic.startsWith('http' )) {
+        pic = new URL(pic, appConfig.site).href;
+    }
+
     cards.push({
       vod_id: href,
       vod_name: title,
-      vod_pic: '',
+      vod_pic: pic, // 使用从列表页获取到的海报
       vod_remarks: tag,
       ext: { url: `${appConfig.site}/${href}` },
     });
