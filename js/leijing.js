@@ -1,12 +1,13 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v27 (终极修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
  *
  * 最终修正说明:
  * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
  * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
  * - 保留“脏链接”以适应App的特殊工作机制。
  * - 修正所有已知的、由我引入的错误。
+ * - 根据用户要求，直接在网络请求中添加 Cookie 以实现登录。
  * =================================================================
  */
 
@@ -28,17 +29,24 @@ const appConfig = {
   ],
 };
 
-async function getConfig( ) {
+async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致
+// getCards 函数与 v21 原版完全一致 (已添加 Cookie)
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+  // --- 修改部分：添加了 Cookie ---
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'Referer': appConfig.site, 
+      'User-Agent': UA,
+      'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+    } 
+  });
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
@@ -80,17 +88,24 @@ async function getTracks(ext) {
     const uniqueLinks = new Set(); // 用于去重的“登记簿”
 
     try {
-        const { data } = await $fetch.get(url, { headers: { 'Referer': appConfig.site, 'User-Agent': UA } });
+        // --- 修改部分：添加了 Cookie ---
+        const { data } = await $fetch.get(url, { 
+          headers: { 
+            'Referer': appConfig.site, 
+            'User-Agent': UA,
+            'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+          } 
+        });
         const $ = cheerio.load(data);
         
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
         // --- 策略一：精准匹配 (已修正) ---
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://' );
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
 
@@ -107,10 +122,10 @@ async function getTracks(ext) {
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
 
-            href = href.replace('http://', 'https://' );
+            href = href.replace('http://', 'https://'  );
 
             let trackName = $el.text().trim();
-            if (trackName.startsWith('http' ) || trackName === '') {
+            if (trackName.startsWith('http'  ) || trackName === '') {
                 trackName = pageTitle;
             }
 
@@ -120,8 +135,8 @@ async function getTracks(ext) {
 
         // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://' );
+        while ((match = urlPattern.exec(bodyText  )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
 
@@ -144,14 +159,20 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数与 v21 原版完全一致
+// search 函数与 v21 原版完全一致 (已添加 Cookie)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+  // --- 修改部分：添加了 Cookie ---
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'User-Agent': UA,
+      'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+    } 
+  });
   const $ = cheerio.load(data);
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
