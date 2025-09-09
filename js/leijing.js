@@ -7,6 +7,9 @@
  * - getTracks (详情页) 保持不变，继续使用前端 Cookie 访问。
  * - search (搜索) 保持不变，继续通过后端服务代理。
  * - 这是目前最精简、最高效、最符合实际情况的混合模式脚本。
+ *
+ * 最终修正:
+ * - 修正了 search 函数中接收搜索词的参数名，从 'text' 改为 'keyword'。
  * =================================================================
  */
 
@@ -30,27 +33,23 @@ const appConfig = {
   ],
 };
 
-async function getConfig( ) {
+async function getConfig(  ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数 - 【前端直连，无Cookie】
+// getCards 函数 - 【前端直连，无Cookie】(保持不变)
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
   
-  // =================== 核心优化点 START ===================
-  // 根据您的反馈，此请求不再发送Cookie
   const { data } = await $fetch.get(url, { 
     headers: { 
       'Referer': appConfig.site, 
       'User-Agent': UA
-      // 'Cookie' field has been removed
     } 
   });
-  // =================== 核心优化点 END =====================
 
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
@@ -93,7 +92,6 @@ async function getTracks(ext) {
     const uniqueLinks = new Set();
 
     try {
-        // 详情页很可能需要Cookie，因此予以保留
         const { data } = await $fetch.get(url, { 
           headers: { 
             'Referer': appConfig.site, 
@@ -106,10 +104,10 @@ async function getTracks(ext) {
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+ ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://' );
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
@@ -122,16 +120,16 @@ async function getTracks(ext) {
             if (!href) return;
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-            href = href.replace('http://', 'https://' );
+            href = href.replace('http://', 'https://'  );
             let trackName = $el.text().trim();
-            if (trackName.startsWith('http' ) || trackName === '') trackName = pageTitle;
+            if (trackName.startsWith('http'  ) || trackName === '') trackName = pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://' );
+        while ((match = urlPattern.exec(bodyText  )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
@@ -153,15 +151,26 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数 - 【后端代理】(保持不变)
+// search 函数 - 【后端代理】(最终修正版)
 async function search(ext) {
   ext = argsify(ext);
-  const { text, page = 1 } = ext;
   
-  const proxyUrl = `${LOCAL_SERVER_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
+  // =================== 核心修正点 START ===================
+  // App 传入的搜索词参数名是 'keyword'，而不是 'text'
+  const { keyword, page = 1 } = ext; 
+  // =================== 核心修正点 END =====================
+
+  // 如果 keyword 不存在或为空，直接返回空列表，避免无效请求
+  if (!keyword) {
+    return jsonify({ list: [] });
+  }
+
+  // 使用正确的变量 'keyword' 来构建代理 URL，而后端接口接收的参数名是 'text'
+  const proxyUrl = `${LOCAL_SERVER_URL}/search?text=${encodeURIComponent(keyword)}&page=${page}`;
   
   try {
     const { data } = await $fetch.get(proxyUrl);
+    // 后端已经处理好了一切，直接返回它的结果
     return jsonify(data);
   } catch (e) {
     console.error('搜索失败，请检查后端服务是否运行:', e.message);
