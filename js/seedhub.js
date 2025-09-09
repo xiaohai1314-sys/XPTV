@@ -33,7 +33,7 @@ const appConfig = {
 		
 	],
 }
-async function getConfig() {
+async function getConfig( ) {
 	return jsonify(appConfig)
 }
 
@@ -81,6 +81,8 @@ async function getTracks(ext) {
 	});
 	
 	const $ = cheerio.load(data);
+	// 第一项：获取帖子标题作为分组标题
+	const postTitle = $('h1').text().split(' ')[0].trim();
 	const playlist = $('.pan-links');
 	
 	if (playlist.length === 0 || playlist.find('li').length === 0) {
@@ -88,28 +90,40 @@ async function getTracks(ext) {
 		return jsonify({ list: [] }); 
 	}
 	
-	playlist.each((_, e) => {
-		
-		$(e).find('li a').each((_, link) => {
-			const href = $(link).attr('data-link');
+	playlist.find('li a').each((_, link) => {
+		const href = $(link).attr('data-link');
+		const originalTitle = $(link).attr('title');
+		let newName = originalTitle;
 
-				tracks.push({
-					name: '网盘',
-					pan: href, 
-				});
-			
+		// 第二项：从原始标题中提取关键词作为提示词
+		const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
+		
+		if (specMatch) {
+			// 将提取到的关键词数组用空格连接成一个字符串
+			const tags = specMatch.join(' ');
+			// 将帖子名和提取的标签组合成新的名称
+			newName = `${postTitle} [${tags}]`;
+		} else {
+			// 如果没有匹配到关键词，则使用帖子名作为基础名称
+			newName = postTitle;
+		}
+
+		tracks.push({
+			name: newName, // 使用包含提示词的新名称
+			pan: href, 
 		});
 	});
 	
 	return jsonify({
 		list: [
 			{
-				title: '默认分组', 
+				title: postTitle, // 使用帖子标题作为分组名
 				tracks,
 			},
 		],
 	});
 }
+
 async function getPlayinfo(ext) {
 	ext = argsify(ext)
 	const url = ext.url
