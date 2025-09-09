@@ -81,8 +81,8 @@ async function getTracks(ext) {
 	});
 	
 	const $ = cheerio.load(data);
-	// 第一项：获取帖子标题作为分组标题
-	const postTitle = $('h1').text().split(' ')[0].trim();
+	// 修正：移除h1文本中可能包含的'# '前缀
+	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
 	const playlist = $('.pan-links');
 	
 	if (playlist.length === 0 || playlist.find('li').length === 0) {
@@ -95,7 +95,7 @@ async function getTracks(ext) {
 		const originalTitle = $(link).attr('title');
 		let newName = originalTitle;
 
-		// 第二项：从原始标题中提取关键词作为提示词
+		// 从原始标题中提取关键词作为提示词
 		const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 		
 		if (specMatch) {
