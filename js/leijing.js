@@ -1,26 +1,26 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v28 (自动登录版)
+ * 脚本名称: 雷鲸资源站脚本 - v29 (JSON登录版)
  *
  * 更新说明:
- * - 新增 login() 自动登录，获取最新 Cookie。
- * - 所有请求改为 fetchWithLogin()，避免 Cookie 过期。
- * - 登录失败时会抛出错误，便于排查。
- * - 保留原有 tabs/ext 分类结构，未做任何调整。
+ * - 登录接口返回 JSON，直接提取 accessToken/refreshToken。
+ * - 不再依赖 headers.set-cookie，适配 App 环境。
+ * - 所有请求仍通过 fetchWithLogin()，Cookie 自动带上。
+ * - 保留原始分类结构 (tabs/ext) 完全不变。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// =============== 登录配置（请自行修改账号/密码哈希）================
+// =============== 登录配置（请自行修改账号/密码哈希/登录token）================
 const USERNAME = "xiaohai1314"; 
 const PASSWORD_HASH = "902253f297e77213c7ea45d96dc1edafcb9e5e5bcebf87363ff0949bf2eaefca"; 
-const LOGIN_TOKEN = "9a85d97e4f834e0fbc7cf7bbcda5c534"; // 可以从浏览器调试获取最新
+const LOGIN_TOKEN = "9a85d97e4f834e0fbc7cf7bbcda5c534"; 
 
-let cookieStr = ""; // 全局保存最新 Cookie
+let cookieStr = ""; // 全局保存 Cookie
 
-// 封装: 自动登录
+// login: 直接解析 JSON 提取 accessToken/refreshToken
 async function login() {
   const timestamp = Date.now();
   const body = `jumpUrl=&token=${LOGIN_TOKEN}&captchaKey=&captchaValue=&type=10&account=${USERNAME}&password=${PASSWORD_HASH}`;
@@ -34,17 +34,22 @@ async function login() {
     }
   });
 
-  if (!res.headers || !res.headers["set-cookie"]) {
-    throw new Error("登录失败: 未返回 Set-Cookie");
+  let data;
+  try {
+    data = JSON.parse(res.data);
+  } catch (e) {
+    throw new Error("登录失败: 返回不是 JSON → " + res.data.slice(0, 100));
   }
 
-  // 拼接所有 set-cookie
-  const setCookies = res.headers["set-cookie"];
-  cookieStr = Array.isArray(setCookies) ? setCookies.map(c => c.split(";")[0]).join("; ") : setCookies;
+  if (!data.accessToken) {
+    throw new Error("登录失败: 未找到 accessToken → " + res.data.slice(0, 100));
+  }
+
+  cookieStr = `cms_accessToken=${data.accessToken}; cms_refreshToken=${data.refreshToken}`;
   console.log("登录成功，新的 Cookie:", cookieStr);
 }
 
-// 封装: 自动携带 Cookie 请求
+// fetchWithLogin: 自动携带 Cookie，如果失效会重新登录
 async function fetchWithLogin(url, options = {}) {
   if (!cookieStr) {
     await login();
@@ -60,7 +65,6 @@ async function fetchWithLogin(url, options = {}) {
       }
     });
     if (!res.data || res.data.includes("登录") || res.status === 401 || res.status === 403) {
-      // Cookie 已失效，重新登录
       await login();
       return await fetchWithLogin(url, options);
     }
@@ -73,7 +77,7 @@ async function fetchWithLogin(url, options = {}) {
 
 // appConfig 与 v21 原版一致
 const appConfig = {
-  ver: 28,
+  ver: 29,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
