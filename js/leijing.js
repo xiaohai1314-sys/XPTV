@@ -1,9 +1,10 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v27 (搜索修正版)
  *
  * 最终修正说明:
- * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
+ * - getCards, getPlayinfo, getTracks 函数与原版逻辑一致。
+ * - search 函数已根据最新的网站 HTML 结构进行修正。
  * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
  * - 保留“脏链接”以适应App的特殊工作机制。
  * - 修正所有已知的、由我引入的错误。
@@ -29,7 +30,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig(   ) {
+async function getConfig(    ) {
   return jsonify(appConfig);
 }
 
@@ -102,10 +103,10 @@ async function getTracks(ext) {
         const bodyText = $('body').text();
 
         // --- 策略一：精准匹配 (已修正) ---
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+    ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'   );
+            let panUrl = match[0].replace('http://', 'https://'    );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
 
@@ -122,10 +123,10 @@ async function getTracks(ext) {
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
 
-            href = href.replace('http://', 'https://'   );
+            href = href.replace('http://', 'https://'    );
 
             let trackName = $el.text().trim();
-            if (trackName.startsWith('http'   ) || trackName === '') {
+            if (trackName.startsWith('http'    ) || trackName === '') {
                 trackName = pageTitle;
             }
 
@@ -135,8 +136,8 @@ async function getTracks(ext) {
 
         // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText   )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'   );
+        while ((match = urlPattern.exec(bodyText    )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'    );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
 
@@ -159,34 +160,54 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数与 v21 原版完全一致 (已添加 Cookie)
+// ==================== 搜索函数 - 已修正 ====================
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
-  const { data } = await $fetch.get(url, { 
-    headers: { 
-      'User-Agent': UA,
-      'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
-    } 
-  });
-  const $ = cheerio.load(data);
-  $('.topicItem').each((_, el) => {
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text();
-    const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: title,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
+  const text = encodeURIComponent(ext.text); // 关键词需要进行 URL 编码
+  const page = ext.page || 1;
+  const url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+
+  try {
+    // 请求部分保持不变，GET 请求是正确的
+    const { data } = await $fetch.get(url, { 
+      headers: { 
+        'User-Agent': UA,
+        'Referer': appConfig.site, // 添加 Referer 是个好习惯
+        'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=3D87DCA5B39F72C34DFD613070F6F8E3'
+      } 
     });
-  });
+
+    const $ = cheerio.load(data);
+
+    // --- 核心修正：使用新的、正确的 CSS 选择器来解析 HTML ---
+    $('.topicItem').each((_, el) => {
+      const $el = $(el); // 将当前元素包装成 jQuery 对象以便后续查找
+      
+      const a = $el.find('h2.title a'); // 标题在 class="title" 的 h2 标签下的 a 链接中
+      const href = a.attr('href');
+      const title = a.text().trim();
+      
+      // 分类标签在 class="tag" 的 span 中
+      const tag = $el.find('.content .info .tag').text().trim();
+
+      // 过滤掉不想要的结果
+      if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) {
+        return; // 相当于 continue
+      }
+
+      cards.push({
+        vod_id: href,
+        vod_name: title,
+        vod_pic: '', // 搜索结果页通常没有图片
+        vod_remarks: tag, // 使用 tag 作为备注
+        ext: { url: `${appConfig.site}/${href}` },
+      });
+    });
+  } catch (e) {
+    console.error('搜索失败:', e);
+  }
+
   return jsonify({ list: cards });
 }
+// ==========================================================
