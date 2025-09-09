@@ -1,22 +1,25 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v28 (最终动态登录版)
  *
  * 最终修正说明:
- * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
- * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
- * - 保留“脏链接”以适应App的特殊工作机制。
- * - 修正所有已知的、由我引入的错误。
- * - 根据用户要求，直接在网络请求中添加 Cookie 以实现登录。
+ * - 新增 login 函数，通过用户名和密码模拟登录，动态获取 Cookie。
+ * - 新增 sha256 辅助函数，使用原生 SubtleCrypto API 加密密码，无任何外部依赖。
+ * - 脚本启动时会自动使用预设的账号密码进行登录。
+ * - 移除了所有函数中硬编码的 Cookie，改用全局 sessionCookie 变量。
+ * - 保持原版 appConfig, getCards, search 函数的核心逻辑不变。
+ * - 引入“协议无关”的去重逻辑，解决重复按钮问题。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// appConfig 与 v21 原版完全一致
+// 全局变量，用于存储登录成功后的 Cookie
+let sessionCookie = '';
+
 const appConfig = {
-  ver: 27,
+  ver: 28,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -29,22 +32,112 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+// --- 新增：原生加密与登录模块 ---
+
+/**
+ * 使用原生 SubtleCrypto API 计算字符串的 SHA-256 哈希值
+ * @param {string} str - 需要加密的原始字符串
+ * @returns {Promise<string>} - 返回一个 Promise ，解析为十六进制格式的哈希字符串
+ */
+async function sha256(str) {
+  const data = new TextEncoder().encode(str);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
+
+/**
+ * 核心登录函数
+ * @param {string} account - 用户名
+ * @param {string} password - 明文密码
+ * @returns {Promise<boolean>} - 是否登录成功
+ */
+async function login(account, password) {
+  try {
+    console.log('正在尝试登录...');
+    // 1. 访问登录页，获取临时的 cms_token
+    const preLoginRes = await $fetch.get(`${appConfig.site}/login`, { headers: { 'User-Agent': UA } });
+    const preLoginCookies = preLoginRes.headers['set-cookie'] || [];
+    const cmsTokenCookie = preLoginCookies.find(c => c.startsWith('cms_token='));
+    
+    if (!cmsTokenCookie) {
+      console.error('登录失败：未能获取到临时的 cms_token。');
+      return false;
+    }
+    const cmsToken = cmsTokenCookie.split(';')[0].split('=')[1];
+
+    // 2. 准备登录数据
+    const hashedPassword = await sha256(password);
+    const formData = new URLSearchParams({
+      jumpUrl: '',
+      token: cmsToken,
+      captchaKey: '',
+      captchaValue: '',
+      type: '10',
+      account: account,
+      password: hashedPassword,
+    }).toString();
+
+    // 3. 发送 POST 请求进行登录
+    const loginRes = await $fetch.post(`${appConfig.site}/login`, formData, {
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': `${appConfig.site}/login`,
+        'Cookie': `cms_token=${cmsToken}`
+      }
+    });
+
+    // 4. 检查登录结果并保存最终的 Cookie
+    const responseData = typeof loginRes.data === 'string' ? JSON.parse(loginRes.data) : loginRes.data;
+    if (responseData && responseData.success) {
+      const finalCookies = loginRes.headers['set-cookie'] || [];
+      sessionCookie = finalCookies.map(c => c.split(';')[0]).join('; ');
+      console.log('登录成功！已保存会话 Cookie。');
+      return true;
+    } else {
+      console.error('登录失败:', responseData ? responseData.msg : '未知错误');
+      return false;
+    }
+  } catch (e) {
+    console.error('登录过程中发生网络错误:', e);
+    return false;
+  }
+}
+
+/**
+ * 脚本初始化函数，负责执行登录
+ */
+async function initialize() {
+  // 使用您提供的账号密码进行登录
+  await login("xiaohai1314", "xiaohai1314");
+}
+
+// 在脚本加载时立即执行初始化
+initialize();
+
+// --- 原有函数修改 ---
+
+async function getConfig() {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致 (已添加 Cookie)
 async function getCards(ext) {
+  if (!sessionCookie) {
+    console.error("未登录，无法获取内容。");
+    return jsonify({ list: [] });
+  }
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
   const { data } = await $fetch.get(url, { 
     headers: { 
       'Referer': appConfig.site, 
       'User-Agent': UA,
-      'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+      'Cookie': sessionCookie // 使用全局 Cookie
     } 
   });
   const $ = cheerio.load(data);
@@ -74,7 +167,6 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 辅助函数：从任何链接中提取“协议无关”的纯净URL用于去重
 function getProtocolAgnosticUrl(rawUrl) {
     if (!rawUrl) return null;
     const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
@@ -82,18 +174,21 @@ function getProtocolAgnosticUrl(rawUrl) {
 }
 
 async function getTracks(ext) {
+    if (!sessionCookie) {
+      console.error("未登录，无法获取资源链接。");
+      return jsonify({ list: [] });
+    }
     ext = argsify(ext);
     const tracks = [];
     const url = ext.url;
-    const uniqueLinks = new Set(); // 用于去重的“登记簿”
+    const uniqueLinks = new Set();
 
     try {
-        // --- 修改部分：添加了 Cookie ---
         const { data } = await $fetch.get(url, { 
           headers: { 
             'Referer': appConfig.site, 
             'User-Agent': UA,
-            'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+            'Cookie': sessionCookie // 使用全局 Cookie
           } 
         });
         const $ = cheerio.load(data);
@@ -101,45 +196,34 @@ async function getTracks(ext) {
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        // --- 策略一：精准匹配 (已修正) ---
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+            let panUrl = match[0].replace('http://', 'https://' );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
-
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
 
-        // --- 策略二：<a>标签扫描 (已修正) ---
         $('a[href*="cloud.189.cn"]').each((_, el) => {
             const $el = $(el);
             let href = $el.attr('href');
             if (!href) return;
-            
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-
-            href = href.replace('http://', 'https://'  );
-
+            href = href.replace('http://', 'https://' );
             let trackName = $el.text().trim();
-            if (trackName.startsWith('http'  ) || trackName === '') {
-                trackName = pageTitle;
-            }
-
+            if (trackName.startsWith('http' ) || trackName === '') trackName = pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
-        // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText  )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+        while ((match = urlPattern.exec(bodyText )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://' );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
-
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
@@ -150,27 +234,24 @@ async function getTracks(ext) {
 
     } catch (e) {
         console.error('获取详情页失败:', e);
-        return jsonify({
-            list: [{
-                title: '错误',
-                tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
-            }]
-        });
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }] }] });
     }
 }
 
-// search 函数与 v21 原版完全一致 (已添加 Cookie)
 async function search(ext) {
+  if (!sessionCookie) {
+    console.error("未登录，无法执行搜索。");
+    return jsonify({ list: [] });
+  }
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
   const { data } = await $fetch.get(url, { 
     headers: { 
       'User-Agent': UA,
-      'Cookie': 'JSESSIONID=C57781E1D646D6C1A62A32160611FC62; cms_token=4febafb5c99a429d8373159ebcd4b7aa; __gads=ID=c3736e4ae873135e:T=1757177996:RT=1757177996:S=ALNI_MZ_4VhTl7nwkhAkCWRTG-rGl5F0lg; __gpi=UID=000011910c26eee9:T=1757177996:RT=1757177996:S=ALNI_MZZ6cUxfxPPF9flu3zbHBHbMPbcXA; __eoi=ID=b3f4d74171b08e4b:T=1757177996:RT=1757177996:S=AA-AfjZOBi2cilokmucUViJXs__q; cms_accessToken=94f3a9fd5a684a9db9e9952716b8b3a4; cms_refreshToken=4a45b4adceb74936a4c4011a85655f1d'
+      'Cookie': sessionCookie // 使用全局 Cookie
     } 
   });
   const $ = cheerio.load(data);
