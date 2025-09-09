@@ -1,83 +1,57 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v29 (JSON登录版)
+ * 脚本名称: 雷鲸资源站脚本 - v28 (后端Cookie分离版)
  *
- * 更新说明:
- * - 登录接口返回 JSON，直接提取 accessToken/refreshToken。
- * - 不再依赖 headers.set-cookie，适配 App 环境。
- * - 所有请求仍通过 fetchWithLogin()，Cookie 自动带上。
- * - 保留原始分类结构 (tabs/ext) 完全不变。
+ * 变更说明:
+ * - 这是一个前后端分离的版本。
+ * - 后端是一个独立的Node.js服务，负责通过Puppeteer自动登录并维护有效的Cookie。
+ * - 本脚本在执行任何需要登录的请求前，会先从后端服务获取最新的Cookie。
+ * - 移除了所有硬编码的Cookie，实现了登录状态的动态化和自动化。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// =============== 登录配置（请自行修改账号/密码哈希/登录token）================
-const USERNAME = "xiaohai1314"; 
-const PASSWORD_HASH = "902253f297e77213c7ea45d96dc1edafcb9e5e5bcebf87363ff0949bf2eaefca"; 
-const LOGIN_TOKEN = "9a85d97e4f834e0fbc7cf7bbcda5c534"; 
+// =================== 新增配置 START ===================
+// 后端Cookie服务的地址。如果你的后端部署在其他服务器，请修改'localhost'为服务器IP地址。
+const COOKIE_PROVIDER_URL = 'http://192.168.10.111:3001/get-cookie';
 
-let cookieStr = ""; // 全局保存 Cookie
+// 用于在脚本运行期间缓存从后端获取的Cookie ，避免重复请求。
+let dynamicCookie = null; 
 
-// login: 直接解析 JSON 提取 accessToken/refreshToken
-async function login() {
-  const timestamp = Date.now();
-  const body = `jumpUrl=&token=${LOGIN_TOKEN}&captchaKey=&captchaValue=&type=10&account=${USERNAME}&password=${PASSWORD_HASH}`;
-  const res = await $fetch.post(`https://www.leijing.xyz/login?&timestamp=${timestamp}`, body, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": UA,
-      "Origin": "https://www.leijing.xyz",
-      "Referer": "https://www.leijing.xyz/login",
-      "X-Requested-With": "XMLHttpRequest"
+/**
+ * 确保获取到有效的Cookie。
+ * 如果尚未获取，则从后端服务请求；如果已获取，则直接返回缓存的Cookie。
+ * @returns {Promise<string>} 返回Cookie字符串，如果失败则为空字符串。
+ */
+async function ensureCookie() {
+    if (dynamicCookie) {
+        return dynamicCookie;
     }
-  });
-
-  let data;
-  try {
-    data = JSON.parse(res.data);
-  } catch (e) {
-    throw new Error("登录失败: 返回不是 JSON → " + res.data.slice(0, 100));
-  }
-
-  if (!data.accessToken) {
-    throw new Error("登录失败: 未找到 accessToken → " + res.data.slice(0, 100));
-  }
-
-  cookieStr = `cms_accessToken=${data.accessToken}; cms_refreshToken=${data.refreshToken}`;
-  console.log("登录成功，新的 Cookie:", cookieStr);
-}
-
-// fetchWithLogin: 自动携带 Cookie，如果失效会重新登录
-async function fetchWithLogin(url, options = {}) {
-  if (!cookieStr) {
-    await login();
-  }
-  try {
-    const res = await $fetch.get(url, {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-        "User-Agent": UA,
-        "Referer": "https://www.leijing.xyz",
-        "Cookie": cookieStr
-      }
-    });
-    if (!res.data || res.data.includes("登录") || res.status === 401 || res.status === 403) {
-      await login();
-      return await fetchWithLogin(url, options);
+    
+    try {
+        console.log('正在从后端服务获取最新Cookie...');
+        const { data } = await $fetch.get(COOKIE_PROVIDER_URL);
+        if (data && data.success) {
+            dynamicCookie = data.cookie;
+            console.log('Cookie获取成功！');
+            return dynamicCookie;
+        } else {
+            throw new Error('从后端获取Cookie失败: ' + (data.message || '未知错误'));
+        }
+    } catch (error) {
+        console.error('无法连接到Cookie服务:', error.message);
+        // 返回空字符串，让后续的请求在没有Cookie的情况下进行（可能会失败，但脚本不会崩溃）
+        return '';
     }
-    return res;
-  } catch (err) {
-    console.error("请求失败:", err);
-    throw err;
-  }
 }
+// =================== 新增配置 END ===================
 
-// appConfig 与 v21 原版一致
+
+// appConfig 与原版完全一致
 const appConfig = {
-  ver: 29,
+  ver: 28, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -90,18 +64,27 @@ const appConfig = {
   ],
 };
 
-async function getConfig() {
+async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
-// getCards
+// getCards 函数 - 已修改为使用动态Cookie
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   const url = appConfig.site + `/${id}&page=${page}`;
+  
+  // --- 修改部分：动态获取Cookie ---
+  const cookie = await ensureCookie();
 
-  const { data } = await fetchWithLogin(url);
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'Referer': appConfig.site, 
+      'User-Agent': UA,
+      'Cookie': cookie // 使用从后端获取的动态Cookie
+    } 
+  });
   const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
@@ -129,88 +112,108 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 提取纯净 URL
+// 辅助函数 - 原封不动
 function getProtocolAgnosticUrl(rawUrl) {
-  if (!rawUrl) return null;
-  const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
-  return match ? match[0] : null;
+    if (!rawUrl) return null;
+    const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
+    return match ? match[0] : null;
 }
 
-// getTracks
+// getTracks 函数 - 已修改为使用动态Cookie
 async function getTracks(ext) {
-  ext = argsify(ext);
-  const tracks = [];
-  const url = ext.url;
-  const uniqueLinks = new Set();
+    ext = argsify(ext);
+    const tracks = [];
+    const url = ext.url;
+    const uniqueLinks = new Set();
 
-  try {
-    const { data } = await fetchWithLogin(url);
-    const $ = cheerio.load(data);
+    try {
+        // --- 修改部分：动态获取Cookie ---
+        const cookie = await ensureCookie();
 
-    const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
-    const bodyText = $('body').text();
+        const { data } = await $fetch.get(url, { 
+          headers: { 
+            'Referer': appConfig.site, 
+            'User-Agent': UA,
+            'Cookie': cookie // 使用从后端获取的动态Cookie
+          } 
+        });
+        const $ = cheerio.load(data);
+        
+        const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+        const bodyText = $('body').text();
 
-    // 策略一：精准匹配
-    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
-    let match;
-    while ((match = precisePattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
-      let agnosticUrl = getProtocolAgnosticUrl(panUrl);
-      if (uniqueLinks.has(agnosticUrl)) continue;
-      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-      uniqueLinks.add(agnosticUrl);
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        let match;
+        while ((match = precisePattern.exec(bodyText)) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'   );
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+            if (uniqueLinks.has(agnosticUrl)) continue;
+
+            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+            uniqueLinks.add(agnosticUrl);
+        }
+
+        $('a[href*="cloud.189.cn"]').each((_, el) => {
+            const $el = $(el);
+            let href = $el.attr('href');
+            if (!href) return;
+            
+            let agnosticUrl = getProtocolAgnosticUrl(href);
+            if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
+
+            href = href.replace('http://', 'https://'   );
+
+            let trackName = $el.text().trim();
+            if (trackName.startsWith('http'   ) || trackName === '') {
+                trackName = pageTitle;
+            }
+
+            tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
+            uniqueLinks.add(agnosticUrl);
+        });
+
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
+        while ((match = urlPattern.exec(bodyText   )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'   );
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+            if (uniqueLinks.has(agnosticUrl)) continue;
+
+            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+            uniqueLinks.add(agnosticUrl);
+        }
+
+        return tracks.length
+            ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+            : jsonify({ list: [] });
+
+    } catch (e) {
+        console.error('获取详情页失败:', e);
+        return jsonify({
+            list: [{
+                title: '错误',
+                tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
+            }]
+        });
     }
-
-    // 策略二：<a> 标签
-    $('a[href*="cloud.189.cn"]').each((_, el) => {
-      const $el = $(el);
-      let href = $el.attr('href');
-      if (!href) return;
-      let agnosticUrl = getProtocolAgnosticUrl(href);
-      if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-      href = href.replace('http://', 'https://');
-      let trackName = $el.text().trim();
-      if (trackName.startsWith('http') || trackName === '') {
-        trackName = pageTitle;
-      }
-      tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
-      uniqueLinks.add(agnosticUrl);
-    });
-
-    // 策略三：纯文本 URL
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-    while ((match = urlPattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
-      let agnosticUrl = getProtocolAgnosticUrl(panUrl);
-      if (uniqueLinks.has(agnosticUrl)) continue;
-      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-      uniqueLinks.add(agnosticUrl);
-    }
-
-    return tracks.length
-      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
-      : jsonify({ list: [] });
-
-  } catch (e) {
-    console.error('获取详情页失败:', e);
-    return jsonify({
-      list: [{
-        title: '错误',
-        tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
-      }]
-    });
-  }
 }
 
-// search
+// search 函数 - 已修改为使用动态Cookie
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
   let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+  
+  // --- 修改部分：动态获取Cookie ---
+  const cookie = await ensureCookie();
 
-  const { data } = await fetchWithLogin(url);
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'User-Agent': UA,
+      'Cookie': cookie // 使用从后端获取的动态Cookie
+    } 
+  });
   const $ = cheerio.load(data);
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
