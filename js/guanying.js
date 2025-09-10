@@ -1,22 +1,21 @@
 /**
- * 观影网脚本 - v19.0 (最终融合版)
+ * 观影网脚本 - v18.0 (架构升级版)
  *
- * --- 核心修正 ---
- * 1.  【功能融合】: 保留了v19.0所有能成功提取网盘的核心逻辑。
- * 2.  【搜索升级】: 将v19.0原有的、基于cheerio的搜索功能，替换为v5.0版本中更高效、更精确的、基于_obj.search数据块的搜索功能。
- * 3.  这是一个集v19.0稳定性与v5.0高效性于一体的最终版本。
+ * --- 核心思想 ---
+ * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
+ * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
+ * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
  */
 
 // ================== 配置区 ==================
-const cheerio = createCheerio();
+// ★ 后端不再需要cheerio
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-
-// 【Cookie修正】直接使用您提供的有效Cookie
-const HARDCODED_COOKIE = 'BT_auth=14c1jE0Dre6jn9SM1nuV6fiGDyrt-kTogiBFgNq8EJVKWC7uewDzoTun981wua_5-fSwVbsXlQxEc7VR5emDJ3mC9d6xQv2n5g2NxEetQJxmYadFe3M3Rv7G-yYMFqUcBezHLOTuQD6_WpS93rg4jQIa8jatA1Z5ZgbCbdUj_5hrN94dXeatvA;BT_cookietime=9005krUNeXOWwSmnEPTL02XixYeVHBuMSSPiA4x4oSfTUXODkJJ3;browser_verified=b142dc23ed95f767248f452739a94198;';
+// ★ 指向你的后端服务器地址
+const BACKEND_URL = 'http://192.168.1.5:5000'; 
 
 const appConfig = {
-    ver: 19.0,
-    title: '观影网',
+    ver: 18.0,
+    title: '观影网 (后端版 )', // 标题变更以区分
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -25,131 +24,101 @@ const appConfig = {
     ],
 };
 
-// ================== 核心函数 (简化登录逻辑  ) ==================
+// ★★★★★【Cookie相关逻辑已全部移除】★★★★★
 
-function log(msg) { try { $log(`[观影网 V19.0] ${msg}`); } catch (_) { console.log(`[观影网 V19.0] ${msg}`); } }
+// ================== 核心函数 ==================
+
+function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-async function fetchWithCookie(url, options = {}) {
-    const headers = { 
-        'User-Agent': UA, 
-        'Cookie': HARDCODED_COOKIE, 
-        'Referer': appConfig.site, 
-        ...options.headers 
-    };
-    return $fetch.get(url, { ...options, headers });
+// ★ 【Cookie 和 fetchWithCookie 已被移除】
+
+// --- init (与V17.0完全一致) ---
+async function init(ext) {
+    return jsonify({});
 }
 
-async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify(appConfig); }
+// --- getConfig (与V17.0完全一致) ---
+async function getConfig() {
+    return jsonify(appConfig);
+}
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【业务逻辑函数 - 已修正】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
+// --- 【改造】getCards ---
 async function getCards(ext) {
     ext = argsify(ext);
-    const { id, page = 1 } = ext;
-    const url = `${appConfig.site}${id}${page}`;
-    log(`请求分类列表: ${url}`);
+    const { page = 1, id } = ext;
+    // ★ 直接请求后端 /getCards 接口
+    const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
+    log(`请求后端获取卡片列表: ${url}`);
 
     try {
-        const { data: htmlText } = await fetchWithCookie(url);
-        const inlistMatch = htmlText.match(/_obj\.inlist\s*=\s*({.*?});/);
-        if (!inlistMatch || !inlistMatch[1]) {
-            throw new Error("未能从HTML响应中匹配到 '_obj.inlist' 数据块。");
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
-        const inlistData = JSON.parse(inlistMatch[1]);
-        if (!inlistData || !inlistData.i) {
-            return jsonify({ list: [] });
-        }
-        const cards = inlistData.i.map((item, index) => {
-            const detailApiUrl = `${appConfig.site}res/downurl/${inlistData.ty}/${item}`;
-            return {
-                vod_id: detailApiUrl,
-                vod_name: inlistData.t[index],
-                vod_pic: `https://s.tutu.pm/img/${inlistData.ty}/${item}/220.webp`,
-                vod_remarks: inlistData.g[index] || '',
-                ext: { url: detailApiUrl },
-            };
-        }  );
-        return jsonify({ list: cards });
+        log(`✅ 成功从后端获取到 ${result.list.length} 个项目。`);
+        return jsonify({ list: result.list });
     } catch (e) {
-        log(`❌ 获取卡片列表异常: ${e.message}`);
+        log(`❌ 请求后端卡片列表异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
+// --- 【改造】getTracks ---
 async function getTracks(ext) {
     ext = argsify(ext);
-    let url = ext.url; 
-    log(`请求详情数据: ${url}`);
+    const detailUrl = ext.url; 
+    // ★ 直接请求后端 /getTracks 接口
+    const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
+    log(`请求后端获取详情数据: ${url}`);
     try {
-        const { data } = await fetchWithCookie(url);
-        const respstr = JSON.parse(data);
-        let tracks = [];
-        if (respstr.hasOwnProperty('panlist')) {
-            const regex = { '中英': /中英/g, '1080P': /1080P/g, '杜比': /杜比/g, '原盘': /原盘/g, '1080p': /1080p/g, '双语字幕': /双语字幕/g };
-            respstr.panlist.url.forEach((item, index) => {
-                let name = '';
-                for (const keyword in regex) {
-                    const matches = (respstr.panlist.name[index] || '').match(regex[keyword]);
-                    if (matches) name = `${name}${matches[0]}`;
-                }
-                tracks.push({ name: name || respstr.panlist.name[index], pan: item, ext: { url: '' } });
-            });
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
-        return jsonify({ list: [{ title: '默认分组', tracks }] });
+        if (result.message) {
+            $utils.toastError(result.message, 4000);
+        }
+        return jsonify({ list: result.list });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// 【【【【【【【【【【【【【【【【【 此函数已从v5.0移植并适配 】】】】】】】】】】】】】】】】】
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// --- 【改造】search ---
 async function search(ext) {
     ext = argsify(ext);
+    const text = ext.text;
     const page = ext.page || 1;
-    const url = `${appConfig.site}s/1---${page}/${encodeURIComponent(ext.text)}`;
-    log(`执行v5.0版搜索: ${url}`);
-    
+    // ★ 直接请求后端 /search 接口
+    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
+    log(`请求后端执行搜索: ${url}`);
     try {
-        const { data: html } = await fetchWithCookie(url);
-        const dataMatch = html.match(/_obj\.search\s*=\s*({.*?});/);
-        if (!dataMatch || !dataMatch[1]) {
-            log("未在搜索结果页匹配到 _obj.search 数据");
-            return jsonify({ list: [] });
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
-        const searchData = JSON.parse(dataMatch[1]).l;
-        if (!searchData || !searchData.i) return jsonify({ list: [] });
-
-        const cards = searchData.i.map((_, index) => {
-            const type = searchData.d[index];
-            const vodId = searchData.i[index];
-            const detailApiUrl = `${appConfig.site}res/downurl/${type}/${vodId}`;
-            const vodName = `${searchData.title[index]} ${searchData.name[index]} (${searchData.year[index]})`;
-            
-            const vod_pic = `https://s.tutu.pm/img/${type}/${vodId}/220.webp`;
-
-            return {
-                vod_id: detailApiUrl,
-                vod_name: vodName,
-                vod_pic: vod_pic,
-                vod_remarks: `豆瓣 ${searchData.pf.db.s[index] ? searchData.pf.db.s[index].toFixed(1 ) : '--'}`,
-                ext: { url: detailApiUrl },
-            };
-        });
-        return jsonify({ list: cards });
+        log(`✅ 成功从后端获取到 ${result.list.length} 个搜索结果。`);
+        return jsonify({ list: result.list });
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
 }
 
+// --- 【原封不动】getPlayinfo ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
