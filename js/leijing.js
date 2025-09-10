@@ -1,24 +1,22 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v32 (前后端分离修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v33 (仅搜索代理版)
  *
  * 修正说明:
- * - 前端负责所有HTML解析逻辑，与原版一致。
- * - 所有需要登录的网络请求 ($fetch) 均指向后端代理。
- * - 后端代理负责登录、携带Cookie请求目标站，并返回原始HTML。
- * - 前端接收HTML后，使用Cheerio进行解析和渲染。
+ * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
+ * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
+ * - 后端服务器功能简化，只为搜索提供服务。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// 新增：后端服务器地址
+// 后端服务器地址 (仅供search使用)
 const BACKEND_URL = 'http://192.168.10.111:3001';
 
-// appConfig 与原版完全一致
 const appConfig = {
-  ver: 32, // 版本号更新
+  ver: 33, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,32 +29,31 @@ const appConfig = {
   ],
 };
 
-async function getConfig(  ) {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
 // 辅助函数，用于处理$fetch返回的数据
-// 不同的$fetch实现返回数据的方式不同，此函数做兼容处理
 function getHtmlFromResponse(response) {
     if (typeof response === 'string') {
-        return response; // 直接返回了HTML字符串
+        return response;
     }
     if (response && typeof response.data === 'string') {
-        return response.data; // 返回了 { data: "<html>..." } 结构
+        return response.data;
     }
-    // 如果是其他意外结构，返回空字符串防止cheerio报错
     console.error("收到了非预期的响应格式:", response);
     return ''; 
 }
 
+// getCards 函数 - 直接请求原始网站
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   
-  const requestUrl = `${BACKEND_URL}/getCards?id=${encodeURIComponent(id)}&page=${page}`;
-  const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response); // **核心修正**
+  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((index, each) => {
@@ -91,15 +88,16 @@ function getProtocolAgnosticUrl(rawUrl) {
     return match ? match[0] : null;
 }
 
+// getTracks 函数 - 直接请求原始网站
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
     const uniqueLinks = new Set();
 
     try {
-        const requestUrl = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(ext.url)}`;
-        const response = await $fetch.get(requestUrl);
-        const htmlData = getHtmlFromResponse(response); // **核心修正**
+        const requestUrl = ext.url;
+        const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+        const htmlData = getHtmlFromResponse(response);
 
         const $ = cheerio.load(htmlData);
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
@@ -151,6 +149,7 @@ async function getTracks(ext) {
     }
 }
 
+// search 函数 - 通过后端代理
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -159,7 +158,7 @@ async function search(ext) {
 
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
   const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response); // **核心修正**
+  const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, el) => {
