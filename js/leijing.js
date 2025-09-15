@@ -11,7 +11,7 @@
  * =================================================================
  */
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36";
 const cheerio = createCheerio();
 
 // appConfig 与 v21 原版完全一致
@@ -44,7 +44,7 @@ async function getCards(ext) {
     headers: { 
       'Referer': appConfig.site, 
       'User-Agent': UA,
-      'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+      'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
     } 
   });
   const $ = cheerio.load(data);
@@ -93,7 +93,7 @@ async function getTracks(ext) {
           headers: { 
             'Referer': appConfig.site, 
             'User-Agent': UA,
-            'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+            'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
           } 
         });
         const $ = cheerio.load(data);
@@ -170,7 +170,7 @@ async function search(ext) {
   const { data } = await $fetch.get(url, { 
     headers: { 
       'User-Agent': UA,
-      'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+      'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
     } 
   });
   const $ = cheerio.load(data);
