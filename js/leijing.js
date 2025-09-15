@@ -1,22 +1,22 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v33 (仅搜索代理版)
+ * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
  *
- * 修正说明:
- * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
- * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
- * - 后端服务器功能简化，只为搜索提供服务。
+ * 最终修正说明:
+ * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
+ * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
+ * - 保留“脏链接”以适应App的特殊工作机制。
+ * - 修正所有已知的、由我引入的错误。
+ * - 根据用户要求，直接在网络请求中添加 Cookie 以实现登录。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// 后端服务器地址 (仅供search使用)
-const BACKEND_URL = 'http://192.168.10.111:3001';
-
+// appConfig 与 v21 原版完全一致
 const appConfig = {
-  ver: 33, // 版本号更新
+  ver: 27,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -29,33 +29,25 @@ const appConfig = {
   ],
 };
 
-async function getConfig( ) {
+async function getConfig(   ) {
   return jsonify(appConfig);
 }
 
-// 辅助函数，用于处理$fetch返回的数据
-function getHtmlFromResponse(response) {
-    if (typeof response === 'string') {
-        return response;
-    }
-    if (response && typeof response.data === 'string') {
-        return response.data;
-    }
-    console.error("收到了非预期的响应格式:", response);
-    return ''; 
-}
-
-// getCards 函数 - 直接请求原始网站
+// getCards 函数与 v21 原版完全一致 (已添加 Cookie)
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-  
-  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
-  const htmlData = getHtmlFromResponse(response);
-
-  const $ = cheerio.load(htmlData);
+  const url = appConfig.site + `/${id}&page=${page}`;
+  // --- 修改部分：添加了 Cookie ---
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'Referer': appConfig.site, 
+      'User-Agent': UA,
+      'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+    } 
+  });
+  const $ = cheerio.load(data);
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
     const href = $(each).find('h2 a').attr('href');
@@ -82,54 +74,72 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
+// 辅助函数：从任何链接中提取“协议无关”的纯净URL用于去重
 function getProtocolAgnosticUrl(rawUrl) {
     if (!rawUrl) return null;
     const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
     return match ? match[0] : null;
 }
 
-// getTracks 函数 - 直接请求原始网站
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
-    const uniqueLinks = new Set();
+    const url = ext.url;
+    const uniqueLinks = new Set(); // 用于去重的“登记簿”
 
     try {
-        const requestUrl = ext.url;
-        const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
-        const htmlData = getHtmlFromResponse(response);
-
-        const $ = cheerio.load(htmlData);
+        // --- 修改部分：添加了 Cookie ---
+        const { data } = await $fetch.get(url, { 
+          headers: { 
+            'Referer': appConfig.site, 
+            'User-Agent': UA,
+            'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+          } 
+        });
+        const $ = cheerio.load(data);
+        
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // --- 策略一：精准匹配 (已修正) ---
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+            let panUrl = match[0].replace('http://', 'https://'   );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
+
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
 
+        // --- 策略二：<a>标签扫描 (已修正) ---
         $('a[href*="cloud.189.cn"]').each((_, el) => {
             const $el = $(el);
             let href = $el.attr('href');
             if (!href) return;
+            
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-            href = href.replace('http://', 'https://'  );
-            let trackName = $el.text().trim() || pageTitle;
+
+            href = href.replace('http://', 'https://'   );
+
+            let trackName = $el.text().trim();
+            if (trackName.startsWith('http'   ) || trackName === '') {
+                trackName = pageTitle;
+            }
+
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
+        // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText  )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+        while ((match = urlPattern.exec(bodyText   )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'   );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
+
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
@@ -149,18 +159,21 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数 - 通过后端代理
+// search 函数与 v21 原版完全一致 (已添加 Cookie)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
-
-  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-  const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response);
-
-  const $ = cheerio.load(htmlData);
+  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+  // --- 修改部分：添加了 Cookie ---
+  const { data } = await $fetch.get(url, { 
+    headers: { 
+      'User-Agent': UA,
+      'Cookie': 'cms_token=9a85d97e4f834e0fbc7cf7bbcda5c534; __gads=ID=6264d985209341bc:T=1757398233:RT=1757398233:S=ALNI_MYRqqjCYqCvzG9qO-Panm8HwXv8CA; __gpi=UID=0000119384d9d03e:T=1757398233:RT=1757398233:S=ALNI_MaFtC8si7aMa0VqRRA6pfC55I0LPQ; __eoi=ID=3f91d1c77bd77ead:T=1757398233:RT=1757398233:S=AA-AfjbHRx5XLOeOd9IUrD-f7uG0; JSESSIONID=620543793A2C0C8EEA5AD0EAD5D6EAE3'
+    } 
+  });
+  const $ = cheerio.load(data);
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
