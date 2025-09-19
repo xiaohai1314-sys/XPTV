@@ -1,22 +1,22 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v27 (Cookie登录修正版)
+ * 脚本名称: 雷鲸资源站脚本 - v33 (仅搜索代理版)
  *
- * 最终修正说明:
- * - 严格保持 appConfig, getCards, search 函数与v21原版一致。
- * - 引入“协议无关”的去重逻辑，彻底解决所有策略之间的重复按钮问题。
- * - 保留“脏链接”以适应App的特殊工作机制。
- * - 修正所有已知的、由我引入的错误。
- * - 根据用户要求，直接在网络请求中添加 Cookie 以实现登录。
+ * 修正说明:
+ * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
+ * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
+ * - 后端服务器功能简化，只为搜索提供服务。
  * =================================================================
  */
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
 
-// appConfig 与 v21 原版完全一致
+// 后端服务器地址 (仅供search使用)
+const BACKEND_URL = 'http://192.168.10.104:3001';
+
 const appConfig = {
-  ver: 27,
+  ver: 33, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -29,25 +29,33 @@ const appConfig = {
   ],
 };
 
-async function getConfig(   ) {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
-// getCards 函数与 v21 原版完全一致 (已添加 Cookie)
+// 辅助函数，用于处理$fetch返回的数据
+function getHtmlFromResponse(response) {
+    if (typeof response === 'string') {
+        return response;
+    }
+    if (response && typeof response.data === 'string') {
+        return response.data;
+    }
+    console.error("收到了非预期的响应格式:", response);
+    return ''; 
+}
+
+// getCards 函数 - 直接请求原始网站
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-  const url = appConfig.site + `/${id}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
-  const { data } = await $fetch.get(url, { 
-    headers: { 
-      'Referer': appConfig.site, 
-      'User-Agent': UA,
-      'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
-    } 
-  });
-  const $ = cheerio.load(data);
+  
+  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  const htmlData = getHtmlFromResponse(response);
+
+  const $ = cheerio.load(htmlData);
   $('.topicItem').each((index, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
     const href = $(each).find('h2 a').attr('href');
@@ -74,72 +82,54 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 辅助函数：从任何链接中提取“协议无关”的纯净URL用于去重
 function getProtocolAgnosticUrl(rawUrl) {
     if (!rawUrl) return null;
     const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
     return match ? match[0] : null;
 }
 
+// getTracks 函数 - 直接请求原始网站
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
-    const url = ext.url;
-    const uniqueLinks = new Set(); // 用于去重的“登记簿”
+    const uniqueLinks = new Set();
 
     try {
-        // --- 修改部分：添加了 Cookie ---
-        const { data } = await $fetch.get(url, { 
-          headers: { 
-            'Referer': appConfig.site, 
-            'User-Agent': UA,
-            'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
-          } 
-        });
-        const $ = cheerio.load(data);
-        
+        const requestUrl = ext.url;
+        const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+        const htmlData = getHtmlFromResponse(response);
+
+        const $ = cheerio.load(htmlData);
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        // --- 策略一：精准匹配 (已修正) ---
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'   );
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
-
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
 
-        // --- 策略二：<a>标签扫描 (已修正) ---
         $('a[href*="cloud.189.cn"]').each((_, el) => {
             const $el = $(el);
             let href = $el.attr('href');
             if (!href) return;
-            
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-
-            href = href.replace('http://', 'https://'   );
-
-            let trackName = $el.text().trim();
-            if (trackName.startsWith('http'   ) || trackName === '') {
-                trackName = pageTitle;
-            }
-
+            href = href.replace('http://', 'https://'  );
+            let trackName = $el.text().trim() || pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
-        // --- 策略三：纯文本URL扫描 (已修正) ---
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText   )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'   );
+        while ((match = urlPattern.exec(bodyText  )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
-
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
@@ -159,21 +149,18 @@ async function getTracks(ext) {
     }
 }
 
-// search 函数与 v21 原版完全一致 (已添加 Cookie)
+// search 函数 - 通过后端代理
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
-  let url = `${appConfig.site}/search?keyword=${text}&page=${page}`;
-  // --- 修改部分：添加了 Cookie ---
-  const { data } = await $fetch.get(url, { 
-    headers: { 
-      'User-Agent': UA,
-      'Cookie': 'JSESSIONID=70EFAE41A154FC54D1FE1A15ED118141; cms_token=fd1962af30fc4159aaf9713753bd9685; cf_clearance=hv_pgnZaT2TT4_ba5Xn5XPsZw.LCtCbA3TmiKOv1VEo-1757926714-1.2.1.1-ig3OXBG3LEX4MtxI0eGCnQBbjlU03c0lbOCvDlYA0R6Z2fsgXqSRQ4ByZIqSLl5DjvP2mvFZgBTfp4AyaIW9xcpNYN8R.h_xs.zk.4aU4Gt7uaH3IFBkmfMbrzekTe0Pg3LfArRt3s_eESE9quLIThgpMpqb7k9Vv2C0cMbRCQUghlaFzb55aYKe0idoflu4vUtwoZMFpZSvHNvXpijktnlukn3HpiAR1ht4tDGlXgw; cms_accessToken=3648de10d4854ad4bb5bf9f7f61a78d9; cms_refreshToken=76075a2c00e24df0b91318abb4620231'
-    } 
-  });
-  const $ = cheerio.load(data);
+
+  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+  const response = await $fetch.get(requestUrl);
+  const htmlData = getHtmlFromResponse(response);
+
+  const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
