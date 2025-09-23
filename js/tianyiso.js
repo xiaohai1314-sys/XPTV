@@ -170,7 +170,7 @@ async function search(ext) {
     console.log('找到的链接:', links);
     
     if (links.length > 0) {
-      // 对每个链接，尝试从周围的HTML中提取标题
+              // 对每个链接，尝试从周围的HTML中提取标题
       for (let link of links) {
         let title = '';
         
@@ -178,32 +178,54 @@ async function search(ext) {
         const linkIndex = data.indexOf(`href="${link}"`);
         if (linkIndex > -1) {
           // 获取链接周围的HTML片段
-          const contextStart = Math.max(0, linkIndex - 500);
-          const contextEnd = Math.min(data.length, linkIndex + 1000);
+          const contextStart = Math.max(0, linkIndex - 1000);
+          const contextEnd = Math.min(data.length, linkIndex + 1500);
           const context = data.substring(contextStart, contextEnd);
+          
+          // 获取搜索关键词用于匹配
+          const searchTerm = decodeURIComponent(text);
           
           // 多种方式提取标题
           const titlePatterns = [
-            /<span[^>]*style='color:red;'>[^<]*<\/span>([^<]*)/,
+            // Vue模板中的标题结构
+            /<template[^>]*#title[^>]*>[\s\S]*?<div[^>]*>([^<]*(?:<span[^>]*>[^<]*<\/span>[^<]*)*)<\/div>[\s\S]*?<\/template>/,
+            // 包含搜索关键词的文本段
+            new RegExp(`([^<>"]*${searchTerm}[^<>"]{0,50})`, 'i'),
+            // span标签中的内容
+            /<span[^>]*style='color:red;'>[^<]*<\/span>([^<]{5,100})/,
+            // div中的标题
             /<div[^>]*font-size:medium[^>]*>([^<]+)<\/div>/,
-            /template[^>]*>([^<]+)</,
-            /"([^"]*黄飞鸿[^"]*)"/,  // 包含搜索关键词的文本
+            // 通用文本匹配
+            /"([^"]{10,100})"/,
           ];
           
           for (let pattern of titlePatterns) {
             const titleMatch = context.match(pattern);
             if (titleMatch && titleMatch[1]) {
-              title = titleMatch[1].trim();
-              if (title.length > 5) { // 确保标题有意义
+              title = titleMatch[1]
+                .replace(/<[^>]*>/g, '') // 移除HTML标签
+                .replace(/&nbsp;/g, ' ') // 替换空格实体
+                .trim();
+              
+              // 确保标题有意义且不太长
+              if (title.length > 3 && title.length < 200) {
                 break;
               }
             }
           }
           
-          // 如果还是没有标题，使用链接ID作为标题
+          // 如果还是没有标题，生成一个描述性标题
           if (!title) {
-            title = link.replace('/s/', '资源-');
+            const linkId = link.replace('/s/', '');
+            title = `${searchTerm} - 资源${linkId.substring(0, 8)}`;
           }
+          
+          // 清理标题
+          title = title
+            .replace(/\s+/g, ' ')
+            .replace(/^[^\w\u4e00-\u9fff]*/, '') // 移除开头的特殊字符
+            .replace(/[^\w\u4e00-\u9fff]*$/, '') // 移除结尾的特殊字符
+            .trim();
         }
         
         if (title) {
@@ -212,7 +234,7 @@ async function search(ext) {
             vod_id: link,
             vod_name: title,
             vod_pic: '',
-            vod_remarks: '',
+            vod_remarks: '点击获取网盘链接',
             ext: {
               url: appConfig.site + link,
             },
