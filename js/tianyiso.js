@@ -1,7 +1,6 @@
 const cheerio = createCheerio()
 const CryptoJS = createCryptoJS()
 
-// 更新User-Agent和请求头
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
 const headers = {
@@ -50,58 +49,39 @@ async function getTracks(ext) {
     })
     
     console.log('详情页URL:', url)
-    console.log('详情页HTML长度:', data.length)
     
     // 多种方式提取网盘链接
     let pan = null
     
-    // 方式1: 天翼云盘链接
-    const tianyi1 = data.match(/"(https:\/\/cloud\.189\.cn\/t\/[^"]*)"/)
-    if (tianyi1) {
-      pan = tianyi1[1]
-    }
+    // 方式1: 天翼云盘链接（各种格式）
+    const patterns = [
+      /"(https:\/\/cloud\.189\.cn\/t\/[^"]*)"/, // 带引号
+      /https:\/\/cloud\.189\.cn\/t\/[A-Za-z0-9]+/, // 不带引号
+      /"(https:\/\/pan\.baidu\.com\/s\/[^"]*)"/, // 百度网盘
+      /"(https:\/\/www\.aliyundrive\.com\/s\/[^"]*)"/, // 阿里云盘
+      /"(https:\/\/pan\.quark\.cn\/s\/[^"]*)"/, // 夸克网盘
+      /https:\/\/pan\.baidu\.com\/s\/[A-Za-z0-9]+/, // 百度网盘无引号
+      /https:\/\/www\.aliyundrive\.com\/s\/[A-Za-z0-9]+/, // 阿里云盘无引号
+      /https:\/\/pan\.quark\.cn\/s\/[A-Za-z0-9]+/, // 夸克网盘无引号
+    ]
     
-    // 方式2: 天翼云盘链接（不带引号）
-    if (!pan) {
-      const tianyi2 = data.match(/https:\/\/cloud\.189\.cn\/t\/[A-Za-z0-9]+/)
-      if (tianyi2) {
-        pan = tianyi2[0]
-      }
-    }
-    
-    // 方式3: 百度网盘链接
-    if (!pan) {
-      const baidu = data.match(/"(https:\/\/pan\.baidu\.com\/s\/[^"]*)"/)
-      if (baidu) {
-        pan = baidu[1]
-      }
-    }
-    
-    // 方式4: 阿里云盘链接
-    if (!pan) {
-      const aliyun = data.match(/"(https:\/\/www\.aliyundrive\.com\/s\/[^"]*)"/)
-      if (aliyun) {
-        pan = aliyun[1]
-      }
-    }
-    
-    // 方式5: 夸克网盘链接
-    if (!pan) {
-      const quark = data.match(/"(https:\/\/pan\.quark\.cn\/s\/[^"]*)"/)
-      if (quark) {
-        pan = quark[1]
+    for (let pattern of patterns) {
+      const match = data.match(pattern)
+      if (match) {
+        pan = match[1] || match[0]
+        break
       }
     }
     
     console.log('找到的网盘链接:', pan)
     
     if (!pan) {
-      console.log('未找到网盘链接，页面前1000字符:', data.substring(0, 1000))
+      // 如果没找到链接，可能是页面结构变化，返回原URL让用户手动访问
       return jsonify({ 
         list: [{
-          title: '错误',
+          title: '需要手动访问',
           tracks: [{
-            name: '未找到网盘链接',
+            name: '点击打开网页',
             pan: url,
           }]
         }]
@@ -160,155 +140,144 @@ async function search(ext) {
     })
     
     console.log('搜索页面HTML长度:', data.length)
-    console.log('HTML前500字符:', data.substring(0, 500))
     
-    const $ = cheerio.load(data)
+    // 重要发现：Vue.js渲染的页面，需要从HTML中提取数据而不是解析DOM结构
+    // 从HTML源码中直接提取链接和标题信息
     
-    // 方式1: 根据实际HTML结构解析 - 查找所有包含 /s/ 链接的 a 标签
-    $('a[href^="/s/"]').each((_, element) => {
-      const $link = $(element)
-      const href = $link.attr('href')
-      
-      // 查找标题 - 在 van-card 的 title template 中
-      let title = ''
-      
-      // 尝试从多个位置获取标题
-      const titleDiv = $link.find('template').first().next('div')
-      if (titleDiv.length > 0) {
-        title = titleDiv.text().trim()
+    // 方法1：从HTML注释或脚本中查找数据
+    // 检查是否有JSON数据
+    const jsonMatch = data.match(/window\.__INITIAL_STATE__\s*=\s*(\{[^}]+\})/);
+    if (jsonMatch) {
+      try {
+        const initialState = JSON.parse(jsonMatch[1]);
+        console.log('找到初始状态数据:', initialState);
+        // 根据数据结构解析结果
+      } catch (e) {
+        console.log('解析初始状态失败:', e);
       }
-      
-      if (!title) {
-        const titleSpan = $link.find('div[style*="font-size:medium"]')
-        if (titleSpan.length > 0) {
-          title = titleSpan.text().trim()
-        }
-      }
-      
-      if (!title) {
-        // 最后尝试获取所有文本内容
-        title = $link.text().trim().split('时间:')[0].trim()
-      }
-      
-      // 清理标题
-      title = title.replace(/\s+/g, ' ').trim()
-      
-      if (title && href) {
-        console.log('找到结果:', { title, href })
-        cards.push({
-          vod_id: href,
-          vod_name: title,
-          vod_pic: '',
-          vod_remarks: '',
-          ext: {
-            url: appConfig.site + href,
-          },
-        })
-      }
-    })
-    
-    // 方式2: 如果上面没有找到结果，使用更通用的方法
-    if (cards.length === 0) {
-      console.log('方式1未找到结果，尝试方式2')
-      
-      // 查找所有van-row中的链接
-      $('van-row a, .van-row a').each((_, element) => {
-        const $link = $(element)
-        const href = $link.attr('href')
-        
-        if (href && href.startsWith('/s/')) {
-          let title = $link.find('div').text().trim()
-          
-          if (!title) {
-            title = $link.text().trim()
-          }
-          
-          title = title.replace(/时间:.*$/g, '').trim()
-          title = title.replace(/\s+/g, ' ')
-          
-          if (title) {
-            console.log('方式2找到结果:', { title, href })
-            cards.push({
-              vod_id: href,
-              vod_name: title,
-              vod_pic: '',
-              vod_remarks: '',
-              ext: {
-                url: appConfig.site + href,
-              },
-            })
-          }
-        }
-      })
     }
     
-    // 方式3: 直接从HTML中用正则表达式提取
-    if (cards.length === 0) {
-      console.log('方式2未找到结果，尝试方式3')
-      
-      const linkMatches = data.match(/href="(\/s\/[^"]+)"/g)
-      if (linkMatches) {
-        for (let match of linkMatches) {
-          const href = match.replace('href="', '').replace('"', '')
+    // 方法2：正则表达式直接从HTML源码提取链接和标题
+    // 查找所有的 /s/ 链接
+    const linkPattern = /href="(\/s\/[^"]+)"/g;
+    let linkMatch;
+    const links = [];
+    
+    while ((linkMatch = linkPattern.exec(data)) !== null) {
+      links.push(linkMatch[1]);
+    }
+    
+    console.log('找到的链接:', links);
+    
+    if (links.length > 0) {
+      // 对每个链接，尝试从周围的HTML中提取标题
+      for (let link of links) {
+        let title = '';
+        
+        // 在HTML中查找这个链接的上下文，提取标题
+        const linkIndex = data.indexOf(`href="${link}"`);
+        if (linkIndex > -1) {
+          // 获取链接周围的HTML片段
+          const contextStart = Math.max(0, linkIndex - 500);
+          const contextEnd = Math.min(data.length, linkIndex + 1000);
+          const context = data.substring(contextStart, contextEnd);
           
-          // 查找这个链接周围的标题
-          const linkIndex = data.indexOf(match)
-          const surroundingText = data.substring(linkIndex, linkIndex + 500)
+          // 多种方式提取标题
+          const titlePatterns = [
+            /<span[^>]*style='color:red;'>[^<]*<\/span>([^<]*)/,
+            /<div[^>]*font-size:medium[^>]*>([^<]+)<\/div>/,
+            /template[^>]*>([^<]+)</,
+            /"([^"]*黄飞鸿[^"]*)"/,  // 包含搜索关键词的文本
+          ];
           
-          // 提取标题的正则表达式
-          const titleMatch = surroundingText.match(/<span[^>]*style='color:red;'>[^<]*<\/span>([^<]*)|<div[^>]*>([^<]+)<\/div>/)
-          if (titleMatch) {
-            let title = (titleMatch[1] || titleMatch[2] || '').trim()
-            if (title) {
-              console.log('方式3找到结果:', { title, href })
-              cards.push({
-                vod_id: href,
-                vod_name: title,
-                vod_pic: '',
-                vod_remarks: '',
-                ext: {
-                  url: appConfig.site + href,
-                },
-              })
+          for (let pattern of titlePatterns) {
+            const titleMatch = context.match(pattern);
+            if (titleMatch && titleMatch[1]) {
+              title = titleMatch[1].trim();
+              if (title.length > 5) { // 确保标题有意义
+                break;
+              }
             }
           }
+          
+          // 如果还是没有标题，使用链接ID作为标题
+          if (!title) {
+            title = link.replace('/s/', '资源-');
+          }
+        }
+        
+        if (title) {
+          console.log('解析结果:', { title, link });
+          cards.push({
+            vod_id: link,
+            vod_name: title,
+            vod_pic: '',
+            vod_remarks: '',
+            ext: {
+              url: appConfig.site + link,
+            },
+          });
         }
       }
     }
     
-    console.log('最终解析到的结果数量:', cards.length)
-    if (cards.length > 0) {
-      console.log('第一个结果:', cards[0])
-    } else {
-      console.log('没有找到任何结果，可能页面结构已改变或者搜索无结果')
+    // 方法3：如果上述方法都失败，尝试更简单的文本匹配
+    if (cards.length === 0) {
+      console.log('尝试简单文本匹配');
       
-      // 添加一个调试信息
+      // 直接搜索包含搜索词的文本段落
+      const searchTerm = decodeURIComponent(text);
+      const textPattern = new RegExp(`([^<>]*${searchTerm}[^<>]*)`, 'gi');
+      let textMatch;
+      let index = 0;
+      
+      while ((textMatch = textPattern.exec(data)) !== null && index < 10) {
+        const title = textMatch[1].trim();
+        if (title.length > 10 && title.length < 200) {
+          cards.push({
+            vod_id: `result_${index}`,
+            vod_name: title,
+            vod_pic: '',
+            vod_remarks: '需要手动查找链接',
+            ext: {
+              url: url,
+            },
+          });
+          index++;
+        }
+      }
+    }
+    
+    console.log('最终解析结果数量:', cards.length);
+    
+    if (cards.length === 0) {
+      // 如果完全没有结果，可能是搜索词没有匹配或网站结构变化
       cards.push({
-        vod_id: 'debug',
-        vod_name: '调试信息: 页面已加载但未解析到结果',
+        vod_id: 'no_results',
+        vod_name: '未找到搜索结果',
         vod_pic: '',
-        vod_remarks: `页面长度: ${data.length}, URL: ${url}`,
+        vod_remarks: '请尝试其他关键词或直接访问网站',
         ext: {
           url: url,
         },
-      })
+      });
     }
     
   } catch (error) {
-    console.log('搜索请求错误:', error)
+    console.log('搜索请求错误:', error);
     
     cards.push({
       vod_id: 'error',
-      vod_name: `搜索失败: ${error.message || '未知错误'}`,
+      vod_name: `搜索失败: ${error.message || '网络错误'}`,
       vod_pic: '',
-      vod_remarks: '请检查网络连接或网站状态',
+      vod_remarks: '请检查网络连接',
       ext: {
         url: url,
       },
-    })
+    });
   }
   
   return jsonify({
     list: cards,
-  })
+  });
 }
