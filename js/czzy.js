@@ -76,10 +76,10 @@ async function performReply(threadId) {
 async function getConfig() {
     log("插件初始化 (V5.3 最终完美版)");
     const CUSTOM_CATEGORIES = [
-        { name: '电影区', ext: { id: 'forum-1.htm' } },
-        { name: '剧集区', ext: { id: 'forum-2.htm' } },
-        { name: '4K电影', ext: { id: 'forum-3.htm' } },
-        { name: '4K剧集', ext: { id: 'forum-4.htm' } },
+        { name: '电影区', ext: { id: 'forum-9.htm' } },
+        { name: '剧集区', ext: { id: 'forum-12.htm' } },
+        { name: '4K电影', ext: { id: 'forum-15.htm' } },
+        { name: '4K剧集', ext: { id: 'forum-8.htm' } },
         { name: '纪录片', ext: { id: 'forum-13.htm' } },
         { name: '综艺区', ext: { id: 'forum-14.htm' } }
     ];
