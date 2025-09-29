@@ -8,10 +8,10 @@
  */
 
 // --- 配置区 ---
-const SITE_URL = "https://www.kuafuzy.com";
+const SITE_URL = "https://www.daiguaji.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
-const FALLBACK_PIC = "https://www.kuafuzy.com/view/img/favicon.png";
+const FALLBACK_PIC = "https://www.daiguaji.com/view/img/favicon.png";
 
 // ★★★★★ 最新有效Cookie ★★★★★
 const COOKIE = 'bbs_sid=r9voaafporp90loq4pb9tkb19f; Hm_lvt_2c2cd308748eb9097e250ba67b76ef20=1755075712; HMACCOUNT=369F5CB87E8CAB18; isClose=yes; bbs_token=fCoPPO37Lp4GXjlXVDxmUPv42rBh4Fw7sMPCjJLTe6RMWiOK; __gads=ID=7493bd5727e59480:T=1755075714:RT=1755077860:S=ALNI_MYJvEBISMvpSRLIfA3UDLv6UK981A; __gpi=UID=0000117f6c1e9b44:T=1755075714:RT=1755077860:S=ALNI_Ma4_A9salT3Rdur67vJ1Z3RZqvk1g; __eoi=ID=5cc1b8a075993313:T=1755075714:RT=1755077860:S=AA-AfjaclE5ud7kHwwQeCM5KX1c-; Hm_lpvt_2c2cd308748eb9097e250ba67b76ef20=1755077876';
