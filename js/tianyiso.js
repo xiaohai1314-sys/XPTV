@@ -23,7 +23,7 @@ const appConfig = {
   title: "天逸搜",
   site: "https://www.tianyiso.com",
   tabs: [{
-    name: '只有搜索',
+    name: '搜索功能',
     ext: {
       url: '/'
     },
@@ -130,7 +130,9 @@ async function search(ext) {
   }
   
   const url = appConfig.site + `/search?k=${text}`
+  console.log('====================================')
   console.log('搜索URL:', url)
+  console.log('====================================')
   
   try {
     const { data } = await $fetch.get(url, {
@@ -138,102 +140,138 @@ async function search(ext) {
       timeout: 15000
     })
     
-    console.log('搜索页面HTML长度:', data.length)
+    console.log('页面HTML总长度:', data.length)
     
-    // 使用正则表达式直接从原始HTML中提取数据
-    // 匹配模式: <van-row>...<a href="/s/xxxxx" target="_blank">...内容...</a>...</van-row>
+    // 详细调试：输出完整HTML的关键部分
+    console.log('\n=== HTML 样本分析 ===')
+    console.log('前3000字符:')
+    console.log(data.substring(0, 3000))
+    console.log('\n... 中间省略 ...\n')
     
-    // 匹配每个搜索结果块
-    const blockRegex = /<van-row>\s*<a href="(\/s\/[^"]+)"\s+target="_blank">[\s\S]*?<\/van-row>/g
+    // 查找第一个 /s/ 链接所在的位置
+    const firstLinkIndex = data.indexOf('href="/s/')
+    if (firstLinkIndex !== -1) {
+      console.log('\n=== 找到第一个 /s/ 链接的位置 ===')
+      console.log('位置:', firstLinkIndex)
+      console.log('前后500字符:')
+      console.log(data.substring(Math.max(0, firstLinkIndex - 250), firstLinkIndex + 250))
+    } else {
+      console.log('\n!!! 警告: 页面中完全没有找到 href="/s/ 的链接 !!!')
+    }
     
-    let blockMatch
-    let count = 0
+    // 尝试多种正则匹配策略
+    console.log('\n=== 尝试多种匹配策略 ===')
     
-    while ((blockMatch = blockRegex.exec(data)) !== null) {
-      count++
-      const fullBlock = blockMatch[0]
-      const link = blockMatch[1]
+    // 策略1: 最宽松的匹配 - 只要有 /s/ 链接
+    const links = data.match(/href="(\/s\/[A-Za-z0-9]+)"/g)
+    console.log('策略1 - 找到的所有 /s/ 链接数量:', links ? links.length : 0)
+    if (links) {
+      console.log('前3个链接:', links.slice(0, 3))
+    }
+    
+    // 策略2: 匹配 <a href="/s/..." 标签
+    const aTagRegex = /<a\s+href="(\/s\/[A-Za-z0-9]+)"[^>]*>/g
+    let aTagMatches = []
+    let match
+    while ((match = aTagRegex.exec(data)) !== null) {
+      aTagMatches.push(match[1])
+    }
+    console.log('策略2 - 匹配到的 <a> 标签数量:', aTagMatches.length)
+    
+    // 策略3: 使用 Cheerio 尝试解析
+    const $ = cheerio.load(data)
+    const cheerioLinks = $('a[href^="/s/"]')
+    console.log('策略3 - Cheerio 找到的链接数量:', cheerioLinks.length)
+    
+    // 如果找到链接，使用最宽松的策略提取所有信息
+    if (aTagMatches.length > 0) {
+      console.log('\n=== 开始提取数据（使用 <a> 标签匹配）===')
       
-      console.log(`\n处理第 ${count} 个结果块, 链接: ${link}`)
-      
-      // 从块中提取标题 - 在 <template #title> 或 style="font-size:medium" 的 div 中
-      let title = ''
-      
-      // 方法1: 匹配 <div style="font-size:medium;..."> 中的内容
-      const titleRegex1 = /<div\s+style="[^"]*font-size:medium[^"]*"[^>]*>([\s\S]*?)<\/div>/
-      const titleMatch1 = fullBlock.match(titleRegex1)
-      
-      if (titleMatch1) {
-        // 移除HTML标签（如 <span style='color:red;'>）
-        title = titleMatch1[1]
-          .replace(/<[^>]+>/g, '') // 移除所有HTML标签
-          .trim()
-          .replace(/\s+/g, ' ') // 压缩空白字符
+      for (let i = 0; i < aTagMatches.length; i++) {
+        const link = aTagMatches[i]
+        console.log(`\n处理第 ${i + 1} 个链接: ${link}`)
         
-        console.log('提取到的标题:', title)
-      }
-      
-      // 提取底部信息 - 在 <template #bottom> 中
-      let remarks = ''
-      
-      // 匹配 <div style="padding-bottom: 20px;"> 中的内容
-      const remarksRegex = /<div\s+style="padding-bottom:\s*20px;"[^>]*>([\s\S]*?)<\/div>/
-      const remarksMatch = fullBlock.match(remarksRegex)
-      
-      if (remarksMatch) {
-        remarks = remarksMatch[1]
-          .replace(/<[^>]+>/g, '') // 移除HTML标签
-          .replace(/&nbsp;/g, ' ') // 替换HTML实体
-          .trim()
-          .replace(/\s+/g, ' ')
+        // 找到这个链接在HTML中的位置
+        const linkPattern = new RegExp(`<a\\s+href="${link.replace(/\//g, '\\/')}"[^>]*>([\\s\\S]{0,2000}?)<\\/a>`, 'i')
+        const linkBlock = data.match(linkPattern)
         
-        console.log('提取到的备注:', remarks)
-      }
-      
-      if (title && link) {
-        console.log('✓ 成功解析结果')
-        cards.push({
-          vod_id: link,
-          vod_name: title,
-          vod_pic: '',
-          vod_remarks: remarks || '点击获取网盘链接',
-          ext: {
-            url: appConfig.site + link,
-          },
-        })
-      } else {
-        console.log('✗ 解析失败 - 标题或链接为空')
+        if (!linkBlock) {
+          console.log('  未能提取到此链接的完整块')
+          continue
+        }
+        
+        const block = linkBlock[0]
+        
+        // 提取标题 - 尝试多种模式
+        let title = ''
+        
+        // 模式1: <div style="font-size:medium
+        const titleMatch1 = block.match(/<div\s+style="[^"]*font-size:medium[^"]*"[^>]*>([\s\S]*?)<\/div>/i)
+        if (titleMatch1) {
+          title = titleMatch1[1].replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' ')
+          console.log('  标题(模式1):', title)
+        }
+        
+        // 模式2: 如果模式1失败，尝试获取 van-card 内的第一个有意义的文本
+        if (!title) {
+          const textMatch = block.match(/>([^<]{10,})</i)
+          if (textMatch) {
+            title = textMatch[1].trim().replace(/\s+/g, ' ')
+            console.log('  标题(模式2-通用文本):', title)
+          }
+        }
+        
+        // 提取备注信息
+        let remarks = ''
+        const remarksMatch = block.match(/<div\s+style="padding-bottom[^>]*>([\s\S]*?)<\/div>/i)
+        if (remarksMatch) {
+          remarks = remarksMatch[1]
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ')
+          console.log('  备注:', remarks)
+        }
+        
+        if (title || link) {
+          cards.push({
+            vod_id: link,
+            vod_name: title || '未知标题',
+            vod_pic: '',
+            vod_remarks: remarks || '点击获取网盘链接',
+            ext: {
+              url: appConfig.site + link,
+            },
+          })
+          console.log('  ✓ 成功添加')
+        }
       }
     }
     
-    console.log(`\n总共找到 ${count} 个结果块，成功解析 ${cards.length} 个`)
+    console.log('\n=== 最终结果 ===')
+    console.log('成功解析的结果数:', cards.length)
     
-    // 检查是否被反爬
-    if (data.includes('安全验证') || data.includes('验证码') || data.includes('Access Denied')) {
-      console.log('检测到反爬虫机制')
-      cards = [{
-        vod_id: 'blocked',
-        vod_name: '检测到反爬虫验证',
-        vod_pic: '',
-        vod_remarks: '网站要求验证，请稍后重试',
-        ext: {
-          url: url,
-        },
-      }]
-    } else if (cards.length === 0) {
-      // 输出HTML样本帮助调试
-      console.log('\n页面HTML样本 (前2000字符):')
-      console.log(data.substring(0, 2000))
-      console.log('\n查找关键标记:')
-      console.log('包含 van-row:', data.includes('van-row'))
-      console.log('包含 /s/:', data.includes('/s/'))
-      console.log('包含 van-card:', data.includes('van-card'))
+    // 如果还是没有结果，提供详细的诊断信息
+    if (cards.length === 0) {
+      console.log('\n!!! 诊断信息 !!!')
+      console.log('响应状态码可能的问题:')
+      console.log('1. 检查是否有反爬虫验证:', data.includes('验证') || data.includes('captcha'))
+      console.log('2. 检查是否是错误页面:', data.includes('404') || data.includes('error'))
+      console.log('3. 页面是否包含 Vue:', data.includes('vue.min.js'))
+      console.log('4. 页面是否包含 van-card:', data.includes('van-card'))
+      console.log('5. 页面是否包含搜索关键词:', data.includes('黄飞鸿'))
+      
+      // 输出整个HTML供分析（如果不太大）
+      if (data.length < 50000) {
+        console.log('\n=== 完整HTML内容 ===')
+        console.log(data)
+      }
       
       cards.push({
-        vod_id: 'no_results',
-        vod_name: '未找到搜索结果',
+        vod_id: 'debug',
+        vod_name: '调试模式：未找到结果',
         vod_pic: '',
-        vod_remarks: '可能是搜索词无结果或页面结构已更新',
+        vod_remarks: '请查看console日志了解详情',
         ext: {
           url: url,
         },
