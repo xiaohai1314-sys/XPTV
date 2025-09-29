@@ -23,7 +23,7 @@ const appConfig = {
   title: "天逸搜",
   site: "https://www.tianyiso.com",
   tabs: [{
-    name: '只有搜索功能',
+    name: '只有搜索',
     ext: {
       url: '/'
     },
