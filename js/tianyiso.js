@@ -1,25 +1,24 @@
-// 确保您已经通过某种方式引入了 cheerio 和 crypto-js
-// 例如在您的环境中：
-// const cheerio = require('cheerio');
-// const CryptoJS = require('crypto-js');
-// 在您提供的脚本环境中，这可能是由外部加载器完成的
 const cheerio = createCheerio()
 const CryptoJS = createCryptoJS()
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
-// 稍微增强了一下 headers，更像真实浏览器
 const headers = {
   'Referer': 'https://www.tianyiso.com/',
   'Origin': 'https://www.tianyiso.com',
   'User-Agent': UA,
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Accept-Encoding': 'gzip, deflate, br',
   'Connection': 'keep-alive',
   'Upgrade-Insecure-Requests': '1',
   'Cache-Control': 'max-age=0',
-  'Pragma': 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Ch-Ua': '"Chromium";v="140", "Google Chrome";v="140", "Not A(Brand";v="99"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
 }
 
 const appConfig = {
@@ -34,7 +33,7 @@ const appConfig = {
   }]
 }
 
-async function getConfig( ) {
+async function getConfig() {
   return jsonify(appConfig)
 }
 
@@ -59,17 +58,17 @@ async function getTracks(ext) {
     let pan = null
     
     const patterns = [
-      /"(https:\/\/cloud\.189\.cn\/t\/[^"]* )"/,
+      /"(https:\/\/cloud\.189\.cn\/t\/[^"]+)"/,
       /https:\/\/cloud\.189\.cn\/t\/[A-Za-z0-9]+/,
-      /"(https:\/\/pan\.baidu\.com\/s\/[^"]* )"/,
-      /"(https:\/\/www\.aliyundrive\.com\/s\/[^"]* )"/,
-      /"(https:\/\/pan\.quark\.cn\/s\/[^"]* )"/,
+      /"(https:\/\/pan\.baidu\.com\/s\/[^"]+)"/,
+      /"(https:\/\/www\.aliyundrive\.com\/s\/[^"]+)"/,
+      /"(https:\/\/pan\.quark\.cn\/s\/[^"]+)"/,
       /https:\/\/pan\.baidu\.com\/s\/[A-Za-z0-9]+/,
       /https:\/\/www\.aliyundrive\.com\/s\/[A-Za-z0-9]+/,
       /https:\/\/pan\.quark\.cn\/s\/[A-Za-z0-9]+/,
     ]
     
-    for (let pattern of patterns ) {
+    for (let pattern of patterns) {
       const match = data.match(pattern)
       if (match) {
         pan = match[1] || match[0]
@@ -143,70 +142,135 @@ async function search(ext) {
     })
     
     console.log('搜索页面HTML长度:', data.length)
+    console.log('HTML前1000字符:', data.substring(0, 1000))
     
-    // --- 核心解析逻辑开始 ---
-    // 使用 Cheerio 加载获取到的 HTML 内容
     const $ = cheerio.load(data);
 
-    // 每个结果项都被一个 a 标签包裹，其链接以 /s/ 开头。这是最精确的选择器。
-    const resultItems = $('a[href^="/s/"]');
+    // 方案1: 更精确的选择器 - 选择 van-row 内的直接 a 标签
+    let resultItems = $('van-row > a[href^="/s/"]');
+    console.log(`方案1找到 ${resultItems.length} 个结果`);
 
-    console.log(`Cheerio 解析：找到了 ${resultItems.length} 个结果项。`);
+    // 方案2: 如果方案1失败，尝试更宽松的选择器
+    if (resultItems.length === 0) {
+      resultItems = $('a[href^="/s/"][target="_blank"]');
+      console.log(`方案2找到 ${resultItems.length} 个结果`);
+    }
+
+    // 方案3: 如果还是失败，尝试查找所有包含 /s/ 的链接
+    if (resultItems.length === 0) {
+      resultItems = $('a[href*="/s/"]').filter(function() {
+        const href = $(this).attr('href');
+        return href && href.match(/^\/s\/[A-Za-z0-9]+$/);
+      });
+      console.log(`方案3找到 ${resultItems.length} 个结果`);
+    }
 
     if (resultItems.length > 0) {
-        resultItems.each((index, element) => {
-            const item = $(element);
+      resultItems.each((index, element) => {
+        try {
+          const item = $(element);
+          const link = item.attr('href');
+          
+          if (!link) return;
 
-            // 1. 提取详情页链接
-            const link = item.attr('href');
-            if (!link) return; // 如果没有链接，则跳过当前循环
-
-            // 2. 提取标题
-            // 标题在 van-card 的 title 插槽内的 div 中
-            const titleDiv = item.find('div[style*="font-size:medium"]');
-            // .text() 会自动移除所有内部的HTML标签（如高亮的<span>），并返回纯文本
-            const title = titleDiv.text().trim().replace(/\s+/g, ' '); // 清理所有多余的空白字符
-
-            // 3. 提取底部描述信息（时间、格式、大小等）
-            const bottomDiv = item.find('div[style*="padding-bottom"]');
-            const remarks = bottomDiv.text().trim().replace(/\s+/g, ' ');
-
-            if (title && link) {
-                console.log('成功解析结果:', { title, link, remarks });
-                cards.push({
-                    vod_id: link,
-                    vod_name: title,
-                    vod_pic: '', // 您可以根据需要设置一个默认图片
-                    vod_remarks: remarks || '点击获取网盘链接',
-                    ext: {
-                        url: appConfig.site + link,
-                    },
-                });
+          // 多种方式尝试提取标题
+          let title = '';
+          
+          // 方法1: 通过 style 属性查找
+          const titleDiv1 = item.find('div[style*="font-size:medium"]');
+          if (titleDiv1.length > 0) {
+            title = titleDiv1.text().trim();
+          }
+          
+          // 方法2: 通过 template #title 查找
+          if (!title) {
+            const titleDiv2 = item.find('[slot="title"] div, template[slot="title"] div');
+            if (titleDiv2.length > 0) {
+              title = titleDiv2.text().trim();
             }
-        });
+          }
+          
+          // 方法3: 查找 van-card 内的第一个 div
+          if (!title) {
+            const titleDiv3 = item.find('van-card div').first();
+            if (titleDiv3.length > 0) {
+              title = titleDiv3.text().trim();
+            }
+          }
+          
+          title = title.replace(/\s+/g, ' ');
+
+          // 提取底部信息
+          let remarks = '';
+          const bottomDiv1 = item.find('div[style*="padding-bottom"]');
+          if (bottomDiv1.length > 0) {
+            remarks = bottomDiv1.text().trim();
+          } else {
+            const bottomDiv2 = item.find('[slot="bottom"] div, template[slot="bottom"] div');
+            if (bottomDiv2.length > 0) {
+              remarks = bottomDiv2.text().trim();
+            }
+          }
+          remarks = remarks.replace(/\s+/g, ' ');
+
+          if (title && link) {
+            console.log(`成功解析结果 ${index + 1}:`, { title, link, remarks });
+            cards.push({
+              vod_id: link,
+              vod_name: title,
+              vod_pic: '',
+              vod_remarks: remarks || '点击获取网盘链接',
+              ext: {
+                url: appConfig.site + link,
+              },
+            });
+          }
+        } catch (itemError) {
+          console.log(`解析第 ${index + 1} 个结果时出错:`, itemError);
+        }
+      });
     }
     
-    // 如果经过解析后，cards数组仍然为空，说明可能被拦截或页面结构大变
-    if (cards.length === 0) {
-      console.log('解析完成，但未找到任何有效资源。可能被反爬虫拦截或页面已更新。');
+    // 检查是否被反爬
+    if (data.includes('安全验证') || data.includes('验证码') || data.includes('Access Denied')) {
+      console.log('检测到反爬虫机制');
       cards.push({
-        vod_id: 'no_results_parsed',
-        vod_name: '未解析到有效资源',
+        vod_id: 'blocked',
+        vod_name: '检测到反爬虫验证',
         vod_pic: '',
-        vod_remarks: '请检查是否被反爬虫拦截或网站结构已更新',
+        vod_remarks: '网站要求验证，请稍后重试或访问网页版',
+        ext: {
+          url: url,
+        },
+      });
+    } else if (cards.length === 0) {
+      console.log('未找到结果，可能是页面结构变化');
+      // 输出更多调试信息
+      console.log('页面包含的关键元素:', {
+        'van-row': $('van-row').length,
+        'van-card': $('van-card').length,
+        'a标签总数': $('a').length,
+        '包含/s/的链接': $('a[href*="/s/"]').length,
+      });
+      
+      cards.push({
+        vod_id: 'no_results',
+        vod_name: '未找到搜索结果',
+        vod_pic: '',
+        vod_remarks: '可能是搜索词无结果或页面结构已更新',
         ext: {
           url: url,
         },
       });
     }
-    // --- 核心解析逻辑结束 ---
     
   } catch (error) {
-    console.log('搜索请求或解析时发生错误:', error);
+    console.log('搜索请求错误:', error);
+    console.log('错误详情:', error.stack);
     
     cards.push({
       vod_id: 'error',
-      vod_name: `搜索失败: ${error.message || '未知网络错误'}`,
+      vod_name: `搜索失败: ${error.message || '网络错误'}`,
       vod_pic: '',
       vod_remarks: '请检查网络连接或目标网站状态',
       ext: {
