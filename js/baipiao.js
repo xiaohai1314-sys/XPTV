@@ -11,7 +11,7 @@
 const cheerio = createCheerio();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 // ★★★ 请务必将这里的IP地址修改为您后端服务器的实际IP地址 ★★★
-const BACKEND_API_URL = 'http://192.168.1.6:8000/get-search-html'; // ★ 请修改为您的后端IP
+const BACKEND_API_URL = 'http://192.168.1.3:8000/get-search-html'; // ★ 请修改为您的后端IP
 
 const appConfig = {
     ver: 11.0, // 版本号保持与原始一致
