@@ -13,7 +13,7 @@ const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const cheerio = createCheerio();
 
 // 后端服务器地址 (仅供search使用)
-const BACKEND_URL = 'http://192.168.1.3:3001';
+const BACKEND_URL = 'http://192.168.1.6:3001';
 
 const appConfig = {
   ver: 33, // 版本号更新
