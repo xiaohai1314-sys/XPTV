@@ -6,7 +6,8 @@
  * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
  * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
  * - 后端服务器功能简化，只为搜索提供服务。
- * - 修复getTracks()中天翼云盘链接提取正则，支持访问码直接拼在URL末尾的格式
+ * - 修复getTracks()中天翼云盘链接提取，支持访问码直接拼在URL末尾的格式
+ * - 最终链接格式统一为：URL（访问码：code）
  * =================================================================
  */
 
@@ -89,6 +90,21 @@ function getProtocolAgnosticUrl(rawUrl) {
     return match ? match[0] : null;
 }
 
+// 辅助函数：提取并组合链接和访问码
+function extractAndCombineLink(text) {
+    // 匹配格式: https://...（访问码：xxxx）或 https://...（访问码：code=xxxx）
+    const pattern = /(https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+?)[\s]*[\(（]访问码[:：]([a-zA-Z0-9]{4,6})[\)）]/;
+    const match = text.match(pattern);
+    
+    if (match) {
+        let baseUrl = match[1].replace('http://', 'https://');
+        let accessCode = match[2];
+        // 返回统一格式：URL（访问码：code）
+        return baseUrl + '（访问码：' + accessCode + '）';
+    }
+    return null;
+}
+
 // getTracks 函数 - 直接请求原始网站
 async function getTracks(ext) {
     ext = argsify(ext);
@@ -104,25 +120,20 @@ async function getTracks(ext) {
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
         const bodyText = $('body').text();
 
-        // 格式1: URL后跟（访问码：xxxx）- 原有格式
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // 提取所有包含访问码的完整链接文本段落
+        const combinedPattern = /https?:\/\/cloud\.189\.cn\/[^\s）\)）\uff09]*[\(（]访问码[:：][a-zA-Z0-9]{4,6}[\)）\uff09]/g;
         let match;
-        while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
-            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
-            if (uniqueLinks.has(agnosticUrl)) continue;
-            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
-            uniqueLinks.add(agnosticUrl);
-        }
-
-        // 格式2: URL中直接包含访问码（访问码拼在URL末尾）- 新增格式支持
-        const inlinePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
-        while ((match = inlinePattern.exec(bodyText)) !== null) {
-            let panUrl = match[1].replace('http://', 'https://');
-            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
-            if (uniqueLinks.has(agnosticUrl)) continue;
-            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: match[2] || '' } });
-            uniqueLinks.add(agnosticUrl);
+        while ((match = combinedPattern.exec(bodyText)) !== null) {
+            const combinedLink = extractAndCombineLink(match[0]);
+            if (combinedLink) {
+                // 提取基础URL用于去重
+                const baseUrl = combinedLink.match(/https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/)[0];
+                const agnosticUrl = getProtocolAgnosticUrl(baseUrl);
+                if (!uniqueLinks.has(agnosticUrl)) {
+                    tracks.push({ name: pageTitle, pan: combinedLink, ext: { accessCode: '' } });
+                    uniqueLinks.add(agnosticUrl);
+                }
+            }
         }
 
         // 从链接标签中提取 - 保持原有方式
@@ -132,16 +143,16 @@ async function getTracks(ext) {
             if (!href) return;
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-            href = href.replace('http://', 'https://'  );
+            href = href.replace('http://', 'https://');
             let trackName = $el.text().trim() || pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
-        // 从文本中提取URL - 保持原有方式
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText  )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+        // 从文本中提取单独的URL - 保持原有方式
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+(?![\(（])/g;
+        while ((match = urlPattern.exec(bodyText)) !== null) {
+            let panUrl = match[0].replace('http://', 'https://');
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
