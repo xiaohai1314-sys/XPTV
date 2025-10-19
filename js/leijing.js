@@ -1,11 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v33 (仅搜索代理版)
+ * 脚本名称: 雷鲸资源站脚本 - v34 (仅搜索代理版)
  *
  * 修正说明:
  * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
  * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
  * - 后端服务器功能简化，只为搜索提供服务。
+ * - 修正 getTracks() 函数，增加对 a 标签 href 属性中链接和访问码的提取逻辑。
  * =================================================================
  */
 
@@ -16,12 +17,12 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 33, // 版本号更新
+  ver: 34, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
-    { name: '电影', ext: { id: '?tagId=42204681950354' } },
+    { name: '电影', ext: { id: '?tagId=4.2204681950354' } },
     { name: '动漫', ext: { id: '?tagId=42204792950357' } },
     { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
     { name: '综艺', ext: { id: '?tagId=42210356650363' } },
@@ -88,7 +89,7 @@ function getProtocolAgnosticUrl(rawUrl) {
     return match ? match[0] : null;
 }
 
-// getTracks 函数 - 直接请求原始网站
+// getTracks 函数 - 直接请求原始网站 (已修正)
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -101,12 +102,32 @@ async function getTracks(ext) {
 
         const $ = cheerio.load(htmlData);
         const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
-        const bodyText = $('body').text();
+        
+        // ==================== 新增逻辑开始 ====================
+        // 专门匹配 href 中包含完整链接和访问码的 a 标签
+        const hrefPattern = /(https?:\/\/cloud\.189\.cn\/web\/share\?code=\w+.*?访问码[：:]([a-zA-Z0-9]{4,6}))/;
+        $('a[href*="cloud.189.cn"]').each((_, el) => {
+            const href = $(el).attr('href');
+            if (!href) return;
+            
+            const match = href.match(hrefPattern);
+            if (match) {
+                let panUrl = match[1].replace('http://', 'https://');
+                let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+                if (agnosticUrl && !uniqueLinks.has(agnosticUrl)) {
+                    tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+                    uniqueLinks.add(agnosticUrl);
+                }
+            }
+        });
+        // ==================== 新增逻辑结束 ====================
 
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // 保留原有逻辑作为备用
+        const bodyText = $('body').text();
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+            let panUrl = match[0].replace('http://', 'https://');
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
@@ -119,15 +140,18 @@ async function getTracks(ext) {
             if (!href) return;
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-            href = href.replace('http://', 'https://'  );
+            // 如果链接中已经包含访问码，则跳过，避免重复添加
+            if (/[（(]访问码/.test(href)) return;
+
+            href = href.replace('http://', 'https://');
             let trackName = $el.text().trim() || pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
         const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
-        while ((match = urlPattern.exec(bodyText  )) !== null) {
-            let panUrl = match[0].replace('http://', 'https://'  );
+        while ((match = urlPattern.exec(bodyText)) !== null) {
+            let panUrl = match[0].replace('http://', 'https://');
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
