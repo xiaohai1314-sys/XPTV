@@ -1,13 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35 (仅搜索代理版)
+ * 脚本名称: 雷鲸资源站脚本 - v33 (仅搜索代理版)
  *
  * 修正说明:
  * - 只有 search() 函数通过后端代理执行，以绕过登录限制。
  * - getCards() 和 getTracks() 函数恢复为直接请求原始网站。
  * - 后端服务器功能简化，只为搜索提供服务。
- * - 修正 getTracks() 函数，增加对 a 标签 href 属性中链接和访问码的提取逻辑。
- * - 进一步修正正则表达式，以更精确地匹配 href 属性中的链接和访问码。
+ * - 修复getTracks()中天翼云盘链接提取正则，支持访问码直接拼在URL末尾的格式
  * =================================================================
  */
 
@@ -18,16 +17,16 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 35, // 版本号更新
+  ver: 33, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
-    { name: '剧集', ext: { id: "?tagId=42204684250355" } },
-    { name: '电影', ext: { id: "?tagId=4.2204681950354" } },
-    { name: '动漫', ext: { id: "?tagId=42204792950357" } },
-    { name: '纪录片', ext: { id: "?tagId=42204697150356" } },
-    { name: '综艺', ext: { id: "?tagId=42210356650363" } },
-    { name: '影视原盘', ext: { id: "?tagId=42212287587456" } },
+    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
+    { name: '电影', ext: { id: '?tagId=42204681950354' } },
+    { name: '动漫', ext: { id: '?tagId=42204792950357' } },
+    { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
+    { name: '综艺', ext: { id: '?tagId=42210356650363' } },
+    { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
   ],
 };
 
@@ -58,15 +57,15 @@ async function getCards(ext) {
   const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
-  $(".topicItem").each((index, each) => {
-    if ($(each).find(".cms-lock-solid").length > 0) return;
-    const href = $(each).find("h2 a").attr("href");
-    const title = $(each).find("h2 a").text();
+  $('.topicItem').each((index, each) => {
+    if ($(each).find('.cms-lock-solid').length > 0) return;
+    const href = $(each).find('h2 a').attr('href');
+    const title = $(each).find('h2 a').text();
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
-    const r = $(each).find(".summary").text();
-    const tag = $(each).find(".tag").text();
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
     if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
@@ -86,12 +85,11 @@ async function getPlayinfo(ext) {
 
 function getProtocolAgnosticUrl(rawUrl) {
     if (!rawUrl) return null;
-    // 匹配 cloud.189.cn/ 之后的所有路径和查询参数，直到遇到非URL字符或字符串结束
-    const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/\?=&\-_.%]+/);
+    const match = rawUrl.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
     return match ? match[0] : null;
 }
 
-// getTracks 函数 - 直接请求原始网站 (已修正)
+// getTracks 函数 - 直接请求原始网站
 async function getTracks(ext) {
     ext = argsify(ext);
     const tracks = [];
@@ -103,69 +101,47 @@ async function getTracks(ext) {
         const htmlData = getHtmlFromResponse(response);
 
         const $ = cheerio.load(htmlData);
-        const pageTitle = $(".topicBox .title").text().trim() || "网盘资源";
-        
-        // ==================== 新增和修正逻辑开始 ====================
-        // 修正后的正则表达式，专门匹配 href 属性中的完整链接和访问码
-        // 匹配 URL 部分，然后是非捕获组匹配括号内的“访问码”和实际码
-        const hrefPattern = /(https?:\/\/cloud\.189\.cn\/web\/share\?code=[a-zA-Z0-9]+)[\(（\uff08]访问码[：:]([a-zA-Z0-9]{4,6})[\)）\uff09]/;
-        
-        $("a[href*='cloud.189.cn']").each((_, el) => {
-            const href = $(el).attr('href');
-            if (!href) return;
-            
-            const match = href.match(hrefPattern);
-            if (match) {
-                // match[1] 是云盘链接，match[2] 是访问码
-                let panUrl = match[1].replace('http://', 'https://');
-                let accessCode = match[2];
-                let fullLinkWithCode = `${panUrl}（访问码：${accessCode}）`; // 重构完整链接字符串
+        const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+        const bodyText = $('body').text();
 
-                let agnosticUrl = getProtocolAgnosticUrl(fullLinkWithCode);
-                if (agnosticUrl && !uniqueLinks.has(agnosticUrl)) {
-                    tracks.push({ name: pageTitle, pan: fullLinkWithCode, ext: { accessCode: accessCode } });
-                    uniqueLinks.add(agnosticUrl);
-                }
-            }
-        });
-        // ==================== 新增和修正逻辑结束 ====================
-
-        // 保留原有逻辑作为备用 (精确正则匹配页面文本)
-        const bodyText = $("body").text();
-        // 修正 precisePattern，确保 `?code=` 后没有多余空格，并正确捕获访问码
-        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[\s]*[\(（\uff08]访问码[：:]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        // 格式1: URL后跟（访问码：xxxx）- 原有格式
+        const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
         let match;
         while ((match = precisePattern.exec(bodyText)) !== null) {
-            let panUrl = match[1].replace('http://', 'https://'); // match[1] 是云盘链接
-            let accessCode = match[2]; // match[2] 是访问码
-            let fullLinkWithCode = `${panUrl}（访问码：${accessCode}）`;
-
-            let agnosticUrl = getProtocolAgnosticUrl(fullLinkWithCode);
+            let panUrl = match[0].replace('http://', 'https://'  );
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
-            tracks.push({ name: pageTitle, pan: fullLinkWithCode, ext: { accessCode: accessCode } });
+            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         }
 
-        // 保留原有逻辑作为备用 (查找没有访问码的纯链接)
-        $("a[href*='cloud.189.cn']").each((_, el) => {
+        // 格式2: URL中直接包含访问码（访问码拼在URL末尾）- 新增格式支持
+        const inlinePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+        while ((match = inlinePattern.exec(bodyText)) !== null) {
+            let panUrl = match[1].replace('http://', 'https://');
+            let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+            if (uniqueLinks.has(agnosticUrl)) continue;
+            tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: match[2] || '' } });
+            uniqueLinks.add(agnosticUrl);
+        }
+
+        // 从链接标签中提取 - 保持原有方式
+        $('a[href*="cloud.189.cn"]').each((_, el) => {
             const $el = $(el);
             let href = $el.attr('href');
             if (!href) return;
             let agnosticUrl = getProtocolAgnosticUrl(href);
             if (!agnosticUrl || uniqueLinks.has(agnosticUrl)) return;
-            // 如果链接中已经包含访问码，则跳过，避免重复添加
-            if (/[（(]访问码/.test(href)) return;
-
-            href = href.replace('http://', 'https://');
+            href = href.replace('http://', 'https://'  );
             let trackName = $el.text().trim() || pageTitle;
             tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
             uniqueLinks.add(agnosticUrl);
         });
 
-        // 保留原有逻辑作为备用 (宽泛URL正则匹配页面文本)
-        const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/\?=&\-_.%]+/g; // 扩展匹配字符集
-        while ((match = urlPattern.exec(bodyText)) !== null) {
-            let panUrl = match[0].replace('http://', 'https://');
+        // 从文本中提取URL - 保持原有方式
+        const urlPattern = /https?:\/\/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/g;
+        while ((match = urlPattern.exec(bodyText  )) !== null) {
+            let panUrl = match[0].replace('http://', 'https://'  );
             let agnosticUrl = getProtocolAgnosticUrl(panUrl);
             if (uniqueLinks.has(agnosticUrl)) continue;
             tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
@@ -199,11 +175,11 @@ async function search(ext) {
   const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
-  $(".topicItem").each((_, el) => {
-    const a = $(el).find("h2 a");
-    const href = a.attr("href");
+  $('.topicItem').each((_, el) => {
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
     const title = a.text();
-    const tag = $(el).find(".tag").text();
+    const tag = $(el).find('.tag').text();
     if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
