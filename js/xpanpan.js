@@ -10,7 +10,7 @@
  * - 【最终成品】此版本是功能完整、性能优化、兼容性强的最终稳定版。
  */
 
-const SITE_URL = 'https://www.wpzysq.com';
+const SITE_URL = 'https://suenen.com/';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 
