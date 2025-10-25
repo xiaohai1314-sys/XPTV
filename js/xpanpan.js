@@ -15,7 +15,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTM
 const cheerio = createCheerio();
 
 // ★★★★★【用户配置区 - Cookie】 ★★★★★
-const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
+const SITE_COOKIE = 'bbs_sid=fdel6orbe5h3ff2ct1i8i5aia7; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=5g6j36pJBF9Uyg8dlv8hnoDSvt37ZLRWx4nckwLTuo2g2Qzg; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
@@ -81,8 +81,8 @@ async function getConfig() {
   return jsonify({
     ver: 1, title: '网盘资源社(终极版)', site: SITE_URL, cookie: SITE_COOKIE,
     tabs: [
-      { name: '影视/剧集', ext: { id: 'forum-1.htm' } }, { name: '4K专区', ext: { id: 'forum-12.htm' } },
-      { name: '动漫区', ext: { id: 'forum-3.htm' } }, { name: '教程/书籍', ext: { id: 'forum-8.htm' } }
+      { name: '电影', ext: { id: 'forum-9.htm' } }, { name: '剧集', ext: { id: 'forum-11.htm' } },
+      { name: '动漫', ext: { id: 'forum-10.htm' } }, { name: '纪录片', ext: { id: 'forum-13.htm' } }
     ],
   });
 }
