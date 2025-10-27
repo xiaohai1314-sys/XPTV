@@ -1,19 +1,17 @@
 /**
- * 找盘资源前端插件 - V1.5 (完整功能版)
- * 修复内容：
- * 1. 实现搜索分页逻辑 - 使用正确的URL格式 /s/{keyword}/{filter}/{page}
- * 2. 完善点击后的网盘链接处理 - 提取重定向后的真实网盘URL
- * 3. 增加详细日志便于调试
- * 4. 首页分页防止无限循环
- * 
- * --- 更新日志 ---
- * V1.5.3 (由Manus修正):
- * - 根据用户反馈“链接直接跳转”，确认中间页是HTTP重定向。
- * - 修改 play 函数，直接返回中间页URL，强制由App的WebView处理重定向，这是最直接且有效的方式。
- * - 简化 getTracks 函数，因为实际的跳转逻辑已移至 play 函数。
+ * 找盘资源前端插件 - V1.6.2 (IP后端版)
+ * 核心变更:
+ * - 引入前后端分离架构，解决App环境限制问题。
+ * - getTracks 函数不再自行解析，而是调用外部 IP 地址的 API 来获取真实的网盘链接。
+ * - 保持原有代码风格和兼容性接口。
  */
 
 // --- 配置区 ---
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// 在这里填入您自己部署的后端服务的 IP 地址和端口
+const API_ENDPOINT = "http://192.168.10.106:3000/api/get_real_url"; 
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
 const SITE_URL = "https://v2pan.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
@@ -59,7 +57,7 @@ let cardsCache = {};
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V1.5.3 ====");
+    log("==== 插件初始化 V1.6.2 (IP后端版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -136,7 +134,6 @@ async function getCards(ext) {
             log(`[getCards] ✓ 缓存${allCards.length}个卡片`);
         }
 
-        // 分页处理
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
@@ -163,7 +160,7 @@ async function search(ext) {
 
     log(`[search] 关键词="${text}", 页=${page}`);
     
-    const filter = 0;  // 全部分类
+    const filter = 0;
     const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
     
     log(`[search] URL: ${url}`);
@@ -191,7 +188,6 @@ async function search(ext) {
         });
 
         log(`[search] ✓ 第${page}页找到${cards.length}个结果`);
-        
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -200,8 +196,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 - 简化】★★★★★
-// 此函数仅用于构造播放列表的结构，实际的跳转由 play 函数完成
+// ★★★★★【详情页 - 核心改造】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -210,36 +205,48 @@ async function getTracks(ext) {
         log(`[getTracks] ❌ URL为空`);
         return jsonify({ list: [] });
     }
-    
-    log(`[getTracks] 准备播放列表，URL: ${url}`);
-    
-    return jsonify({ 
-        list: [{ 
-            title: '网盘资源', 
-            tracks: [{ 
-                name: '点击此处跳转',
-                // 此处的 pan 字段只是一个占位符，实际的跳转URL在 play 函数中处理
-                pan: url, 
-                ext: {}
-            }] 
-        }] 
-    });
-}
 
-// ★★★★★【播放/跳转 - 核心修正】★★★★★
-// 当用户点击 "点击此处跳转" 时，App会调用此函数
-async function play(flag, id) { 
-    const fullUrl = getCorrectPicUrl(id);
-    log(`[play] 核心跳转逻辑触发，将使用WebView打开: ${fullUrl}`);
-    
-    // 【关键】返回一个包含 'url' 字段的JSON对象。
-    // App的播放器会识别这个格式，并使用其内置的WebView打开这个URL。
-    // WebView会自动处理HTTP重定向，从而跳转到最终的网盘页面。
-    return jsonify({ 
-        url: fullUrl 
-    }); 
-}
+    const middleUrl = getCorrectPicUrl(url);
+    log(`[getTracks] 将请求后端API解析: ${middleUrl}`);
 
+    try {
+        // 构造请求后端的URL
+        const apiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(middleUrl)}`;
+        
+        // 使用 $fetch.get 访问你的后端API
+        const response = await $fetch.get(apiUrl);
+        const result = JSON.parse(response.data);
+
+        if (result.success && result.real_url) {
+            log(`[getTracks] ✓ 后端API成功返回真实链接: ${result.real_url}`);
+            
+            let panName = '网盘链接';
+            if (result.real_url.includes('quark')) panName = '夸克网盘';
+            else if (result.real_url.includes('baidu')) panName = '百度网盘';
+            else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
+
+            // 直接返回包含真实链接的播放列表
+            return jsonify({
+                list: [{
+                    title: '解析成功',
+                    tracks: [{ name: panName, pan: result.real_url, ext: {} }]
+                }]
+            });
+        } else {
+            log(`[getTracks] ❌ 后端API返回错误: ${result.error || '未知错误'}`);
+            throw new Error(result.error || 'API did not return a real URL');
+        }
+    } catch (e) {
+        log(`[getTracks] ❌ 请求后端API时发生异常: ${e.message}`);
+        // 异常时提供一个手动打开的备用方案
+        return jsonify({
+            list: [{
+                title: '自动解析失败',
+                tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }]
+            }]
+        });
+    }
+}
 
 // --- 兼容接口 ---
 async function init() { 
@@ -262,4 +269,10 @@ async function detail(id) {
     return getTracks({ url: id }); 
 }
 
-log('==== 插件加载完成 V1.5.3 ====');
+// play 函数现在直接播放 getTracks 返回的真实链接，为兼容保留
+async function play(flag, id) { 
+    log(`[play] 直接播放: ${id}`);
+    return jsonify({ url: id }); 
+}
+
+log('==== 插件加载完成 V1.6.2 ====');
