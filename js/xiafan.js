@@ -1,11 +1,10 @@
 /**
- * 夸父资源前端插件 - V5.4 (根据用户需求定制修改)
+ * 夸父资源前端插件 - V5.5 (去重优化版)
  *
  * 版本说明:
- * - 【V5.4 定制修改】基于 V5.3 版本，按需进行以下两项核心升级。
- * - 【Cookie更新】将 COOKIE 常量更新为用户提供的最新有效值。
- * - 【网盘扩展】增强 `getTracks` 函数，在原有夸克网盘的基础上，新增了对“天翼云盘”和“阿里云盘”链接的提取与识别能力。
- * - 【保留所有胜利果实】V5.3 中已完美解决的回帖逻辑、搜索缓存机制、URL构造、提示语等所有优秀成果，均被完整保留，未动分毫。
+ * - 【V5.5 核心优化】基于 V5.4 版本，针对 `getTracks` 函数进行关键性修正。
+ * - 【链接去重】在提取网盘链接时，增加了一个 Set 来存储已添加的链接，彻底解决了因页面结构问题（如一个链接包含文本和图片）导致相同链接被重复添加的 Bug。现在，即使网站上只有一个链接，App 端也只会显示一个条目。
+ * - 【保留所有胜利果实】V5.4 中已实现的 Cookie 更新、多网盘支持（阿里/天翼/夸克）以及之前版本的所有优秀功能（完美回帖、强大搜索等）均完整保留。
  */
 
 // --- 配置区 ---
@@ -21,9 +20,9 @@ const COOKIE = 'bbs_sid=mt21hvqotqu78cl7h33ug63p1r; Hm_lvt_0a637cceb4c7e7eb54ed5
 // --- 核心辅助函数 ---
 function log(msg ) {
     try {
-        $log(`[夸父资源 定制修改版] ${msg}`);
+        $log(`[夸父资源 去重优化版] ${msg}`);
     } catch (_) {
-        console.log(`[夸父资源 定制修改版] ${msg}`);
+        console.log(`[夸父资源 去重优化版] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -54,7 +53,6 @@ async function performReply(threadId) {
             }
         });
         
-        // 核心修正：不再使用错误的JSON.parse，而是直接判断返回的HTML中是否包含我们发送的内容
         if (data && data.includes(message)) {
             log(`回帖成功, 内容: "${message}"`);
             return true;
@@ -75,12 +73,12 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.4 定制修改版)");
+    log("插件初始化 (V5.5 去重优化版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-7.htm' } },
         { name: '剧集区', ext: { id: 'forum-10.htm' } },
-        { name: '天翼', ext: { id: 'forum-1.htm' } },
-        { name: '阿里', ext: { id: 'forum-3.htm' } },
+        { name: '4K电影', ext: { id: 'forum-3.htm' } },
+        { name: '4K剧集', ext: { id: 'forum-1.htm' } },
         { name: '纪录片', ext: { id: 'forum-14.htm' } },
         { name: '音频区', ext: { id: 'forum-13.htm' } }
     ];
@@ -125,7 +123,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V5.4 定制修改：扩展网盘提取逻辑】★★★★★
+// ★★★★★【V5.5 核心优化：增加链接去重逻辑】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -147,10 +145,17 @@ async function getTracks(ext) {
 
         const mainMessage = $('.message[isfirst="1"]');
         const tracks = [];
-        
-        // 使用更通用的选择器来捕获所有可能的网盘链接
+        const addedLinks = new Set(); // 用于存储已添加的链接，防止重复
+
         mainMessage.find('a[href*="pan.quark.cn"], a[href*="cloud.189.cn"], a[href*="aliyundrive.com"]').each((_, element) => {
             const link = $(element).attr('href');
+
+            // 如果链接已经添加过，则跳过
+            if (!link || addedLinks.has(link)) {
+                return;
+            }
+            addedLinks.add(link); // 将新链接添加到Set中
+
             let panName = '未知网盘';
             if (link.includes('quark.cn')) {
                 panName = '夸克网盘';
@@ -161,7 +166,6 @@ async function getTracks(ext) {
             }
             
             tracks.push({
-                // 动态生成名称，例如 "夸克网盘 1", "阿里云盘 2"
                 name: `${panName} ${tracks.filter(t => t.name.startsWith(panName)).length + 1}`,
                 pan: link,
                 ext: {},
@@ -296,4 +300,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (V5.4 定制修改版)');
+log('夸父资源插件加载完成 (V5.5 去重优化版)');
