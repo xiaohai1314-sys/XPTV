@@ -1,28 +1,29 @@
 /**
- * 夸父资源前端插件 - V5.3 最终完美版
+ * 夸父资源前端插件 - V5.4 (根据用户需求定制修改)
  *
  * 版本说明:
- * - 【V5.3 核心】基于 V5.2 版本，只对 `performReply` 函数进行了一次外科手术式的修正。
- * - 【完美回帖】彻底废除了 `performReply` 中错误的 `JSON.parse` 逻辑，改为使用最可靠的HTML内容匹配来判断回帖是否成功，彻底解决了“红色HTML代码”的丑陋错误。
- * - 【保留所有胜利果实】V5.2 中已完美解决的搜索逻辑（缓存机制+正确URL）、您最满意的提示语、最新的有效Cookie等所有来之不易的成果，均被完整保留，未动分毫。
+ * - 【V5.4 定制修改】基于 V5.3 版本，按需进行以下两项核心升级。
+ * - 【Cookie更新】将 COOKIE 常量更新为用户提供的最新有效值。
+ * - 【网盘扩展】增强 `getTracks` 函数，在原有夸克网盘的基础上，新增了对“天翼云盘”和“阿里云盘”链接的提取与识别能力。
+ * - 【保留所有胜利果实】V5.3 中已完美解决的回帖逻辑、搜索缓存机制、URL构造、提示语等所有优秀成果，均被完整保留，未动分毫。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://suenen.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://suenen.com/view/img/favicon.png";
 
-// ★★★★★ 最新有效Cookie ★★★★★
-const COOKIE = 'bbs_sid=mt21hvqotqu78cl7h33ug63p1r; Hm_lvt_2c2cd308748eb9097e250ba67b76ef20=1755075712; HMACCOUNT=369F5CB87E8CAB18; isClose=yes; bbs_token=BybmHjg4nUBBHrI6h099qtroItZJTMF8ug0n9DppL9WaUuM4; __gads=ID=7493bd5727e59480:T=1755075714:RT=1755077860:S=ALNI_MYJvEBISMvpSRLIfA3UDLv6UK981A; __gpi=UID=0000117f6c1e9b44:T=1755075714:RT=1755077860:S=ALNI_Ma4_A9salT3Rdur67vJ1Z3RZqvk1g; __eoi=ID=5cc1b8a075993313:T=1755075714:RT=1755077860:S=AA-AfjaclE5ud7kHwwQeCM5KX1c-; Hm_lpvt_2c2cd308748eb9097e250ba67b76ef20=1755077876';
-// ★★★★★★★★★★★★★★★★★★★★★
+// ★★★★★ 最新有效Cookie (用户提供 ) ★★★★★
+const COOKIE = 'bbs_sid=mt21hvqotqu78cl7h33ug63p1r; Hm_lvt_0a637cceb4c7e7eb54ed5c54bfc52234=1761539216; HMACCOUNT=4046F7D926357D93; bbs_token=BybmHjg4nUBBHrI6h099qtroItZJTMF8ug0n9DppL9WaUuM4; Hm_lpvt_0a637cceb4c7e7eb54ed5c54bfc52234=1761540595';
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
 function log(msg ) {
     try {
-        $log(`[夸父资源 最终完美版] ${msg}`);
+        $log(`[夸父资源 定制修改版] ${msg}`);
     } catch (_) {
-        console.log(`[夸父资源 最终完美版] ${msg}`);
+        console.log(`[夸父资源 定制修改版] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -74,7 +75,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.3 最终完美版)");
+    log("插件初始化 (V5.4 定制修改版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-7.htm' } },
         { name: '剧集区', ext: { id: 'forum-10.htm' } },
@@ -94,7 +95,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
+    if (path.startsWith('http'  )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -124,6 +125,7 @@ async function getCards(ext) {
     }
 }
 
+// ★★★★★【V5.4 定制修改：扩展网盘提取逻辑】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -144,16 +146,27 @@ async function getTracks(ext) {
         }
 
         const mainMessage = $('.message[isfirst="1"]');
-        const links = [];
-        mainMessage.find('a[href*="pan.quark.cn"]').each((_, element) => {
-            links.push($(element).attr('href'));
+        const tracks = [];
+        
+        // 使用更通用的选择器来捕获所有可能的网盘链接
+        mainMessage.find('a[href*="pan.quark.cn"], a[href*="cloud.189.cn"], a[href*="aliyundrive.com"]').each((_, element) => {
+            const link = $(element).attr('href');
+            let panName = '未知网盘';
+            if (link.includes('quark.cn')) {
+                panName = '夸克网盘';
+            } else if (link.includes('cloud.189.cn')) {
+                panName = '天翼云盘';
+            } else if (link.includes('aliyundrive.com')) {
+                panName = '阿里云盘';
+            }
+            
+            tracks.push({
+                // 动态生成名称，例如 "夸克网盘 1", "阿里云盘 2"
+                name: `${panName} ${tracks.filter(t => t.name.startsWith(panName)).length + 1}`,
+                pan: link,
+                ext: {},
+            });
         });
-
-        const tracks = links.map((link, index) => ({
-            name: `夸克网盘 ${index + 1}`,
-            pan: link,
-            ext: {},
-        }));
 
         if (tracks.length === 0) {
             log("未找到有效资源链接。");
@@ -170,6 +183,7 @@ async function getTracks(ext) {
         return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
     }
 }
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // ★★★★★【V5.1/V5.2 胜利果实：最强搜索逻辑】★★★★★
 let searchCache = {
@@ -282,4 +296,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (V5.3 最终完美版)');
+log('夸父资源插件加载完成 (V5.4 定制修改版)');
