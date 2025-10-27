@@ -77,8 +77,8 @@ async function getConfig() {
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-7.htm' } },
         { name: '剧集区', ext: { id: 'forum-10.htm' } },
-        { name: '4K电影', ext: { id: 'forum-3.htm' } },
-        { name: '4K剧集', ext: { id: 'forum-1.htm' } },
+        { name: '阿里', ext: { id: 'forum-3.htm' } },
+        { name: '天翼', ext: { id: 'forum-1.htm' } },
         { name: '纪录片', ext: { id: 'forum-14.htm' } },
         { name: '音频区', ext: { id: 'forum-13.htm' } }
     ];
