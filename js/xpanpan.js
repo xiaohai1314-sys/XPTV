@@ -1,5 +1,5 @@
 /**
- * 找盘资源前端插件 - V1.4 (搜索分页修复版)
+ * 找盘资源前端插件 - V1.5 (搜索分页修复版)
  * 修复内容：
  * 1. 实现搜索分页逻辑 - 使用正确的URL格式 /s/{keyword}/{filter}/{page}
  * 2. 完善点击后的网盘链接处理
@@ -212,20 +212,28 @@ async function getTracks(ext) {
         const fullUrl = getCorrectPicUrl(url);
         log(`[getTracks] 完整URL: ${fullUrl}`);
         
-        // 尝试获取页面内容
-        log(`[getTracks] 开始请求...`);
+        // 【核心修复】v2pan.com的资源页面会自动重定向到网盘
+        // 或者页面本身通过JavaScript渲染网盘链接
+        // 最好的方案是直接返回这个URL，让App的WebView处理
+        // WebView会：
+        // 1. 执行JavaScript代码
+        // 2. 跟随重定向
+        // 3. 最终显示网盘分享页面
+        
+        // 首先尝试解析页面（可能有直接的网盘链接）
+        log(`[getTracks] 尝试解析页面...`);
+        
         const response = await $fetch.get(fullUrl, { 
             headers: { 'User-Agent': UA }
         });
         
         const { data } = response;
-        log(`[getTracks] ✓ 获取页面成功，长度=${data.length}`);
+        log(`[getTracks] 获取页面长度: ${data.length}`);
         
-        // 解析页面，尝试找网盘链接
         const $ = cheerio.load(data);
         const tracks = [];
 
-        // 【方案1】如果是搜索结果详情页，查找 resource-item
+        // 【方案1】查找 resource-item 元素
         $('a.resource-item').each((_, item) => {
             const linkElement = $(item);
             const resourceLink = linkElement.attr('href');
@@ -241,30 +249,45 @@ async function getTracks(ext) {
             }
         });
 
-        // 【方案2】如果找不到，尝试查找网盘链接
+        // 【方案2】查找网盘直链
         if (tracks.length === 0) {
-            log(`[getTracks] 尝试备选选择器查找网盘链接`);
+            log(`[getTracks] 查找网盘链接...`);
             
-            $('a[href*="pan"], a[href*="quark"], a[href*="baidu"], a[href*="aliyun"], a[href*="xunlei"]').each((_, elem) => {
+            // 查找包含网盘域名的链接
+            $('a').each((_, elem) => {
+                const href = $(elem).attr('href') || '';
                 const text = $(elem).text().trim();
-                const href = $(elem).attr('href');
-                if (text && href && href.length > 0) {
-                    tracks.push({
-                        name: text,
-                        pan: href.startsWith('http') ? href : getCorrectPicUrl(href),
-                        ext: {}
-                    });
+                
+                // 匹配网盘链接
+                if (href.includes('quark') || href.includes('pan.qq') || 
+                    href.includes('baidu') || href.includes('aliyun') || 
+                    href.includes('xunlei') || href.includes('115') ||
+                    href.includes('lanzou') || text.includes('网盘')) {
+                    
+                    if (text && href.length > 0) {
+                        tracks.push({
+                            name: text || '网盘链接',
+                            pan: href.startsWith('http') ? href : getCorrectPicUrl(href),
+                            ext: {}
+                        });
+                    }
                 }
             });
         }
 
-        // 【方案3】如果仍未找到，返回页面URL本身（让App的WebView打开）
+        // 【方案3】如果都找不到，直接返回页面URL
+        // 让App的WebView打开，WebView会处理JavaScript和重定向
         if (tracks.length === 0) {
-            log(`[getTracks] ⚠ 未找到直接链接，返回页面URL`);
-            tracks.push({
-                name: '打开网盘页面',
-                pan: fullUrl,
-                ext: {}
+            log(`[getTracks] ⚠ 无法从HTML提取链接，使用WebView方案`);
+            return jsonify({ 
+                list: [{ 
+                    title: '网盘资源', 
+                    tracks: [{ 
+                        name: '打开网盘',
+                        pan: fullUrl,  // WebView会处理这个URL
+                        ext: {}
+                    }] 
+                }] 
             });
         }
 
@@ -273,7 +296,19 @@ async function getTracks(ext) {
         
     } catch (e) {
         log(`[getTracks] ❌ 异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "加载失败", pan: '', ext: {} }] }] });
+        
+        // 异常情况下也返回页面URL，让WebView尝试打开
+        const fallbackUrl = getCorrectPicUrl(url);
+        return jsonify({ 
+            list: [{ 
+                title: '网盘资源', 
+                tracks: [{ 
+                    name: '打开网盘',
+                    pan: fallbackUrl,
+                    ext: {}
+                }] 
+            }] 
+        });
     }
 }
 
