@@ -1,13 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.3 (完整修复版)
+ * 找盘资源前端插件 - V1.4 (搜索分页修复版)
  * 修复内容：
- * 1. 实现首页分页，解决无限循环问题
- * 2. 搜索结果直接返回网盘链接（跳过中间页面）
- * 
- * 关键发现：
- * - v2pan.com 的搜索结果链接 /m/resource/view?id=xxx 
- * - 会自动重定向到实际的网盘分享链接（如夸克网盘、百度网盘等）
- * - 所以我们不需要解析中间页面，直接返回这个URL即可
+ * 1. 实现搜索分页逻辑 - 使用正确的URL格式 /s/{keyword}/{filter}/{page}
+ * 2. 完善点击后的网盘链接处理
+ * 3. 增加详细日志便于调试
  */
 
 // --- 配置区 ---
@@ -16,11 +12,12 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
-const PAGE_SIZE = 12;  // 每页12个卡片
+const PAGE_SIZE = 12;  // 首页每页12个卡片
+const SEARCH_PAGE_SIZE = 30;  // 搜索每页30个结果
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[找盘资源] ${msg}`;
+    const logMsg = `[找盘] ${msg}`;
     try { 
         $log(logMsg); 
     } catch (_) { 
@@ -55,7 +52,7 @@ let cardsCache = {};
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V1.3 完整修复版)");
+    log("==== 插件初始化 V1.4 ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -70,21 +67,20 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【V1.3 修复：首页分页】★★★★★
+// ★★★★★【首页分页】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
     const url = SITE_URL;
     
-    log(`[getCards] 获取分类: "${categoryName}", 页码: ${page}`);
+    log(`[getCards] 分类="${categoryName}", 页=${page}`);
     
     try {
-        // 检查缓存
         const cacheKey = `category_${categoryName}`;
         let allCards = cardsCache[cacheKey];
 
         if (!allCards) {
-            log(`[getCards] 缓存未命中，重新获取首页`);
+            log(`[getCards] 缓存未命中，获取首页`);
             
             const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
             const $ = cheerio.load(data);
@@ -93,77 +89,61 @@ async function getCards(ext) {
             const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
             
             if (categorySpan.length === 0) {
-                log(`[getCards] 找不到分类: "${categoryName}"`);
+                log(`[getCards] ❌ 找不到分类:"${categoryName}"`);
                 return jsonify({ list: [] });
             }
 
-            log(`[getCards] 找到分类，开始提取卡片`);
+            log(`[getCards] ✓ 找到分类，提取卡片`);
 
-            const rowDiv = categorySpan
+            let rowDiv = categorySpan
                 .closest('div.d-flex')
                 .parent()
                 .next('div.row');
 
             if (rowDiv.length === 0) {
-                log(`[getCards] 使用备选方案定位row`);
-                const altRowDiv = categorySpan
+                log(`[getCards] 使用备选选择器`);
+                rowDiv = categorySpan
                     .closest('div.d-flex')
                     .next('div.row');
-                
-                if (altRowDiv.length === 0) {
-                    log(`[getCards] 错误: 仍找不到row容器`);
-                    return jsonify({ list: [] });
-                }
-
-                altRowDiv.find('a.col-4').each((_, item) => {
-                    const linkElement = $(item);
-                    const imgElement = linkElement.find('img.lozad');
-                    
-                    allCards.push({
-                        vod_id: linkElement.attr('href') || "",
-                        vod_name: linkElement.find('h2').text().trim() || "",
-                        vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
-                        vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                        ext: { url: linkElement.attr('href') || "" }
-                    });
-                });
-            } else {
-                rowDiv.find('a.col-4').each((_, item) => {
-                    const linkElement = $(item);
-                    const imgElement = linkElement.find('img.lozad');
-                    
-                    allCards.push({
-                        vod_id: linkElement.attr('href') || "",
-                        vod_name: linkElement.find('h2').text().trim() || "",
-                        vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
-                        vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                        ext: { url: linkElement.attr('href') || "" }
-                    });
-                });
             }
 
-            // 缓存结果
+            if (rowDiv.length === 0) {
+                log(`[getCards] ❌ 找不到row容器`);
+                return jsonify({ list: [] });
+            }
+
+            rowDiv.find('a.col-4').each((_, item) => {
+                const linkElement = $(item);
+                const imgElement = linkElement.find('img.lozad');
+                
+                allCards.push({
+                    vod_id: linkElement.attr('href') || "",
+                    vod_name: linkElement.find('h2').text().trim() || "",
+                    vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
+                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                    ext: { url: linkElement.attr('href') || "" }
+                });
+            });
+
             cardsCache[cacheKey] = allCards;
-            log(`[getCards] 缓存卡片: ${allCards.length} 个`);
+            log(`[getCards] ✓ 缓存${allCards.length}个卡片`);
         }
 
-        // 【修复关键】实现分页逻辑
+        // 分页处理
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
 
-        log(`[getCards] 总数: ${allCards.length}, 当前页: ${page}, 返回: ${pageCards.length} 个`);
-
-        // 当返回空列表时，App会停止分页
+        log(`[getCards] 总数=${allCards.length}, 返回=${pageCards.length}个 (页码${page})`);
         return jsonify({ list: pageCards });
         
     } catch (e) {
-        log(`[getCards] 异常: ${e.message}`);
+        log(`[getCards] ❌ 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★【V1.3 修复：搜索功能】★★★★★
+// ★★★★★【搜索 - 支持分页】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
@@ -174,9 +154,14 @@ async function search(ext) {
         return jsonify({ list: [] });
     }
 
-    log(`[search] 搜索: "${text}", 页: ${page}`);
+    log(`[search] 关键词="${text}", 页=${page}`);
     
-    const url = `${SITE_URL}/s?q=${encodeURIComponent(text)}`;
+    // 【修复关键】使用正确的分页URL格式: /s/{keyword}/{filter}/{page}
+    // filter: 0=全部, 1=百度网盘, 2=夸克网盘, 3=阿里云盘等
+    const filter = 0;  // 全部分类
+    const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
+    
+    log(`[search] URL: ${url}`);
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
@@ -195,27 +180,29 @@ async function search(ext) {
                     vod_name: title,
                     vod_pic: FALLBACK_PIC,
                     vod_remarks: `[${panType}]`,
-                    ext: { url: resourceLink, isDirectLink: false }
+                    ext: { url: resourceLink }
                 });
             }
         });
 
-        log(`[search] 找到 ${cards.length} 个结果`);
+        log(`[search] ✓ 第${page}页找到${cards.length}个结果`);
+        
+        // 当返回空列表时，App会停止继续分页
         return jsonify({ list: cards });
 
     } catch (e) {
-        log(`[search] 异常: ${e.message}`);
+        log(`[search] ❌ 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★【V1.3 修复：网盘链接提取】★★★★★
+// ★★★★★【详情页 - 获取网盘链接】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
-    const { url, isDirectLink } = ext;
+    const { url } = ext;
     
     if (!url) {
-        log(`[getTracks] URL为空`);
+        log(`[getTracks] ❌ URL为空`);
         return jsonify({ list: [] });
     }
 
@@ -223,27 +210,69 @@ async function getTracks(ext) {
 
     try {
         const fullUrl = getCorrectPicUrl(url);
+        log(`[getTracks] 完整URL: ${fullUrl}`);
         
-        // 【关键修复】
-        // v2pan.com 的 /m/resource/view?id=xxx 会自动重定向到实际的网盘链接
-        // 所以我们只需要返回这个URL，让App的WebView打开它
-        // App会自动跟随重定向到真实的网盘分享页面（如夸克网盘、百度网盘等）
-        
-        log(`[getTracks] 返回网盘重定向链接: ${fullUrl}`);
-        
-        return jsonify({ 
-            list: [{ 
-                title: '资源', 
-                tracks: [{ 
-                    name: '打开网盘',
-                    pan: fullUrl,  // 直接返回这个URL，会自动跳转到网盘
-                    ext: {} 
-                }] 
-            }] 
+        // 尝试获取页面内容
+        log(`[getTracks] 开始请求...`);
+        const response = await $fetch.get(fullUrl, { 
+            headers: { 'User-Agent': UA }
         });
         
+        const { data } = response;
+        log(`[getTracks] ✓ 获取页面成功，长度=${data.length}`);
+        
+        // 解析页面，尝试找网盘链接
+        const $ = cheerio.load(data);
+        const tracks = [];
+
+        // 【方案1】如果是搜索结果详情页，查找 resource-item
+        $('a.resource-item').each((_, item) => {
+            const linkElement = $(item);
+            const resourceLink = linkElement.attr('href');
+            const title = linkElement.find('h2').text().trim();
+            const panType = linkElement.find('span.text-success').text().trim() || '未知网盘';
+            
+            if (resourceLink && title) {
+                tracks.push({
+                    name: `[${panType}] ${title}`,
+                    pan: getCorrectPicUrl(resourceLink),
+                    ext: {}
+                });
+            }
+        });
+
+        // 【方案2】如果找不到，尝试查找网盘链接
+        if (tracks.length === 0) {
+            log(`[getTracks] 尝试备选选择器查找网盘链接`);
+            
+            $('a[href*="pan"], a[href*="quark"], a[href*="baidu"], a[href*="aliyun"], a[href*="xunlei"]').each((_, elem) => {
+                const text = $(elem).text().trim();
+                const href = $(elem).attr('href');
+                if (text && href && href.length > 0) {
+                    tracks.push({
+                        name: text,
+                        pan: href.startsWith('http') ? href : getCorrectPicUrl(href),
+                        ext: {}
+                    });
+                }
+            });
+        }
+
+        // 【方案3】如果仍未找到，返回页面URL本身（让App的WebView打开）
+        if (tracks.length === 0) {
+            log(`[getTracks] ⚠ 未找到直接链接，返回页面URL`);
+            tracks.push({
+                name: '打开网盘页面',
+                pan: fullUrl,
+                ext: {}
+            });
+        }
+
+        log(`[getTracks] ✓ 返回${tracks.length}个资源`);
+        return jsonify({ list: [{ title: '资源列表', tracks }] });
+        
     } catch (e) {
-        log(`[getTracks] 异常: ${e.message}`);
+        log(`[getTracks] ❌ 异常: ${e.message}`);
         return jsonify({ list: [{ title: '错误', tracks: [{ name: "加载失败", pan: '', ext: {} }] }] });
     }
 }
@@ -265,7 +294,7 @@ async function category(tid, pg) {
 }
 
 async function detail(id) { 
-    log(`[detail] 获取详情: ${id}`);
+    log(`[detail] 详情ID: ${id}`);
     return getTracks({ url: id }); 
 }
 
@@ -274,4 +303,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('找盘资源插件加载完成 (V1.3)');
+log('==== 插件加载完成 V1.4 ====');
