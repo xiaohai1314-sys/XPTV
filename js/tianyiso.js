@@ -1,6 +1,9 @@
 /**
  * 阿里资源搜索前端插件 - V1.0 (纯前端版)
  * 核心特性: 无后端依赖，直接提取阿里云盘直链，本地过滤资源
+ * * 修复说明: 
+ * 1. 修复了 search 函数中 csrf_token 硬编码导致搜索失败的问题。
+ * 2. search 函数现在会先 GET 首页获取动态 token，再进行 POST 搜索。
  */
 // --- 配置区 ---
 const SITE_URL = "https://stp.ezyro.com/al/"; // 阿里资源搜索地址
@@ -63,21 +66,37 @@ async function getCards(ext) {
   }
 }
 
-// --- 搜索功能 (纯前端表单提交) ---
+// --- 搜索功能 (修复: 动态获取 csrf_token) ---
 async function search(ext) {
   ext = argsify(ext);
   const { text = '', page = 1 } = ext;
   if (!text) return jsonify({ list: [] });
   
   try {
-    // 纯前端POST提交搜索（模拟原页面表单）
-    const { data } = await $fetch.post(SITE_URL, {
+    // 步骤 1: GET请求首页，动态获取 csrf_token
+    const { data: homeData } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+    const $$ = cheerio.load(homeData);
+    
+    // 假设 CSRF token 位于 <input type="hidden" name="csrf_token" value="..." />
+    const dynamicToken = $$('input[name="csrf_token"]').attr('value'); 
+
+    if (!dynamicToken) {
+        log(`[搜索] 错误: 无法获取动态 CSRF Token，请检查网站结构是否变化。`);
+        return jsonify({ list: [] });
+    }
+    
+    log(`[搜索] 成功获取动态 Token: ${dynamicToken.slice(0, 10)}...`);
+
+    // 步骤 2: 使用动态获取的 token 进行 POST 提交
+    const { data: searchData } = await $fetch.post(SITE_URL, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-      body: `csrf_token=c850dbe1c635b5791f06c7773af530ca9e707552fc5ecff16230cc51d1ee6b3e&q=${encodeURIComponent(text)}`
+      // 使用动态 token 替换硬编码值
+      body: `csrf_token=${dynamicToken}&q=${encodeURIComponent(text)}`
     });
     
-    const $ = cheerio.load(data);
+    const $ = cheerio.load(searchData);
     const cards = [];
+    
     $('div.result-card').each((_, item) => {
       const link = $(item).find('.result-url a').attr('href') || "";
       const title = $(item).find('.result-name').text().trim() || "";
