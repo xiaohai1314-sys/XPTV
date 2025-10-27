@@ -1,8 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.6.3 (带搜索结果过滤版)
+ * 找盘资源前端插件 - V1.7.0 (夸克专项筛选版)
  * 核心变更:
- * - 在 search 函数中增加了过滤逻辑，只显示特定网盘（夸克、115、天翼、阿里、UC）的搜索结果。
- * - 排除 "迅雷" 和 "百度" 网盘的资源。
+ * - 增加针对夸克网盘的二级筛选功能，可按视频质量（1080P, 4K, 蓝光等）过滤。
+ * - 修改 home 和 category 函数，动态生成筛选菜单。
+ * - 升级 search 函数，实现组合筛选逻辑。
  */
 
 // --- 配置区 ---
@@ -30,13 +31,15 @@ let cardsCache = {};
 
 // --- 插件入口函数 (保持不变) ---
 async function getConfig() {
-    log("==== 插件初始化 V1.6.3 (带搜索过滤) ====");
+    log("==== 插件初始化 V1.7.0 (夸克专项筛选版) ====");
     const CUSTOM_CATEGORIES = [{ name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } }];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
 // ★★★★★【首页分页】(保持不变) ★★★★★
 async function getCards(ext) {
+    // ... 此函数保持不变，为节省篇幅已折叠 ...
+    // (此处代码与您提供的版本完全相同)
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
     const url = SITE_URL;
@@ -79,13 +82,15 @@ async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
     const page = ext.page || 1;
+    // 获取用户选择的夸克筛选条件，默认为 "all"
+    const quarkFilter = ext.quark_quality || 'all';
 
     if (!text) {
         log(`[search] 搜索词为空`);
         return jsonify({ list: [] });
     }
 
-    log(`[search] 关键词="${text}", 页=${page}`);
+    log(`[search] 关键词="${text}", 页=${page}, 夸克筛选="${quarkFilter}"`);
     
     const filter = 0;
     const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
@@ -96,7 +101,7 @@ async function search(ext) {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const cards = [];
-        let originalCount = 0; // 记录原始结果数量
+        let originalCount = 0;
 
         $("a.resource-item").each((idx, item) => {
             originalCount++;
@@ -105,11 +110,21 @@ async function search(ext) {
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
             
-            // 【关键过滤逻辑】
-            // 如果网盘类型包含 "迅雷" 或 "百度"，则跳过当前循环
+            // 1. 过滤掉 "迅雷" 或 "百度" 网盘
             if (panType.includes('迅雷') || panType.includes('百度')) {
-                log(`[search] 过滤掉 [${panType}] 资源: ${title}`);
+                log(`[search] 过滤掉网盘类型 [${panType}]: ${title}`);
                 return; // continue
+            }
+
+            // 2. 如果是夸克网盘，并且用户选择了筛选条件，则进行二次筛选
+            if (panType.includes('夸克') && quarkFilter !== 'all') {
+                // 将标题和筛选关键字都转为大写，进行不区分大小写的匹配
+                const upperTitle = title.toUpperCase();
+                const upperFilter = quarkFilter.toUpperCase();
+                if (!upperTitle.includes(upperFilter)) {
+                    log(`[search] 夸克资源不匹配质量筛选 [${quarkFilter}]: ${title}`);
+                    return; // continue
+                }
             }
 
             if (resourceLink && title) {
@@ -134,6 +149,8 @@ async function search(ext) {
 
 // ★★★★★【详情页】(保持不变) ★★★★★
 async function getTracks(ext) {
+    // ... 此函数保持不变，为节省篇幅已折叠 ...
+    // (此处代码与您提供的版本完全相同)
     ext = argsify(ext);
     const { url } = ext;
     if (!url) { log(`[getTracks] ❌ URL为空`); return jsonify({ list: [] }); }
@@ -160,11 +177,52 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 (保持不变) ---
-async function init() { return getConfig(); }
-async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
-async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
-async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
-async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
+// --- 兼容接口 (home 和 category 已修改) ---
+async function init() { 
+    return getConfig(); 
+}
 
-log('==== 插件加载完成 V1.6.3 ====');
+// 定义筛选器
+const quarkQualityFilter = {
+    "key": "quark_quality",
+    "name": "夸克质量",
+    "value": [
+        { "n": "全部", "v": "all" },
+        { "n": "1080P", "v": "1080P" },
+        { "n": "4K", "v": "4K" },
+        { "n": "蓝光", "v": "蓝光" },
+        { "n": "原盘", "v": "原盘" },
+        { "n": "REMUX", "v": "REMUX" },
+        { "n": "UHD", "v": "UHD" },
+        { "n": "杜比", "v": "杜比" },
+        { "n": "次世代", "v": "次世代" }
+    ]
+};
+
+async function home() {
+    const c = await getConfig();
+    const config = JSON.parse(c);
+    // 在首页返回筛选器定义
+    return jsonify({ 
+        class: config.tabs, 
+        filters: { "all": [quarkQualityFilter] } // "all" 表示这个筛选器对所有分类都生效
+    });
+}
+
+async function category(tid, pg, filter, ext) {
+    const id = typeof tid === 'object' ? tid.id : tid;
+    // 将筛选条件 ext 传递给 search 函数
+    return search({ text: ext.wd, page: pg, ...ext });
+}
+
+async function detail(id) { 
+    log(`[detail] 详情ID: ${id}`);
+    return getTracks({ url: id }); 
+}
+
+async function play(flag, id) { 
+    log(`[play] 直接播放: ${id}`);
+    return jsonify({ url: id }); 
+}
+
+log('==== 插件加载完成 V1.7.0 ====');
