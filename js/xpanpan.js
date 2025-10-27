@@ -1,9 +1,8 @@
 /**
- * 找盘资源前端插件 - V1.7.0 (夸克专项筛选版)
+ * 找盘资源前端插件 - V1.7.1 (筛选逻辑修正版)
  * 核心变更:
- * - 增加针对夸克网盘的二级筛选功能，可按视频质量（1080P, 4K, 蓝光等）过滤。
- * - 修改 home 和 category 函数，动态生成筛选菜单。
- * - 升级 search 函数，实现组合筛选逻辑。
+ * - 修正了 category 和 search 函数之间参数传递的致命错误。
+ * - 确保 search 函数能正确接收到搜索关键词和筛选条件，使筛选功能生效。
  */
 
 // --- 配置区 ---
@@ -31,15 +30,14 @@ let cardsCache = {};
 
 // --- 插件入口函数 (保持不变) ---
 async function getConfig() {
-    log("==== 插件初始化 V1.7.0 (夸克专项筛选版) ====");
+    log("==== 插件初始化 V1.7.1 (筛选逻辑修正版) ====");
     const CUSTOM_CATEGORIES = [{ name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } }];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
 // ★★★★★【首页分页】(保持不变) ★★★★★
 async function getCards(ext) {
-    // ... 此函数保持不变，为节省篇幅已折叠 ...
-    // (此处代码与您提供的版本完全相同)
+    // ... 此函数保持不变 ...
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
     const url = SITE_URL;
@@ -79,21 +77,20 @@ async function getCards(ext) {
 
 // ★★★★★【搜索 - 核心改造】★★★★★
 async function search(ext) {
-    ext = argsify(ext);
-    const text = ext.text || '';
-    const page = ext.page || 1;
-    // 获取用户选择的夸克筛选条件，默认为 "all"
-    const quarkFilter = ext.quark_quality || 'all';
+    // 【关键修正】从 ext 对象中正确解析参数
+    const keyword = ext.wd || '';      // 搜索关键词
+    const page = ext.pg || 1;          // 页码
+    const quarkFilter = ext.quark_quality || 'all'; // 夸克筛选条件
 
-    if (!text) {
+    if (!keyword) {
         log(`[search] 搜索词为空`);
         return jsonify({ list: [] });
     }
 
-    log(`[search] 关键词="${text}", 页=${page}, 夸克筛选="${quarkFilter}"`);
+    log(`[search] 关键词="${keyword}", 页=${page}, 夸克筛选="${quarkFilter}"`);
     
     const filter = 0;
-    const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
+    const url = `${SITE_URL}/s/${encodeURIComponent(keyword)}/${filter}/${page}`;
     
     log(`[search] URL: ${url}`);
 
@@ -110,20 +107,17 @@ async function search(ext) {
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
             
-            // 1. 过滤掉 "迅雷" 或 "百度" 网盘
             if (panType.includes('迅雷') || panType.includes('百度')) {
                 log(`[search] 过滤掉网盘类型 [${panType}]: ${title}`);
-                return; // continue
+                return;
             }
 
-            // 2. 如果是夸克网盘，并且用户选择了筛选条件，则进行二次筛选
             if (panType.includes('夸克') && quarkFilter !== 'all') {
-                // 将标题和筛选关键字都转为大写，进行不区分大小写的匹配
                 const upperTitle = title.toUpperCase();
                 const upperFilter = quarkFilter.toUpperCase();
                 if (!upperTitle.includes(upperFilter)) {
                     log(`[search] 夸克资源不匹配质量筛选 [${quarkFilter}]: ${title}`);
-                    return; // continue
+                    return;
                 }
             }
 
@@ -149,8 +143,7 @@ async function search(ext) {
 
 // ★★★★★【详情页】(保持不变) ★★★★★
 async function getTracks(ext) {
-    // ... 此函数保持不变，为节省篇幅已折叠 ...
-    // (此处代码与您提供的版本完全相同)
+    // ... 此函数保持不变 ...
     ext = argsify(ext);
     const { url } = ext;
     if (!url) { log(`[getTracks] ❌ URL为空`); return jsonify({ list: [] }); }
@@ -182,37 +175,31 @@ async function init() {
     return getConfig(); 
 }
 
-// 定义筛选器
 const quarkQualityFilter = {
     "key": "quark_quality",
     "name": "夸克质量",
     "value": [
-        { "n": "全部", "v": "all" },
-        { "n": "1080P", "v": "1080P" },
-        { "n": "4K", "v": "4K" },
-        { "n": "蓝光", "v": "蓝光" },
-        { "n": "原盘", "v": "原盘" },
-        { "n": "REMUX", "v": "REMUX" },
-        { "n": "UHD", "v": "UHD" },
-        { "n": "杜比", "v": "杜比" },
-        { "n": "次世代", "v": "次世代" }
+        { "n": "全部", "v": "all" }, { "n": "1080P", "v": "1080P" }, { "n": "4K", "v": "4K" },
+        { "n": "蓝光", "v": "蓝光" }, { "n": "原盘", "v": "原盘" }, { "n": "REMUX", "v": "REMUX" },
+        { "n": "UHD", "v": "UHD" }, { "n": "杜比", "v": "杜比" }, { "n": "次世代", "v": "次世代" }
     ]
 };
 
 async function home() {
     const c = await getConfig();
     const config = JSON.parse(c);
-    // 在首页返回筛选器定义
     return jsonify({ 
         class: config.tabs, 
-        filters: { "all": [quarkQualityFilter] } // "all" 表示这个筛选器对所有分类都生效
+        filters: { "all": [quarkQualityFilter] }
     });
 }
 
+// 【关键修正】当用户点击搜索时，App会调用此函数
 async function category(tid, pg, filter, ext) {
-    const id = typeof tid === 'object' ? tid.id : tid;
-    // 将筛选条件 ext 传递给 search 函数
-    return search({ text: ext.wd, page: pg, ...ext });
+    // 将页码 pg 补充到 ext 对象中
+    ext.pg = pg;
+    // 直接将包含了所有搜索参数的 ext 对象传递给 search 函数
+    return search(ext);
 }
 
 async function detail(id) { 
@@ -225,4 +212,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('==== 插件加载完成 V1.7.0 ====');
+log('==== 插件加载完成 V1.7.1 ====');
