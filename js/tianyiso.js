@@ -1,9 +1,9 @@
 /**
  * 阿里资源搜索前端插件 - V1.0 (纯前端版)
  * 核心特性: 无后端依赖，直接提取阿里云盘直链，本地过滤资源
- * * 修复说明: 
- * 1. 修复了 search 函数中 csrf_token 硬编码导致搜索失败的问题。
- * 2. search 函数现在会先 GET 首页获取动态 token，再进行 POST 搜索。
+ * * 最终修复: 
+ * 1. 动态获取 csrf_token。
+ * 2. 在 POST 搜索请求中强制添加 'Referer' 头，以绕过某些服务器校验。
  */
 // --- 配置区 ---
 const SITE_URL = "https://stp.ezyro.com/al/"; // 阿里资源搜索地址
@@ -66,7 +66,7 @@ async function getCards(ext) {
   }
 }
 
-// --- 搜索功能 (修复: 动态获取 csrf_token) ---
+// --- 搜索功能 (修复: 动态获取 csrf_token + Referer 头) ---
 async function search(ext) {
   ext = argsify(ext);
   const { text = '', page = 1 } = ext;
@@ -74,6 +74,7 @@ async function search(ext) {
   
   try {
     // 步骤 1: GET请求首页，动态获取 csrf_token
+    // 宿主环境的 $fetch 应该自动处理 Cookie
     const { data: homeData } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
     const $$ = cheerio.load(homeData);
     
@@ -85,11 +86,16 @@ async function search(ext) {
         return jsonify({ list: [] });
     }
     
-    log(`[搜索] 成功获取动态 Token: ${dynamicToken.slice(0, 10)}...`);
+    log(`[搜索] 成功获取动态 Token`);
 
     // 步骤 2: 使用动态获取的 token 进行 POST 提交
     const { data: searchData } = await $fetch.post(SITE_URL, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+      headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded', 
+          'User-Agent': UA,
+          // 关键修复: 添加 Referer 头
+          'Referer': SITE_URL 
+      },
       // 使用动态 token 替换硬编码值
       body: `csrf_token=${dynamicToken}&q=${encodeURIComponent(text)}`
     });
