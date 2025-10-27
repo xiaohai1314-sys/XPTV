@@ -1,5 +1,5 @@
 /**
- * 找盘资源前端插件 - V1.5 (搜索分页修复版)
+ * 找盘资源前端插件 - V1.6 (搜索分页修复版)
  * 修复内容：
  * 1. 实现搜索分页逻辑 - 使用正确的URL格式 /s/{keyword}/{filter}/{page}
  * 2. 完善点击后的网盘链接处理
@@ -212,92 +212,126 @@ async function getTracks(ext) {
         const fullUrl = getCorrectPicUrl(url);
         log(`[getTracks] 完整URL: ${fullUrl}`);
         
-        // 【核心修复】v2pan.com的资源页面会自动重定向到网盘
-        // 或者页面本身通过JavaScript渲染网盘链接
-        // 最好的方案是直接返回这个URL，让App的WebView处理
-        // WebView会：
-        // 1. 执行JavaScript代码
-        // 2. 跟随重定向
-        // 3. 最终显示网盘分享页面
-        
-        // 首先尝试解析页面（可能有直接的网盘链接）
-        log(`[getTracks] 尝试解析页面...`);
+        // 【关键修复】v2pan.com的资源链接会重定向到真实的网盘链接
+        // 我们需要获取重定向后的最终URL
         
         const response = await $fetch.get(fullUrl, { 
             headers: { 'User-Agent': UA }
         });
         
-        const { data } = response;
-        log(`[getTracks] 获取页面长度: ${data.length}`);
+        let { data } = response;
         
+        // 【重要】检查是否获得了重定向后的URL
+        // 如果response包含url字段，说明有重定向
+        let finalUrl = response.url || fullUrl;
+        
+        log(`[getTracks] 页面长度: ${data.length}`);
+        log(`[getTracks] 最终URL: ${finalUrl}`);
+        
+        // 如果最终URL已经是网盘链接，直接返回
+        if (finalUrl.includes('pan.quark.cn') || 
+            finalUrl.includes('pan.qq.com') || 
+            finalUrl.includes('pan.baidu.com') ||
+            finalUrl.includes('aliyundrive.com') ||
+            finalUrl.includes('xunlei') ||
+            finalUrl.includes('115.com') ||
+            finalUrl.includes('lanzou')) {
+            
+            log(`[getTracks] ✓ 检测到直接网盘链接: ${finalUrl}`);
+            
+            // 提取网盘名称
+            let panName = '网盘';
+            if (finalUrl.includes('quark')) panName = '夸克网盘';
+            else if (finalUrl.includes('pan.qq')) panName = '腾讯微云';
+            else if (finalUrl.includes('baidu')) panName = '百度网盘';
+            else if (finalUrl.includes('aliyun')) panName = '阿里云盘';
+            else if (finalUrl.includes('xunlei')) panName = '迅雷网盘';
+            
+            return jsonify({ 
+                list: [{ 
+                    title: '网盘资源', 
+                    tracks: [{ 
+                        name: panName,
+                        pan: finalUrl,
+                        ext: {}
+                    }] 
+                }] 
+            });
+        }
+        
+        // 如果不是直接网盘链接，尝试从HTML中提取
         const $ = cheerio.load(data);
         const tracks = [];
 
-        // 【方案1】查找 resource-item 元素
-        $('a.resource-item').each((_, item) => {
-            const linkElement = $(item);
-            const resourceLink = linkElement.attr('href');
-            const title = linkElement.find('h2').text().trim();
-            const panType = linkElement.find('span.text-success').text().trim() || '未知网盘';
+        // 【方案1】查找网盘直链
+        log(`[getTracks] 从HTML中查找网盘链接...`);
+        
+        $('a').each((_, elem) => {
+            const href = $(elem).attr('href') || '';
+            const text = $(elem).text().trim();
             
-            if (resourceLink && title) {
-                tracks.push({
-                    name: `[${panType}] ${title}`,
-                    pan: getCorrectPicUrl(resourceLink),
-                    ext: {}
-                });
+            // 匹配网盘链接
+            if (href.includes('pan.quark.cn') || href.includes('pan.qq.com') || 
+                href.includes('pan.baidu.com') || href.includes('aliyundrive.com') || 
+                href.includes('xunlei') || href.includes('115.com') ||
+                href.includes('lanzou')) {
+                
+                if (href.length > 0) {
+                    let panName = text || '网盘';
+                    if (href.includes('quark')) panName = '夸克网盘';
+                    else if (href.includes('qq.com')) panName = '腾讯微云';
+                    else if (href.includes('baidu')) panName = '百度网盘';
+                    
+                    tracks.push({
+                        name: panName,
+                        pan: href.startsWith('http') ? href : getCorrectPicUrl(href),
+                        ext: {}
+                    });
+                }
             }
         });
 
-        // 【方案2】查找网盘直链
+        // 【方案2】查找 resource-item 元素
         if (tracks.length === 0) {
-            log(`[getTracks] 查找网盘链接...`);
+            log(`[getTracks] 尝试resource-item选择器...`);
             
-            // 查找包含网盘域名的链接
-            $('a').each((_, elem) => {
-                const href = $(elem).attr('href') || '';
-                const text = $(elem).text().trim();
+            $('a.resource-item').each((_, item) => {
+                const linkElement = $(item);
+                const resourceLink = linkElement.attr('href');
+                const title = linkElement.find('h2').text().trim();
+                const panType = linkElement.find('span.text-success').text().trim() || '未知网盘';
                 
-                // 匹配网盘链接
-                if (href.includes('quark') || href.includes('pan.qq') || 
-                    href.includes('baidu') || href.includes('aliyun') || 
-                    href.includes('xunlei') || href.includes('115') ||
-                    href.includes('lanzou') || text.includes('网盘')) {
-                    
-                    if (text && href.length > 0) {
-                        tracks.push({
-                            name: text || '网盘链接',
-                            pan: href.startsWith('http') ? href : getCorrectPicUrl(href),
-                            ext: {}
-                        });
-                    }
+                if (resourceLink && title) {
+                    tracks.push({
+                        name: `[${panType}] ${title}`,
+                        pan: getCorrectPicUrl(resourceLink),
+                        ext: {}
+                    });
                 }
             });
         }
 
-        // 【方案3】如果都找不到，直接返回页面URL
-        // 让App的WebView打开，WebView会处理JavaScript和重定向
+        // 【方案3】都找不到，返回原始链接
         if (tracks.length === 0) {
-            log(`[getTracks] ⚠ 无法从HTML提取链接，使用WebView方案`);
+            log(`[getTracks] ⚠ 无法提取网盘链接，返回原始链接`);
             return jsonify({ 
                 list: [{ 
                     title: '网盘资源', 
                     tracks: [{ 
                         name: '打开网盘',
-                        pan: fullUrl,  // WebView会处理这个URL
+                        pan: fullUrl,
                         ext: {}
                     }] 
                 }] 
             });
         }
 
-        log(`[getTracks] ✓ 返回${tracks.length}个资源`);
-        return jsonify({ list: [{ title: '资源列表', tracks }] });
+        log(`[getTracks] ✓ 返回${tracks.length}个网盘链接`);
+        return jsonify({ list: [{ title: '网盘资源', tracks }] });
         
     } catch (e) {
         log(`[getTracks] ❌ 异常: ${e.message}`);
         
-        // 异常情况下也返回页面URL，让WebView尝试打开
         const fallbackUrl = getCorrectPicUrl(url);
         return jsonify({ 
             list: [{ 
