@@ -1,10 +1,13 @@
 /**
- * 找盘资源前端插件 - V1.1 (修复版)
+ * 找盘资源前端插件 - V1.3 (完整修复版)
  * 修复内容：
- * 1. 修复首页内容不显示 - 重写getCards()的DOM选择器
- * 2. 修复海报不显示 - 确保正确获取data-src属性
- * 3. 修复搜索无列表 - search()直接返回多个结果卡片
- * 4. 增加调试日志 - 便于定位问题
+ * 1. 实现首页分页，解决无限循环问题
+ * 2. 搜索结果直接返回网盘链接（跳过中间页面）
+ * 
+ * 关键发现：
+ * - v2pan.com 的搜索结果链接 /m/resource/view?id=xxx 
+ * - 会自动重定向到实际的网盘分享链接（如夸克网盘、百度网盘等）
+ * - 所以我们不需要解析中间页面，直接返回这个URL即可
  */
 
 // --- 配置区 ---
@@ -12,7 +15,8 @@ const SITE_URL = "https://v2pan.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
-const DEBUG = true; // 调试模式
+const DEBUG = true;
+const PAGE_SIZE = 12;  // 每页12个卡片
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -45,10 +49,13 @@ function getCorrectPicUrl(path) {
     return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
+// --- 全局缓存 ---
+let cardsCache = {};
+
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V1.1 修复版)");
+    log("插件初始化 (V1.3 完整修复版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -63,86 +70,92 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【V1.1 修复：首页内容获取】★★★★★
+// ★★★★★【V1.3 修复：首页分页】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
-    const { id: categoryName } = ext;
+    const { id: categoryName, page = 1 } = ext;
     const url = SITE_URL;
     
-    log(`[getCards] 开始获取分类: "${categoryName}"`);
+    log(`[getCards] 获取分类: "${categoryName}", 页码: ${page}`);
     
     try {
-        const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-        const $ = cheerio.load(data);
-        const cards = [];
+        // 检查缓存
+        const cacheKey = `category_${categoryName}`;
+        let allCards = cardsCache[cacheKey];
 
-        // 【修复关键】正确的DOM遍历逻辑
-        // 1. 找到包含分类名的span.fs-5.fw-bold
-        // 2. 向上找到最近的 .d-flex
-        // 3. 再向上找到父div（包含该.d-flex的div）
-        // 4. 找到下一个.row兄弟元素
-        // 5. 在.row中找所有a.col-4
-
-        const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
-        
-        if (categorySpan.length === 0) {
-            log(`[getCards] 警告: 找不到分类标题 "${categoryName}"`);
-            return jsonify({ list: [] });
-        }
-
-        log(`[getCards] 找到分类标题，开始查找卡片区域`);
-
-        // 从span向上找到.d-flex，再向上找到div，然后找下一个.row
-        const rowDiv = categorySpan
-            .closest('div.d-flex')
-            .parent()
-            .next('div.row');
-
-        if (rowDiv.length === 0) {
-            log(`[getCards] 警告: 找不到row容器`);
-            log(`[getCards] 尝试备选方案: 使用 closest().next()`);
+        if (!allCards) {
+            log(`[getCards] 缓存未命中，重新获取首页`);
             
-            // 备选方案：直接使用next()
-            const altRowDiv = categorySpan
-                .closest('div.d-flex')
-                .next('div.row');
+            const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+            const $ = cheerio.load(data);
+            allCards = [];
+
+            const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
             
-            if (altRowDiv.length === 0) {
-                log(`[getCards] 错误: 仍找不到row容器，请检查HTML结构`);
+            if (categorySpan.length === 0) {
+                log(`[getCards] 找不到分类: "${categoryName}"`);
                 return jsonify({ list: [] });
             }
-            
-            altRowDiv.find('a.col-4').each((_, item) => {
-                const linkElement = $(item);
-                const imgElement = linkElement.find('img.lozad');
-                const picUrl = getCorrectPicUrl(imgElement.attr('data-src'));
+
+            log(`[getCards] 找到分类，开始提取卡片`);
+
+            const rowDiv = categorySpan
+                .closest('div.d-flex')
+                .parent()
+                .next('div.row');
+
+            if (rowDiv.length === 0) {
+                log(`[getCards] 使用备选方案定位row`);
+                const altRowDiv = categorySpan
+                    .closest('div.d-flex')
+                    .next('div.row');
                 
-                cards.push({
-                    vod_id: linkElement.attr('href') || "",
-                    vod_name: linkElement.find('h2').text().trim() || "",
-                    vod_pic: picUrl,
-                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                    ext: { url: linkElement.attr('href') || "" }
+                if (altRowDiv.length === 0) {
+                    log(`[getCards] 错误: 仍找不到row容器`);
+                    return jsonify({ list: [] });
+                }
+
+                altRowDiv.find('a.col-4').each((_, item) => {
+                    const linkElement = $(item);
+                    const imgElement = linkElement.find('img.lozad');
+                    
+                    allCards.push({
+                        vod_id: linkElement.attr('href') || "",
+                        vod_name: linkElement.find('h2').text().trim() || "",
+                        vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
+                        vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                        ext: { url: linkElement.attr('href') || "" }
+                    });
                 });
-            });
-        } else {
-            rowDiv.find('a.col-4').each((_, item) => {
-                const linkElement = $(item);
-                const imgElement = linkElement.find('img.lozad');
-                const picUrl = getCorrectPicUrl(imgElement.attr('data-src'));
-                
-                cards.push({
-                    vod_id: linkElement.attr('href') || "",
-                    vod_name: linkElement.find('h2').text().trim() || "",
-                    vod_pic: picUrl,
-                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                    ext: { url: linkElement.attr('href') || "" }
+            } else {
+                rowDiv.find('a.col-4').each((_, item) => {
+                    const linkElement = $(item);
+                    const imgElement = linkElement.find('img.lozad');
+                    
+                    allCards.push({
+                        vod_id: linkElement.attr('href') || "",
+                        vod_name: linkElement.find('h2').text().trim() || "",
+                        vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
+                        vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                        ext: { url: linkElement.attr('href') || "" }
+                    });
                 });
-            });
+            }
+
+            // 缓存结果
+            cardsCache[cacheKey] = allCards;
+            log(`[getCards] 缓存卡片: ${allCards.length} 个`);
         }
 
-        log(`[getCards] 成功获取 ${cards.length} 个卡片`);
-        return jsonify({ list: cards });
+        // 【修复关键】实现分页逻辑
+        const startIdx = (page - 1) * PAGE_SIZE;
+        const endIdx = startIdx + PAGE_SIZE;
+        const pageCards = allCards.slice(startIdx, endIdx);
+
+        log(`[getCards] 总数: ${allCards.length}, 当前页: ${page}, 返回: ${pageCards.length} 个`);
+
+        // 当返回空列表时，App会停止分页
+        return jsonify({ list: pageCards });
         
     } catch (e) {
         log(`[getCards] 异常: ${e.message}`);
@@ -150,107 +163,88 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V1.1 修复：详情页网盘链接提取】★★★★★
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const { url } = ext;
-    
-    if (!url) {
-        log(`[getTracks] 错误: 没有提供url`);
-        return jsonify({ list: [] });
-    }
-
-    const detailUrl = getCorrectPicUrl(url);
-    log(`[getTracks] 开始处理详情页: ${detailUrl}`);
-
-    try {
-        const { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA } });
-        const $ = cheerio.load(data);
-        const tracks = [];
-
-        $('a.resource-item').each((_, item) => {
-            const resourceLink = $(item).attr('href');
-            const title = $(item).find('h2').text().trim();
-            const panType = $(item).find('span.text-success').text().trim() || '未知网盘';
-            
-            if (resourceLink && title) {
-                tracks.push({
-                    name: `[${panType}] ${title}`,
-                    pan: getCorrectPicUrl(resourceLink),
-                    ext: {},
-                });
-            }
-        });
-
-        if (tracks.length === 0) {
-            log(`[getTracks] 未找到有效资源`);
-            tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
-        }
-
-        log(`[getTracks] 成功获取 ${tracks.length} 个资源`);
-        return jsonify({ list: [{ title: '资源列表', tracks }] });
-        
-    } catch (e) {
-        log(`[getTracks] 异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查网络", pan: '', ext: {} }] }] });
-    }
-}
-
-// ★★★★★【V1.1 修复：搜索功能 - 直接返回多个结果卡片】★★★★★
+// ★★★★★【V1.3 修复：搜索功能】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
     const page = ext.page || 1;
 
     if (!text) {
-        log(`[search] 错误: 搜索关键词为空`);
+        log(`[search] 搜索词为空`);
         return jsonify({ list: [] });
     }
 
-    log(`[search] 正在搜索: "${text}", 第 ${page} 页`);
+    log(`[search] 搜索: "${text}", 页: ${page}`);
     
     const url = `${SITE_URL}/s?q=${encodeURIComponent(text)}`;
-    log(`[search] 请求URL: ${url}`);
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const cards = [];
 
-        // 【修复关键】直接返回所有搜索结果作为独立卡片
-        // 不再聚合成一张卡片，这样用户体验更好
-        
         $("a.resource-item").each((idx, item) => {
             const linkElement = $(item);
             const resourceLink = linkElement.attr('href');
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
-            const uploader = linkElement.find('span.text-gray-500').eq(1)?.text().trim() || '';
-            const updateTime = linkElement.find('span').last().text().trim() || '';
             
             if (resourceLink && title) {
                 cards.push({
                     vod_id: resourceLink,
                     vod_name: title,
                     vod_pic: FALLBACK_PIC,
-                    vod_remarks: `[${panType}] ${uploader} ${updateTime}`.trim(),
-                    ext: { url: resourceLink }
+                    vod_remarks: `[${panType}]`,
+                    ext: { url: resourceLink, isDirectLink: false }
                 });
             }
         });
 
-        log(`[search] 搜索到 ${cards.length} 条结果`);
-        
-        if (cards.length === 0) {
-            log(`[search] 提示: 未找到相关资源`);
-            return jsonify({ list: [] });
-        }
-
+        log(`[search] 找到 ${cards.length} 个结果`);
         return jsonify({ list: cards });
 
     } catch (e) {
         log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
+    }
+}
+
+// ★★★★★【V1.3 修复：网盘链接提取】★★★★★
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const { url, isDirectLink } = ext;
+    
+    if (!url) {
+        log(`[getTracks] URL为空`);
+        return jsonify({ list: [] });
+    }
+
+    log(`[getTracks] 处理URL: ${url}`);
+
+    try {
+        const fullUrl = getCorrectPicUrl(url);
+        
+        // 【关键修复】
+        // v2pan.com 的 /m/resource/view?id=xxx 会自动重定向到实际的网盘链接
+        // 所以我们只需要返回这个URL，让App的WebView打开它
+        // App会自动跟随重定向到真实的网盘分享页面（如夸克网盘、百度网盘等）
+        
+        log(`[getTracks] 返回网盘重定向链接: ${fullUrl}`);
+        
+        return jsonify({ 
+            list: [{ 
+                title: '资源', 
+                tracks: [{ 
+                    name: '打开网盘',
+                    pan: fullUrl,  // 直接返回这个URL，会自动跳转到网盘
+                    ext: {} 
+                }] 
+            }] 
+        });
+        
+    } catch (e) {
+        log(`[getTracks] 异常: ${e.message}`);
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: "加载失败", pan: '', ext: {} }] }] });
     }
 }
 
@@ -267,8 +261,7 @@ async function home() {
 
 async function category(tid, pg) {
     const id = typeof tid === 'object' ? tid.id : tid;
-    log(`[category] 获取分类: ${id}, 页码: ${pg}`);
-    return getCards({ id: id, page: 1 });
+    return getCards({ id: id, page: pg || 1 });
 }
 
 async function detail(id) { 
@@ -277,8 +270,8 @@ async function detail(id) {
 }
 
 async function play(flag, id) { 
-    log(`[play] 播放资源: flag=${flag}, id=${id}`);
+    log(`[play] 打开: ${id}`);
     return jsonify({ url: id }); 
 }
 
-log('找盘资源插件加载完成 (V1.1 修复版)');
+log('找盘资源插件加载完成 (V1.3)');
