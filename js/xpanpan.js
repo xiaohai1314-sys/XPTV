@@ -7,8 +7,9 @@
  * 4. 首页分页防止无限循环
  * 
  * --- 更新日志 ---
- * V1.5.1 (由Manus修正):
- * - 修正 getTracks 函数，使其能够访问中间页面并解析出真实的网盘链接，解决无法识别链接的问题。
+ * V1.5.2 (由Manus修正):
+ * - 增强 getTracks 函数，增加多种链接提取策略（属性提取、脚本内容正则匹配），提高解析成功率。
+ * - 完善备用逻辑，在自动解析失败时，依然提供手动打开页面的选项。
  */
 
 // --- 配置区 ---
@@ -57,7 +58,7 @@ let cardsCache = {};
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V1.5.1 ====");
+    log("==== 插件初始化 V1.5.2 ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -161,8 +162,6 @@ async function search(ext) {
 
     log(`[search] 关键词="${text}", 页=${page}`);
     
-    // 【修复关键】使用正确的分页URL格式: /s/{keyword}/{filter}/{page}
-    // filter: 0=全部, 1=百度网盘, 2=夸克网盘, 3=阿里云盘等
     const filter = 0;  // 全部分类
     const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
     
@@ -192,7 +191,6 @@ async function search(ext) {
 
         log(`[search] ✓ 第${page}页找到${cards.length}个结果`);
         
-        // 当返回空列表时，App会停止继续分页
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -201,7 +199,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 - 获取网盘链接 (已修正)】★★★★★
+// ★★★★★【详情页 - 获取网盘链接 (增强版)】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -211,78 +209,69 @@ async function getTracks(ext) {
         return jsonify({ list: [] });
     }
 
-    log(`[getTracks] 开始处理详情URL: ${url}`);
+    const fullUrl = getCorrectPicUrl(url);
+    log(`[getTracks] 开始处理详情URL: ${fullUrl}`);
 
     try {
-        const fullUrl = getCorrectPicUrl(url);
-        log(`[getTracks] 正在访问中间页面: ${fullUrl}`);
-        
-        // 1. 访问中间页面以获取其HTML内容
-        const { data } = await $fetch.get(fullUrl, { headers: { 'User-Agent': UA } });
-        const $ = cheerio.load(data);
+        const { data: html } = await $fetch.get(fullUrl, { headers: { 'User-Agent': UA } });
+        const $ = cheerio.load(html);
 
-        // 2. 从页面中提取真实的网盘链接
-        // 通过分析，真实链接在 class="btn-clipboard" 的 <a> 标签的 data-clipboard-text 属性中
-        const realPanUrl = $('a.btn-clipboard').attr('data-clipboard-text');
+        let realPanUrl = '';
+
+        // **策略一：从 'data-clipboard-text' 属性获取**
+        realPanUrl = $('a.btn-clipboard').attr('data-clipboard-text');
+        if (realPanUrl) {
+            log(`[getTracks] ✓ 策略1成功: 从属性中提取到链接: ${realPanUrl}`);
+        }
+
+        // **策略二：如果策略一失败，从页面脚本中正则匹配**
+        if (!realPanUrl) {
+            log('[getTracks] 策略1失败，尝试策略2: 从script标签中正则匹配...');
+            const scriptContent = $('script').text();
+            const regex = /(https?:\/\/(?:pan|share )\.(?:baidu|quark|aliyundrive)\.com\/[^\s"'<]+)/;
+            const match = scriptContent.match(regex);
+            if (match && match[0]) {
+                realPanUrl = match[0];
+                log(`[getTracks] ✓ 策略2成功: 从脚本中匹配到链接: ${realPanUrl}`);
+            }
+        }
 
         if (realPanUrl) {
-            log(`[getTracks] ✓ 成功提取到真实网盘链接: ${realPanUrl}`);
-            
-            // 识别网盘类型用于显示
             let panName = '网盘链接';
-            if (realPanUrl.includes('quark')) {
-                panName = '夸克网盘';
-            } else if (realPanUrl.includes('baidu')) {
-                panName = '百度网盘';
-            } else if (realPanUrl.includes('aliyundrive')) {
-                panName = '阿里云盘';
-            } else if (realPanUrl.includes('xunlei')) {
-                panName = '迅雷网盘';
-            }
+            if (realPanUrl.includes('quark')) panName = '夸克网盘';
+            else if (realPanUrl.includes('baidu')) panName = '百度网盘';
+            else if (realPanUrl.includes('aliyundrive')) panName = '阿里云盘';
+            else if (realPanUrl.includes('xunlei')) panName = '迅雷网盘';
 
             return jsonify({ 
                 list: [{ 
                     title: '解析成功', 
-                    tracks: [{ 
-                        name: panName,
-                        pan: realPanUrl,  // 【关键】返回提取到的真实网盘链接
-                        ext: {}
-                    }] 
+                    tracks: [{ name: panName, pan: realPanUrl, ext: {} }] 
                 }] 
             });
-
         } else {
-            log(`[getTracks] ❌ 在页面中未找到 class="btn-clipboard" 的元素，无法提取链接。`);
-            // 提供一个备用方案，让用户可以手动在WebView中打开
+            log(`[getTracks] ❌ 所有自动解析策略均失败。`);
+            // **备用方案：返回中间页，让用户手动打开**
             return jsonify({ 
                 list: [{ 
                     title: '无法自动解析', 
-                    tracks: [{ 
-                        name: '请手动打开页面',
-                        pan: fullUrl,
-                        ext: {}
-                    }] 
+                    tracks: [{ name: '请手动打开页面', pan: fullUrl, ext: {} }] 
                 }] 
             });
         }
         
     } catch (e) {
         log(`[getTracks] ❌ 访问或解析时发生异常: ${e.message}`);
-        
-        // 异常时的回退方案
-        const fallbackUrl = getCorrectPicUrl(url);
+        // **异常时的回退方案**
         return jsonify({ 
             list: [{ 
                 title: '解析异常', 
-                tracks: [{ 
-                    name: '请手动尝试打开',
-                    pan: fallbackUrl,
-                    ext: {}
-                }] 
+                tracks: [{ name: '请手动尝试打开', pan: fullUrl, ext: {} }] 
             }] 
         });
     }
 }
+
 
 // --- 兼容接口 ---
 async function init() { 
@@ -310,4 +299,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('==== 插件加载完成 V1.5.1 ====');
+log('==== 插件加载完成 V1.5.2 ====');
