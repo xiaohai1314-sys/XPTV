@@ -7,9 +7,10 @@
  * 4. 首页分页防止无限循环
  * 
  * --- 更新日志 ---
- * V1.5.2 (由Manus修正):
- * - 增强 getTracks 函数，增加多种链接提取策略（属性提取、脚本内容正则匹配），提高解析成功率。
- * - 完善备用逻辑，在自动解析失败时，依然提供手动打开页面的选项。
+ * V1.5.3 (由Manus修正):
+ * - 根据用户反馈“链接直接跳转”，确认中间页是HTTP重定向。
+ * - 修改 play 函数，直接返回中间页URL，强制由App的WebView处理重定向，这是最直接且有效的方式。
+ * - 简化 getTracks 函数，因为实际的跳转逻辑已移至 play 函数。
  */
 
 // --- 配置区 ---
@@ -58,7 +59,7 @@ let cardsCache = {};
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V1.5.2 ====");
+    log("==== 插件初始化 V1.5.3 ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -199,7 +200,8 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 - 获取网盘链接 (增强版)】★★★★★
+// ★★★★★【详情页 - 简化】★★★★★
+// 此函数仅用于构造播放列表的结构，实际的跳转由 play 函数完成
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -208,68 +210,34 @@ async function getTracks(ext) {
         log(`[getTracks] ❌ URL为空`);
         return jsonify({ list: [] });
     }
-
-    const fullUrl = getCorrectPicUrl(url);
-    log(`[getTracks] 开始处理详情URL: ${fullUrl}`);
-
-    try {
-        const { data: html } = await $fetch.get(fullUrl, { headers: { 'User-Agent': UA } });
-        const $ = cheerio.load(html);
-
-        let realPanUrl = '';
-
-        // **策略一：从 'data-clipboard-text' 属性获取**
-        realPanUrl = $('a.btn-clipboard').attr('data-clipboard-text');
-        if (realPanUrl) {
-            log(`[getTracks] ✓ 策略1成功: 从属性中提取到链接: ${realPanUrl}`);
-        }
-
-        // **策略二：如果策略一失败，从页面脚本中正则匹配**
-        if (!realPanUrl) {
-            log('[getTracks] 策略1失败，尝试策略2: 从script标签中正则匹配...');
-            const scriptContent = $('script').text();
-            const regex = /(https?:\/\/(?:pan|share )\.(?:baidu|quark|aliyundrive)\.com\/[^\s"'<]+)/;
-            const match = scriptContent.match(regex);
-            if (match && match[0]) {
-                realPanUrl = match[0];
-                log(`[getTracks] ✓ 策略2成功: 从脚本中匹配到链接: ${realPanUrl}`);
-            }
-        }
-
-        if (realPanUrl) {
-            let panName = '网盘链接';
-            if (realPanUrl.includes('quark')) panName = '夸克网盘';
-            else if (realPanUrl.includes('baidu')) panName = '百度网盘';
-            else if (realPanUrl.includes('aliyundrive')) panName = '阿里云盘';
-            else if (realPanUrl.includes('xunlei')) panName = '迅雷网盘';
-
-            return jsonify({ 
-                list: [{ 
-                    title: '解析成功', 
-                    tracks: [{ name: panName, pan: realPanUrl, ext: {} }] 
-                }] 
-            });
-        } else {
-            log(`[getTracks] ❌ 所有自动解析策略均失败。`);
-            // **备用方案：返回中间页，让用户手动打开**
-            return jsonify({ 
-                list: [{ 
-                    title: '无法自动解析', 
-                    tracks: [{ name: '请手动打开页面', pan: fullUrl, ext: {} }] 
-                }] 
-            });
-        }
-        
-    } catch (e) {
-        log(`[getTracks] ❌ 访问或解析时发生异常: ${e.message}`);
-        // **异常时的回退方案**
-        return jsonify({ 
-            list: [{ 
-                title: '解析异常', 
-                tracks: [{ name: '请手动尝试打开', pan: fullUrl, ext: {} }] 
+    
+    log(`[getTracks] 准备播放列表，URL: ${url}`);
+    
+    return jsonify({ 
+        list: [{ 
+            title: '网盘资源', 
+            tracks: [{ 
+                name: '点击此处跳转',
+                // 此处的 pan 字段只是一个占位符，实际的跳转URL在 play 函数中处理
+                pan: url, 
+                ext: {}
             }] 
-        });
-    }
+        }] 
+    });
+}
+
+// ★★★★★【播放/跳转 - 核心修正】★★★★★
+// 当用户点击 "点击此处跳转" 时，App会调用此函数
+async function play(flag, id) { 
+    const fullUrl = getCorrectPicUrl(id);
+    log(`[play] 核心跳转逻辑触发，将使用WebView打开: ${fullUrl}`);
+    
+    // 【关键】返回一个包含 'url' 字段的JSON对象。
+    // App的播放器会识别这个格式，并使用其内置的WebView打开这个URL。
+    // WebView会自动处理HTTP重定向，从而跳转到最终的网盘页面。
+    return jsonify({ 
+        url: fullUrl 
+    }); 
 }
 
 
@@ -294,9 +262,4 @@ async function detail(id) {
     return getTracks({ url: id }); 
 }
 
-async function play(flag, id) { 
-    log(`[play] 打开: ${id}`);
-    return jsonify({ url: id }); 
-}
-
-log('==== 插件加载完成 V1.5.2 ====');
+log('==== 插件加载完成 V1.5.3 ====');
