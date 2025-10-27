@@ -1,13 +1,12 @@
 /**
- * 找盘资源前端插件 - V1.7.1 (筛选逻辑修正版)
+ * 找盘资源前端插件 - V1.7.2 (最终修正版)
  * 核心变更:
- * - 修正了 category 和 search 函数之间参数传递的致命错误。
- * - 确保 search 函数能正确接收到搜索关键词和筛选条件，使筛选功能生效。
+ * - 彻底修复 search 函数，使其能同时兼容普通搜索和筛选搜索两种调用方式。
+ * - 确保在任何情况下都能正确获取搜索关键词，恢复基本搜索功能。
  */
 
 // --- 配置区 ---
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// 您的后端API地址 (保持不变)
 const API_ENDPOINT = "http://192.168.10.106:3000/api/get_real_url"; 
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
@@ -30,7 +29,7 @@ let cardsCache = {};
 
 // --- 插件入口函数 (保持不变) ---
 async function getConfig() {
-    log("==== 插件初始化 V1.7.1 (筛选逻辑修正版) ====");
+    log("==== 插件初始化 V1.7.2 (最终修正版) ====");
     const CUSTOM_CATEGORIES = [{ name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } }];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
@@ -77,10 +76,12 @@ async function getCards(ext) {
 
 // ★★★★★【搜索 - 核心改造】★★★★★
 async function search(ext) {
-    // 【关键修正】从 ext 对象中正确解析参数
-    const keyword = ext.wd || '';      // 搜索关键词
-    const page = ext.pg || 1;          // 页码
-    const quarkFilter = ext.quark_quality || 'all'; // 夸克筛选条件
+    // 【关键修正】兼容处理两种搜索场景的传参
+    // 普通搜索: ext = { text: '关键词', page: 1 }
+    // 筛选搜索: ext = { wd: '关键词', pg: 1, quark_quality: '4K' }
+    const keyword = ext.text || ext.wd || '';
+    const page = ext.page || ext.pg || 1;
+    const quarkFilter = ext.quark_quality || 'all';
 
     if (!keyword) {
         log(`[search] 搜索词为空`);
@@ -108,7 +109,6 @@ async function search(ext) {
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
             
             if (panType.includes('迅雷') || panType.includes('百度')) {
-                log(`[search] 过滤掉网盘类型 [${panType}]: ${title}`);
                 return;
             }
 
@@ -116,7 +116,6 @@ async function search(ext) {
                 const upperTitle = title.toUpperCase();
                 const upperFilter = quarkFilter.toUpperCase();
                 if (!upperTitle.includes(upperFilter)) {
-                    log(`[search] 夸克资源不匹配质量筛选 [${quarkFilter}]: ${title}`);
                     return;
                 }
             }
@@ -170,14 +169,13 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 (home 和 category 已修改) ---
+// --- 兼容接口 (保持不变) ---
 async function init() { 
     return getConfig(); 
 }
 
 const quarkQualityFilter = {
-    "key": "quark_quality",
-    "name": "夸克质量",
+    "key": "quark_quality", "name": "夸克质量",
     "value": [
         { "n": "全部", "v": "all" }, { "n": "1080P", "v": "1080P" }, { "n": "4K", "v": "4K" },
         { "n": "蓝光", "v": "蓝光" }, { "n": "原盘", "v": "原盘" }, { "n": "REMUX", "v": "REMUX" },
@@ -188,17 +186,12 @@ const quarkQualityFilter = {
 async function home() {
     const c = await getConfig();
     const config = JSON.parse(c);
-    return jsonify({ 
-        class: config.tabs, 
-        filters: { "all": [quarkQualityFilter] }
-    });
+    return jsonify({ class: config.tabs, filters: { "all": [quarkQualityFilter] } });
 }
 
-// 【关键修正】当用户点击搜索时，App会调用此函数
 async function category(tid, pg, filter, ext) {
-    // 将页码 pg 补充到 ext 对象中
-    ext.pg = pg;
-    // 直接将包含了所有搜索参数的 ext 对象传递给 search 函数
+    // 筛选搜索时，App会调用此函数
+    ext.pg = pg; // 将页码补充到ext中
     return search(ext);
 }
 
@@ -212,4 +205,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('==== 插件加载完成 V1.7.1 ====');
+log('==== 插件加载完成 V1.7.2 ====');
