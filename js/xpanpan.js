@@ -1,5 +1,5 @@
 // 配置你的后端服务地址
-const BACKEND_URL = "http://your-server:3000";  // 替换为你的服务器地址
+const BACKEND_URL = "http://192.168.10.106:3000";  // 替换为你的服务器地址
 
 // ★ 首页分类
 async function getCards(ext) {
