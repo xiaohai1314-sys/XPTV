@@ -1,261 +1,343 @@
 /**
- * 阿里资源搜索前端插件 - V1.2 (纯前端版)
- * 说明：
- *  - 针对 https://stp.ezyro.com/al/ 的表单结构优化（POST, q, csrf_token）
- *  - 增强 getCards/getTracks 的解析兼容性
- *  - 保持原有外部接口：init/home/category/detail/play
+ * reboys.cn 网盘资源聚合脚本 - V2.0.0
+ * 纯前端实现，零后端依赖
+ * 
+ * 功能:
+ * - 直接调用reboys.cn的搜索API（已有API-TOKEN在前端）
+ * - 提取网盘链接，无需额外后端API
+ * - 支持多网盘类型识别
  */
 
-// --- 配置区 ---
-const SITE_URL = "https://stp.ezyro.com/al/"; // 阿里资源搜索地址（注意末尾 / 保持一致）
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const cheerio = createCheerio ? createCheerio() : null; // 宿主环境的 cheerio
-const FALLBACK_PIC = "https://www.aliyundrive.com/favicon.ico";
-const DEBUG = true;
-const PAGE_SIZE = 12;
+const SITE_URL = "https://reboys.cn";
+const API_TOKEN = "eyJ0aW1lc3RhbXAiOjE3NjE2MjA0MzYsIm5vbmNlIjoiNjkwMDMxZDQxZWYzNDEuOTc3MTYzMTgiLCJzaWduYXR1cmUiOiIxMWY0YWVlZWZhNDU2NjNlMGZjMTY1NjBjNjMyZGM0YTA4MGRhNGQxOWJjZjYzZmQ5MDRkNDE2NTA2MjAyOWE0In0=";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const FALLBACK_PIC = "https://reboys.cn/favicon.ico";
 
-// --- 辅助函数 ---
-function log(msg) { const logMsg = `[阿里资源搜索-纯前端] ${msg}`; if (DEBUG) console.log(logMsg); }
-function argsify(ext) { try { return typeof ext === 'string' ? JSON.parse(ext) : ext || {}; } catch (e) { return {}; } }
+// ============ 日志函数 ============
+function log(msg) {
+  const logMsg = `[reboys] ${msg}`;
+  try { $log(logMsg); } 
+  catch (_) { console.log(logMsg); }
+}
+
+function argsify(ext) {
+  if (typeof ext === 'string') {
+    try { return JSON.parse(ext); } 
+    catch (e) { return {}; }
+  }
+  return ext || {};
+}
+
 function jsonify(data) { return JSON.stringify(data); }
-// 校验阿里云盘链接
-function isAliyunDriveUrl(url) {
-  return typeof url === 'string' && (
-    url.includes('aliyundrive.com/s/') ||
-    url.includes('aliyundrive.com/share/') ||
-    url.includes('pan.aliyun.com/s/')
-  );
-}
-function joinUrl(base, path) {
-  if (!path) return base;
-  if (/^https?:\/\//i.test(path)) return path;
-  return base.replace(/\/+$/, '') + '/' + path.replace(/^\/+/, '');
+
+// ============ 网盘类型识别 ============
+const PAN_TYPES = {
+  '夸克': { regex: /quark|夸克/i, id: 0 },
+  '阿里云盘': { regex: /aliyun|阿里/i, id: 1 },
+  '百度网盘': { regex: /baidu|百度/i, id: 2 },
+  'UC网盘': { regex: /uc|UC/i, id: 3 },
+  '迅雷网盘': { regex: /thunder|迅雷/i, id: 4 }
+};
+
+function getPanType(typeStr) {
+  for (const [name, config] of Object.entries(PAN_TYPES)) {
+    if (config.regex.test(typeStr)) {
+      return { name, id: config.id };
+    }
+  }
+  return { name: '未知网盘', id: -1 };
 }
 
-// --- 插件入口 ---
+// ============ API 调用层 ============
+/**
+ * 直接调用reboys.cn的搜索API
+ * 使用前端已有的API-TOKEN
+ */
+async function searchAPI(keyword, page = 1) {
+  const url = `${SITE_URL}/search?keyword=${encodeURIComponent(keyword)}&page=${page}`;
+  
+  log(`[API] 调用搜索: ${keyword} (第${page}页)`);
+  
+  try {
+    // 使用内置的$fetch（如果环境支持）或原生fetch
+    let response;
+    
+    if (typeof $fetch !== 'undefined') {
+      response = await $fetch.get(url, {
+        headers: {
+          'API-TOKEN': API_TOKEN,
+          'User-Agent': UA
+        }
+      });
+      const data = typeof response === 'string' ? JSON.parse(response) : response;
+      return data;
+    } else {
+      // 浏览器环境
+      const fetchResp = await fetch(url, {
+        headers: {
+          'API-TOKEN': API_TOKEN,
+          'User-Agent': UA
+        }
+      });
+      return await fetchResp.json();
+    }
+  } catch (e) {
+    log(`[API] ❌ 搜索异常: ${e.message}`);
+    return { code: -1, message: e.message, data: {} };
+  }
+}
+
+/**
+ * 从资源详情页提取真实网盘链接
+ */
+async function extractResourceLink(resourceUrl) {
+  log(`[Extract] 提取资源链接: ${resourceUrl}`);
+  
+  try {
+    let pageData;
+    
+    if (typeof $fetch !== 'undefined') {
+      pageData = await $fetch.get(resourceUrl, {
+        headers: { 'User-Agent': UA }
+      });
+      if (typeof pageData !== 'string') {
+        pageData = JSON.stringify(pageData);
+      }
+    } else {
+      const resp = await fetch(resourceUrl, {
+        headers: { 'User-Agent': UA }
+      });
+      pageData = await resp.text();
+    }
+    
+    // 方案1: 查找href中的网盘链接
+    const panUrlMatch = pageData.match(
+      /(https?:\/\/(pan\.quark\.cn|aliyundrive\.com|pan\.baidu\.com|115\.com|thunder:\/\/)[^\s"'<>]+)/gi
+    );
+    
+    if (panUrlMatch && panUrlMatch.length > 0) {
+      const panUrl = panUrlMatch[0];
+      log(`[Extract] ✓ 找到网盘链接: ${panUrl.substring(0, 50)}...`);
+      return {
+        success: true,
+        url: panUrl,
+        type: detectPanType(panUrl)
+      };
+    }
+    
+    // 方案2: 查找常见的跳转链接
+    const linkMatch = pageData.match(/onclick="[^"]*window\.open\('([^']+)'\)/);
+    if (linkMatch) {
+      const url = linkMatch[1];
+      log(`[Extract] ✓ 找到跳转链接`);
+      return {
+        success: true,
+        url: url,
+        type: detectPanType(url)
+      };
+    }
+    
+    log(`[Extract] ⚠ 未找到直接链接，返回资源页面`);
+    return {
+      success: false,
+      url: resourceUrl,
+      type: '资源页面',
+      message: '请在资源页面获取'
+    };
+    
+  } catch (e) {
+    log(`[Extract] ❌ 异常: ${e.message}`);
+    return {
+      success: false,
+      url: resourceUrl,
+      type: '资源页面',
+      message: `提取失败: ${e.message}`
+    };
+  }
+}
+
+function detectPanType(url) {
+  if (url.includes('quark')) return '夸克网盘';
+  if (url.includes('aliyun')) return '阿里云盘';
+  if (url.includes('baidu')) return '百度网盘';
+  if (url.includes('115')) return '115网盘';
+  if (url.includes('thunder')) return '迅雷网盘';
+  return '网盘链接';
+}
+
+// ============ 插件接口 ============
+
 async function getConfig() {
-  log("==== 纯前端插件初始化 ====");
-  const CATEGORIES = [{ name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } }];
-  return jsonify({ ver: 1, title: '阿里资源搜索', site: SITE_URL, tabs: CATEGORIES });
+  log("==== 插件初始化 V2.0.0 ====");
+  return jsonify({
+    ver: 1,
+    title: 'reboys资源聚合',
+    site: SITE_URL,
+    cookie: '',
+    tabs: [
+      { name: '短剧', ext: { id: '短剧' } },
+      { name: '电影', ext: { id: '电影' } },
+      { name: '电视剧', ext: { id: '电视剧' } },
+      { name: '动漫', ext: { id: '动漫' } },
+      { name: '综艺', ext: { id: '综艺' } }
+    ]
+  });
 }
 
-// --- 首页资源提取 (兼容 .results 容器) ---
 async function getCards(ext) {
   ext = argsify(ext);
-  const { id: category, page = 1 } = ext;
+  const { id: categoryName, page = 1 } = ext;
+  
+  log(`[getCards] 分类: ${categoryName}, 页: ${page}`);
+  
   try {
-    const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA, 'Referer': SITE_URL } });
-    const $ = cheerio.load(data);
-    const cards = [];
-
-    // 优先在 .results 节点下查找条目
-    const container = $('.results').length ? $('.results') : $.root();
-    const selectors = ['.result-card', '.search-item', 'li.result', '.item', '.result'];
-
-    for (const sel of selectors) {
-      const items = container.find(sel);
-      if (items && items.length) {
-        items.each((_, it) => {
-          const el = $(it);
-          let link = el.find('.result-url a').attr('href') || el.find('a').attr('href') || "";
-          const title = (el.find('.result-name').text() || el.find('.title').text() || el.find('a').text()).trim() || "";
-          const time = (el.find('.result-time').text() || el.find('.meta').text()).trim() || "";
-
-          if (link && !/^https?:\/\//i.test(link)) link = joinUrl(SITE_URL, link);
-
-          if (isAliyunDriveUrl(link) && title) {
-            cards.push({
-              vod_id: link,
-              vod_name: title,
-              vod_pic: FALLBACK_PIC,
-              vod_remarks: `[阿里云盘] ${time}`,
-              ext: { url: link }
-            });
-          }
-        });
-        // 若该 selector 找到了条目，就不再继续检查后续 selector（减少重复）
-        if (items.length) break;
-      }
+    // 调用API获取分类数据
+    const apiResp = await searchAPI(`分类:${categoryName}`, page);
+    
+    if (apiResp.code !== 0 || !apiResp.data) {
+      return jsonify({ list: [] });
     }
-
-    // 若仍然没有通过结构化解析到内容，尝试全文正则抓取 aliyundrive 链接（最后手段）
-    if (!cards.length) {
-      const raw = data || '';
-      const urlRegex = /(https?:\/\/[^\s'"]*(aliyundrive\.com\/s\/[A-Za-z0-9\-_.]+|aliyundrive\.com\/share\/[A-Za-z0-9\-_.]+|pan\.aliyun\.com\/s\/[A-Za-z0-9\-_.]+))/ig;
-      const seen = new Set();
-      let m;
-      while ((m = urlRegex.exec(raw)) !== null) {
-        const lnk = m[0];
-        if (!seen.has(lnk)) {
-          seen.add(lnk);
-          cards.push({
-            vod_id: lnk,
-            vod_name: lnk,
-            vod_pic: FALLBACK_PIC,
-            vod_remarks: `[阿里云盘 - 直接匹配]`,
-            ext: { url: lnk }
-          });
-        }
+    
+    const cards = (apiResp.data.results || []).map(item => ({
+      vod_id: `/d/${item.id}.html`,
+      vod_name: item.title || item.name || '',
+      vod_pic: item.image || FALLBACK_PIC,
+      vod_remarks: item.source_category_id ? `[${item.source_category_id}]` : '',
+      ext: {
+        url: item.links ? item.links[0].url : `/d/${item.id}.html`
       }
-    }
-
-    // 分页
-    const start = (page - 1) * PAGE_SIZE;
-    const pageData = cards.slice(start, start + PAGE_SIZE);
-    log(`[首页] 分类${category}：共${cards.length}个资源，第${page}页返回${pageData.length}个`);
-    return jsonify({ list: pageData });
+    }));
+    
+    log(`[getCards] ✓ 获得 ${cards.length} 个卡片`);
+    return jsonify({ list: cards });
+    
   } catch (e) {
-    log(`[首页] 异常: ${e && e.message ? e.message : e}`);
+    log(`[getCards] ❌ ${e.message}`);
     return jsonify({ list: [] });
   }
 }
 
-// --- 搜索功能 (针对 stp.ezyro.com/al 的精确实现) ---
 async function search(ext) {
   ext = argsify(ext);
   const { text = '', page = 1 } = ext;
-  if (!text) return jsonify({ list: [] });
-
+  
+  if (!text) {
+    return jsonify({ list: [] });
+  }
+  
+  log(`[search] 关键词: "${text}", 页: ${page}`);
+  
   try {
-    // 1) GET 首页，提取 csrf_token（页面中有 input[name="csrf_token"]）
-    const { data: homeData } = await $fetch.get(SITE_URL, {
-      headers: { 'User-Agent': UA, 'Referer': SITE_URL }
-    });
-    const $$ = cheerio.load(homeData || '');
-
-    const dynamicToken = $$('input[name="csrf_token"]').attr('value') || '';
-    if (!dynamicToken) {
-      log('[搜索] 未能在首页找到 csrf_token（仍将尝试提交，但可能被拒绝）');
-    } else {
-      log('[搜索] 成功获取 csrf_token');
+    // 直接调用reboys的搜索API
+    const apiResp = await searchAPI(text, page);
+    
+    if (apiResp.code !== 0 || !apiResp.data) {
+      log(`[search] API返回: code=${apiResp.code}, msg=${apiResp.message}`);
+      return jsonify({ list: [] });
     }
-
-    // 2) 构造 POST body（与页面 form 一致）
-    const params = new URLSearchParams();
-    if (dynamicToken) params.append('csrf_token', dynamicToken);
-    params.append('q', text);
-    if (page && page > 1) { params.append('page', page); params.append('p', page); }
-
-    // 3) POST 到同一页面（form action="" 表示提交到当前 URL）
-    log(`[搜索] 提交 POST 到 ${SITE_URL}，body=${params.toString().slice(0,200)}`);
-    const { data: searchData } = await $fetch.post(SITE_URL, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': UA,
-        'Referer': SITE_URL
-      },
-      body: params.toString()
-    });
-
-    // 4) 解析返回 HTML
-    const $ = cheerio.load(searchData || '');
-    const cards = [];
-
-    // 解析优先级：.results 下结构化条目 -> 常见 selectors -> 正则降级
-    const container = $('.results').length ? $('.results') : $.root();
-    const selectors = ['.result-card', '.search-item', 'li.result', '.item', '.result'];
-
-    let found = false;
-    for (const sel of selectors) {
-      const items = container.find(sel);
-      if (items && items.length) {
-        items.each((_, it) => {
-          const el = $(it);
-          let link = el.find('.result-url a').attr('href') || el.find('a').attr('href') || "";
-          const title = (el.find('.result-name').text() || el.find('.title').text() || el.find('a').text()).trim() || "";
-          const time = (el.find('.result-time').text() || el.find('.meta').text()).trim() || "";
-
-          if (link && !/^https?:\/\//i.test(link)) link = joinUrl(SITE_URL, link);
-
-          if (isAliyunDriveUrl(link) && title) {
-            cards.push({
-              vod_id: link,
-              vod_name: title,
-              vod_pic: FALLBACK_PIC,
-              vod_remarks: `[阿里云盘] ${time}`,
-              ext: { url: link }
-            });
-          }
-        });
-        if (items.length) { found = true; break; }
-      }
-    }
-
-    // 降级正则匹配（裸链）
-    if (!found) {
-      const raw = searchData || '';
-      const urlRegex = /(https?:\/\/[^\s'"]*(aliyundrive\.com\/s\/[A-Za-z0-9\-_.]+|aliyundrive\.com\/share\/[A-Za-z0-9\-_.]+|pan\.aliyun\.com\/s\/[A-Za-z0-9\-_.]+))/ig;
-      const seen = new Set();
-      let m;
-      while ((m = urlRegex.exec(raw)) !== null) {
-        const lnk = m[0];
-        if (!seen.has(lnk)) {
-          seen.add(lnk);
-          cards.push({
-            vod_id: lnk,
-            vod_name: lnk,
-            vod_pic: FALLBACK_PIC,
-            vod_remarks: `[阿里云盘 - 直接匹配]`,
-            ext: { url: lnk }
-          });
+    
+    const results = apiResp.data.data?.results || [];
+    
+    const cards = results
+      .filter(item => {
+        // 过滤掉迅雷和百度
+        const source = item.source_name || '';
+        return !source.includes('迅雷') && !source.includes('百度');
+      })
+      .map(item => ({
+        vod_id: item.id || Math.random(),
+        vod_name: item.title || item.name || '未知资源',
+        vod_pic: FALLBACK_PIC,
+        vod_remarks: `[${item.source_name || '未知'}]`,
+        ext: {
+          url: item.links ? item.links[0].url : '',
+          resourceId: item.id,
+          sourceType: getPanType(item.source_name || '').id
         }
-      }
-    }
-
-    log(`[搜索] 关键词"${text}" 解析到 ${cards.length} 条（返回第 ${page} 页）`);
-    return jsonify({ list: cards.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) });
-
+      }));
+    
+    log(`[search] ✓ 获得 ${cards.length} 个结果`);
+    return jsonify({ list: cards });
+    
   } catch (e) {
-    log('[搜索] 异常: ' + (e && e.message ? e.message : e));
+    log(`[search] ❌ ${e.message}`);
     return jsonify({ list: [] });
   }
 }
 
-// --- 详情页 (直接返回阿里云盘直链，尝试提取访问码附近信息) ---
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext;
-  if (!url || !isAliyunDriveUrl(url)) {
-    return jsonify({ list: [{ title: '无效链接', tracks: [{ name: '请检查链接', pan: '', ext: {} }] }] });
+  const { url, resourceId } = ext;
+  
+  if (!url && !resourceId) {
+    return jsonify({ list: [] });
   }
-
+  
+  log(`[getTracks] 获取详情: ${url || resourceId}`);
+  
   try {
-    // 尝试 GET 详情页（若为站内链接），并在页面中查找访问码（例如：访问码：abcd）
-    let code = '';
-    let title = '阿里云盘资源';
-    if (url.indexOf(SITE_URL) === 0) {
-      // 站内详情页，抓取页面并尝试查找旁边的访问码文本
-      const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Referer': SITE_URL } });
-      const $ = cheerio.load(data || '');
-      // 常见访问码附近文本匹配
-      const txt = $.text() || '';
-      const codeMatch = txt.match(/访问码[:：\s]*([A-Za-z0-9]{3,8})/);
-      if (codeMatch) code = codeMatch[1];
-      // 尝试提取更合适的标题
-      title = ($('.post-title').text() || $('.title').text() || $('h1').text() || title).trim();
+    // 首先尝试直接提取
+    const result = await extractResourceLink(url);
+    
+    let trackUrl = result.url;
+    let trackName = result.type;
+    
+    // 如果提取失败且有resourceId，尝试通过API获取
+    if (!result.success && resourceId) {
+      log(`[getTracks] 尝试通过API获取资源 ${resourceId}`);
+      const apiResp = await searchAPI(`id:${resourceId}`);
+      if (apiResp.data && apiResp.data.links && apiResp.data.links[0]) {
+        trackUrl = apiResp.data.links[0].url;
+      }
     }
-
-    // 构造返回 track（若有访问码，放入 ext 方便宿主做拼接）
-    const trackExt = {};
-    if (code) trackExt.access_code = code;
-
+    
     return jsonify({
       list: [{
-        title: title,
-        tracks: [{ name: '阿里云盘', pan: url, ext: trackExt }]
+        title: '获取成功',
+        tracks: [{
+          name: trackName,
+          pan: trackUrl,
+          ext: {}
+        }]
       }]
     });
+    
   } catch (e) {
-    log('[详情] 异常: ' + (e && e.message ? e.message : e));
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取详情失败', pan: url, ext: {} }] }] });
+    log(`[getTracks] ❌ ${e.message}`);
+    return jsonify({
+      list: [{
+        title: '获取失败',
+        tracks: [{
+          name: '错误',
+          pan: url || '',
+          ext: {}
+        }]
+      }]
+    });
   }
 }
 
-// --- 兼容接口 ---
+// ============ 兼容接口 ============
 async function init() { return getConfig(); }
-async function home() { const cfg = JSON.parse(await getConfig()); return jsonify({ class: cfg.tabs }); }
-async function category(tid, pg) { return getCards({ id: tid, page: pg }); }
-async function detail(id) { return getTracks({ url: id }); }
-async function play(_, id) { return jsonify({ url: id }); }
 
-log('==== 纯前端插件 V1.2 加载完成 ====');
+async function home() {
+  const c = await getConfig();
+  const config = JSON.parse(c);
+  return jsonify({ class: config.tabs, filters: {} });
+}
+
+async function category(tid, pg) {
+  const id = typeof tid === 'object' ? tid.id : tid;
+  return getCards({ id, page: pg || 1 });
+}
+
+async function detail(id) {
+  log(`[detail] ${id}`);
+  return getTracks({ url: id });
+}
+
+async function play(flag, id) {
+  return jsonify({ url: id });
+}
+
+log('==== V2.0.0 加载完成 (纯前端) ====');
