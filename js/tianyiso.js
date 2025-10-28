@@ -1,22 +1,21 @@
 /**
- * reboys.cn 前端插件 - V15.0 (与后端 V15 匹配的最终解析版)
- * * 核心修正: 修复 search/getTracks 的 JSON 解析和数据映射问题。
- * * 保持: home/category/辅助函数/detail的原始逻辑不变，确保插件分类功能完整。
+ * reboys.cn 前端插件 - V16.0 (最终解析修复版)
+ * * 核心修正: 修复了 search 函数中对后端 JSON 响应体的解析路径，确保 results 数组能正确提取。
+ * * 保持: home/category/辅助函数/detail 的原始逻辑不变。
  */
 
 // --- 配置区 ---
 const BACKEND_URL = "http://192.168.1.7:3000"; // 您的后端服务地址
 const SITE_URL = "https://reboys.cn";
-// 匹配后端的 Chrome 141 UA
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
-const cheerio = createCheerio( ); // 假设环境提供此函数
+const cheerio = createCheerio( );
 
 // --- 辅助函数 ---
 function log(msg) { 
     if (DEBUG) {
-        console.log(`[reboys插件 V15] ${msg}`); 
+        console.log(`[reboys插件 V16] ${msg}`); 
     }
 }
 function argsify(ext) { 
@@ -26,15 +25,14 @@ function argsify(ext) {
 function jsonify(obj) { 
     return JSON.stringify(obj); 
 }
-// V13.2 遗留的 getConfig / home 逻辑...
 async function getConfig() {
-    log("==== 插件初始化 V15 ====");
+    log("==== 插件初始化 V16 ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
         { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
         { name: '综艺', ext: { id: 5 } }
     ];
-    return jsonify({ ver: 1, title: 'reboys搜(V15)', site: SITE_URL, tabs: CATEGORIES });
+    return jsonify({ ver: 1, title: 'reboys搜(V16)', site: SITE_URL, tabs: CATEGORIES });
 }
 // ----------------------------------------------------------------------
 // ★★★★★ 首页/分类 (保持原逻辑不变) ★★★★★
@@ -47,7 +45,6 @@ async function getCards(ext) {
     try {
         if (!homeCache) {
             log(`[getCards] 缓存未命中，正在抓取首页HTML...`);
-            // 使用 V15 修正后的 UA
             const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
             homeCache = data;
         }
@@ -67,10 +64,8 @@ async function getCards(ext) {
             const title = $item.find('p').text().trim();
             const imageUrl = $item.find('img').attr('src');
             
-            
             if (detailPath && title) {
                 cards.push({
-                    // vod_id 存储详情页路径，并标记来源为 'home'
                     vod_id: jsonify({ type: 'home', path: detailPath }),
                     vod_name: title,
                     vod_pic: imageUrl || FALLBACK_PIC,
@@ -89,7 +84,7 @@ async function getCards(ext) {
 
 
 // ----------------------------------------------------------------------
-// ★★★★★ 搜索 (核心修复：解析 V15 后端结构) ★★★★★
+// ★★★★★ 搜索 (核心修复：修正解析路径) ★★★★★
 // ----------------------------------------------------------------------
 async function search(ext) {
     ext = argsify(ext);
@@ -98,8 +93,8 @@ async function search(ext) {
     log(`[search] 开始搜索: ${keyword}`);
     
     try {
-        const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}&page=1`; // 假设只请求第一页
-        // 1. 调用后端接口，使用 V15 修正后的 UA
+        const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}&page=1`;
+        // 1. 调用后端接口
         const { data: response } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
 
         // 2. 检查后端返回的 code
@@ -108,18 +103,19 @@ async function search(ext) {
              return jsonify({ list: [] });
         }
 
-        // 3. 核心修正：安全地提取 results 数组 (后端结构: response.data.data.data.results)
-        const results = response.data?.data?.data?.results || [];
+        // 3. 核心修正：安全地提取 results 数组
+        // 从 {code:0, data: {code:0, data: {total: 98, results: [...]}}} 中提取 results
+        const coreData = response.data?.data; 
+        const results = coreData?.results || []; // <--- 修正后的路径
 
         log(`[search] 后端成功返回 ${results.length} 条结果。`);
 
         // 4. 核心映射：将后端结果转换为 App 插件期望的格式
         const list = results.map(item => {
-            // ⚠️ 关键：将网盘信息打包成 JSON 字符串，作为 vod_id 传递给 getTracks
             const vod_id_data = {
                 type: 'search', 
                 title: item.title,
-                links: item.links || [], // 直接携带网盘链接数组
+                links: item.links || [], 
             };
             
             const vod_id = JSON.stringify(vod_id_data);
@@ -130,12 +126,12 @@ async function search(ext) {
             return {
                 vod_id: vod_id,         
                 vod_name: item.title,   
-                vod_pic: item.image || FALLBACK_PIC,  // 优先使用后端图片
+                vod_pic: item.image || FALLBACK_PIC, 
                 vod_remarks: remarks,  
             };
         });
 
-        const total = response.data?.data?.data?.total || list.length;
+        const total = coreData?.total || list.length;
         
         // 5. 返回符合 App 插件规范的结构
         return jsonify({
@@ -153,14 +149,14 @@ async function search(ext) {
 
 
 // ----------------------------------------------------------------------
-// ★★★★★ 详情/播放 (核心修复：从 links 数组中解析多网盘) ★★★★★
+// ★★★★★ 详情/播放 (保持原逻辑不变) ★★★★★
 // ----------------------------------------------------------------------
 async function getTracks(ext) {
     const vod_id = ext.vod_id;
     log(`[getTracks] 收到 vod_id: ${vod_id}`);
     
     try {
-        const idData = argsify(vod_id); // 解析 vod_id
+        const idData = argsify(vod_id); 
         
         if (idData.type === 'search') {
             // 搜索结果模式：网盘链接已在 vod_id.links 中
@@ -168,7 +164,6 @@ async function getTracks(ext) {
             log(`[getTracks] (搜索源) 发现 ${links.length} 个网盘链接。`);
 
             if (links && links.length > 0) {
-                // 将 links 数组转换为 App 期望的 tracks 格式
                 const tracks = links.map(link => {
                     const panType = (link.type || '网盘').toUpperCase();
                     const password = link.password ? ` (码: ${link.password})` : '';
@@ -176,11 +171,10 @@ async function getTracks(ext) {
                     
                     return {
                         name: name,
-                        pan: link.url, // 网盘链接
+                        pan: link.url,
                     };
                 });
                 
-                // 返回 App 播放列表结构
                 return jsonify({ 
                     list: [{ 
                         title: idData.title || '播放列表', 
@@ -195,7 +189,7 @@ async function getTracks(ext) {
 
         } 
         else if (idData.type === 'home') {
-            // 首页/分类模式：调用后端 /detail 接口解析详情页 (保持原有逻辑)
+            // 首页/分类模式：调用后端 /detail 接口解析详情页
             log(`[getTracks] (首页源) 请求后端解析路径: ${idData.path}`);
             const url = `${BACKEND_URL}/detail?path=${encodeURIComponent(idData.path)}`;
             const { data } = await $fetch.get(url);
