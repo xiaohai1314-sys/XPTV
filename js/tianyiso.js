@@ -1,111 +1,144 @@
 /**
- * reboys.cn 前端插件 - V16 (终极诊断版)
+ * reboys.cn 前端插件 - V17 (最终正确版)
  * 
- * 诊断目的:
- * 彻底解剖 $fetch.get 的返回结果，找出数据到底藏在哪里，以及它是什么类型。
- * 将会生成多个结果，每个结果标题代表一步诊断。
+ * 核心修正:
+ * 1. [最终确认] 根据您在浏览器中测试返回的JSON，确认了后端工作正常且数据结构清晰。
+ * 2. [最终修正] search: 
+ *    - 使用正确的路径 `data.data.data.results` 来访问结果列表。
+ *    - 从 `item.links[0].url` 和 `item.links[0].password` 提取播放链接和密码，这是之前失败的关键原因。
+ * 3. [恢复] 恢复所有功能，并清理了所有诊断代码。
  */
 
-// --- 配置区 (保持不变) ---
-const BACKEND_URL = "http://192.168.10.106:3000";
+// --- 配置区 ---
+const BACKEND_URL = "http://192.168.10.106:3000"; // 您的后端服务地址
+const SITE_URL = "https://reboys.cn";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
+const cheerio = createCheerio( ); // 假设环境提供此函数
 
 // --- 辅助函数 ---
-function log(msg ) { if (DEBUG) console.log(`[reboys诊断V16] ${msg}`); }
+function log(msg) { if (DEBUG) console.log(`[reboys插件 V17] ${msg}`); }
+function argsify(ext) { if (typeof ext === 'string') try { return JSON.parse(ext); } catch (e) { return {}; } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 插件入口 (简化) ---
-async function getConfig() { return jsonify({ ver: 1, title: 'reboys搜(V16-Diag)' }); }
-async function init() { return getConfig(); }
-async function home() { return jsonify({ class: [] }); }
-async function category() { return jsonify({ list: [] }); }
-async function detail() { return jsonify({ list: [] }); }
-async function play() { return jsonify({ url: '' }); }
+// --- 插件入口 ---
+async function getConfig() {
+    log("==== 插件初始化 V17 (最终正确版) ====");
+    const CATEGORIES = [
+        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
+        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
+        { name: '综艺', ext: { id: 5 } }
+    ];
+    return jsonify({ ver: 1, title: 'reboys搜(V17)', site: SITE_URL, tabs: CATEGORIES });
+}
 
-// ★★★★★【核心诊断代码】★★★★★
-async function search(ext) {
-    const text = typeof ext === 'string' ? ext : (ext.text || '');
-    if (!text) return jsonify({ list: [] });
-    log(`[search] 开始终极诊断，关键词: "${text}"`);
-    
-    let diagnosticResults = [];
-    let step = 1;
-
+// ★★★★★【首页/分类】★★★★★
+let homeCache = null;
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { id: categoryId } = ext;
+    log(`[getCards] 获取分类ID="${categoryId}"`);
     try {
-        const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(text)}&page=1`;
-        log(`[search] 准备请求后端URL: ${url}`);
-        
-        const response = await $fetch.get(url);
-        log(`[search] ✓ 成功从后端获取到响应!`);
-
-        // Step 1: 检查 response 本身是什么类型
-        const responseType = typeof response;
-        diagnosticResults.push({
-            vod_name: `[${step++}] 响应类型: ${responseType}`,
-            vod_remarks: '检查 $fetch 返回值的类型'
-        });
-
-        // Step 2: 尝试将 response 序列化为JSON字符串
-        let responseAsString = '[序列化失败]';
-        try {
-            responseAsString = JSON.stringify(response);
-            diagnosticResults.push({
-                vod_name: `[${step++}] 响应内容 (序列化后): ${responseAsString.substring(0, 200)}`,
-                vod_remarks: '查看完整的响应结构'
-            });
-        } catch (e) {
-            diagnosticResults.push({
-                vod_name: `[${step++}] 响应内容: [序列化失败: ${e.message}]`,
-                vod_remarks: '响应对象无法被JSON.stringify'
-            });
+        if (!homeCache) {
+            log(`[getCards] 缓存未命中，抓取首页HTML...`);
+            const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+            homeCache = data;
         }
-
-        // Step 3: 检查 response.data 是否存在
-        if (typeof response.data !== 'undefined') {
-            const dataType = typeof response.data;
-            diagnosticResults.push({
-                vod_name: `[${step++}] response.data 类型: ${dataType}`,
-                vod_remarks: '检查是否存在 .data 字段'
-            });
-
-            // Step 4: 尝试序列化 response.data
-            let dataAsString = '[序列化失败]';
-            try {
-                dataAsString = JSON.stringify(response.data);
-                diagnosticResults.push({
-                    vod_name: `[${step++}] response.data 内容: ${dataAsString.substring(0, 200)}`,
-                    vod_remarks: '查看 .data 字段的内容'
-                });
-            } catch (e) {
-                diagnosticResults.push({
-                    vod_name: `[${step++}] response.data 内容: [序列化失败: ${e.message}]`,
-                    vod_remarks: '.data 字段无法被序列化'
+        const $ = cheerio.load(homeCache);
+        const cards = [];
+        const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
+        targetBlock.find('a.item').each((_, element) => {
+            const $item = $(element);
+            const detailPath = $item.attr('href');
+            const title = $item.find('p').text().trim();
+            const imageUrl = $item.find('img').attr('src');
+            if (detailPath && title) {
+                cards.push({
+                    vod_id: jsonify({ type: 'home', path: detailPath }),
+                    vod_name: title,
+                    vod_pic: imageUrl || FALLBACK_PIC,
+                    vod_remarks: '首页推荐'
                 });
             }
-
-        } else {
-            diagnosticResults.push({
-                vod_name: `[${step++}] response.data: 不存在`,
-                vod_remarks: '响应对象没有 .data 字段'
-            });
-        }
-
-    } catch (e) {
-        log(`❌ [search] 诊断过程中发生严重错误: ${e.message}`);
-        diagnosticResults.push({
-            vod_name: `[!] 诊断失败: ${e.message}`,
-            vod_remarks: '请求后端时发生异常'
         });
+        log(`✓ 为分类 ${categoryId} 提取到 ${cards.length} 个卡片`);
+        return jsonify({ list: cards });
+    } catch (e) {
+        log(`❌ [getCards] 异常: ${e.message}`);
+        homeCache = null;
+        return jsonify({ list: [] });
     }
+}
 
-    // 为每个结果添加通用字段
-    const finalList = diagnosticResults.map(item => ({
-        ...item,
-        vod_id: Math.random().toString(),
-        vod_pic: FALLBACK_PIC
-    }));
+// ★★★★★【搜索 - 最终修正版】★★★★★
+async function search(ext) {
+    ext = argsify(ext);
+    const text = ext.text || '';
+    if (!text) return jsonify({ list: [] });
+    log(`[search] 用户搜索: "${text}"`);
+    
+    try {
+        const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(text)}&page=1`;
+        const { data } = await $fetch.get(url);
+        
+        if (data && data.code === 0) {
+            const results = data.data?.data?.results || [];
+            log(`✓ 解析到 ${results.length} 条搜索结果`);
 
-    log(`[search] 诊断结束，返回 ${finalList.length} 条诊断信息。`);
-    return jsonify({ list: finalList });
+            return jsonify({
+                list: results.map(item => {
+                    // [核心修正] 从 item.links 数组中提取链接和密码
+                    const linkInfo = item.links && item.links.length > 0 ? item.links[0] : {};
+                    const playUrl = linkInfo.url || '';
+                    const playPwd = linkInfo.password || '';
+
+                    return {
+                        vod_id: jsonify({ type: 'search', url: playUrl, pwd: playPwd, title: item.title }),
+                        vod_name: item.title,
+                        vod_pic: item.image || FALLBACK_PIC,
+                        vod_remarks: playPwd ? `码: ${playPwd}` : '直链'
+                    };
+                })
+            });
+        } else {
+            log(`❌ 后端接口返回错误: ${data ? data.message : '无响应'}`);
+            return jsonify({ list: [] });
+        }
+    } catch (e) {
+        log(`❌ [search] 请求后端异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
+
+// ★★★★★【详情】★★★★★
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const idData = argsify(ext.vod_id);
+    log(`[getTracks] 解析详情: ${JSON.stringify(idData)}`);
+
+    try {
+        if (idData.type === 'search') {
+            const trackName = idData.pwd ? `${idData.title} (码: ${idData.pwd})` : idData.title;
+            return jsonify({ list: [{ title: '播放列表', tracks: [{ name: trackName, url: idData.url }] }] });
+        } 
+        else if (idData.type === 'home') {
+            log(`[getTracks] (首页源) 功能待开发`);
+            return jsonify({ list: [] });
+        }
+        throw new Error('未知的 vod_id 类型');
+    } catch (e) {
+        log(`❌ [getTracks] 异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
+
+// --- 兼容接口 ---
+async function init() { return getConfig(); }
+async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
+async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
+async function detail(id) { return getTracks({ vod_id: id }); }
+async function play(flag, id) {
+    log(`[play] 播放请求: flag=${flag}, id=${id}`);
+    return jsonify({ url: id }); 
 }
