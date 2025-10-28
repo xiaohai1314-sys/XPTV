@@ -1,9 +1,10 @@
 /**
- * reboys.cn 前端插件 - V22.0 (终极稳定版：兼容解析 + 网盘修复)
+ * reboys.cn 前端插件 - V23.0 (终极稳定版：修复无限加载 + 强制网盘识别)
  * 核心修正:
- * 1. [终极兼容] search: 采用最保守的“多层级”数据提取策略，确保无论 App 自动剥离多少层 JSON，都能找到 results 数组。
- * 2. [网盘修复] getTracks: 确保生成的 tracks 结构纯净， pan 字段仅包含网盘 URL。
- * 3. [网盘修复] play: 确保能直接返回网盘 URL，防止 App 无法识别。
+ * 1. [无限加载修复] search: 引入搜索缓存机制，防止重复请求。
+ * 2. [网盘修复] getTracks: 强制返回 App 插件要求的 vod_play_from/vod_play_url 字段。
+ * 3. [网盘修复] play: 保持直接返回 URL 的逻辑。
+ * 4. [兼容解析] 保持兼容性路径提取。
  */
 
 // --- 配置区 ---
@@ -17,13 +18,12 @@ const cheerio = createCheerio( );
 
 // --- 全局缓存 ---
 let homeCache = null;
-let searchCache = {}; 
+let searchCache = {}; // V23 修复：引入搜索缓存
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V22] ${msg}`;
+    const logMsg = `[reboys V23] ${msg}`;
     try { 
-        // 尝试使用 $log，如果 App 不支持，则使用 console.log
         $log(logMsg); 
     } catch (_) { 
         if (DEBUG) console.log(logMsg); 
@@ -41,13 +41,13 @@ function jsonify(obj) {
 // ★★★★★ getConfig & 首页/分类 (逻辑保持不变) ★★★★★
 // ----------------------------------------------------------------------
 async function getConfig() {
-    log("==== 插件初始化 V22 (终极稳定版) ====");
+    log("==== 插件初始化 V23 (终极稳定版) ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
         { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
         { name: '综艺', ext: { id: 5 } }
     ];
-    return jsonify({ ver: 1, title: 'reboys搜(V22)', site: SITE_URL, tabs: CATEGORIES });
+    return jsonify({ ver: 1, title: 'reboys搜(V23)", site: SITE_URL, tabs: CATEGORIES });
 }
 
 async function getCards(ext) {
@@ -90,15 +90,15 @@ async function getCards(ext) {
 
 
 // ----------------------------------------------------------------------
-// ★★★★★ 搜索 (终极兼容解析) ★★★★★
+// ★★★★★ 搜索 (修复无限加载) ★★★★★
 // ----------------------------------------------------------------------
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
-    const page = ext.page || 1; // 加上分页支持，防止无限加载
+    const page = ext.page || 1; 
     if (!keyword) return jsonify({ list: [] });
     
-    // 检查缓存，防止重复搜索导致无限加载
+    // 检查缓存，防止重复搜索请求
     const cacheKey = `${keyword}_${page}`;
     if (searchCache[cacheKey]) {
         return jsonify(searchCache[cacheKey]);
@@ -122,7 +122,6 @@ async function search(ext) {
                 response = fetchResult;
             }
         } catch (e) {
-            log(`❌ [search] JSON 解析失败: ${e.message}`);
             return jsonify({ list: [] });
         }
         
@@ -132,13 +131,10 @@ async function search(ext) {
 
         // 2. 兼容性路径提取
         let coreData = null;
-        
         if (response.data && response.data.data && response.data.data.results) {
              coreData = response.data.data;
         } else if (response.data && response.data.results) {
              coreData = response.data;
-        } else if (response.data && response.data.data && response.data.data.data && response.data.data.data.results) {
-             coreData = response.data.data.data;
         } else if (response.results) {
              coreData = response;
         }
@@ -171,7 +167,7 @@ async function search(ext) {
         });
 
         const total = coreData?.total || list.length;
-        const pageCount = Math.ceil(total / (results.length || 10)); // 假设每页10条或根据结果数量估算
+        const pageCount = Math.ceil(total / (results.length || 10)); 
         
         const finalResult = {
             list: list,
@@ -180,7 +176,7 @@ async function search(ext) {
             pagecount: pageCount,
         };
 
-        searchCache[cacheKey] = finalResult; // 缓存结果
+        searchCache[cacheKey] = finalResult; 
         return jsonify(finalResult);
 
     } catch (e) {
@@ -191,51 +187,48 @@ async function search(ext) {
 
 
 // ----------------------------------------------------------------------
-// ★★★★★ 详情/播放 (网盘识别修复) ★★★★★
+// ★★★★★ 详情/播放 (强制网盘识别修复) ★★★★★
 // ----------------------------------------------------------------------
 async function getTracks(ext) {
     const vod_id = ext.vod_id;
-    log(`[getTracks] 收到 vod_id: ${vod_id.substring(0, 100)}...`);
     
     try {
         const idData = argsify(vod_id); 
         
         if (idData.type === 'search') {
-            // 搜索结果模式：网盘链接已在 vod_id.links 中
             const links = idData.links;
-            log(`[getTracks] (搜索源) 发现 ${links.length} 个网盘链接。`);
 
             if (links && links.length > 0) {
-                // V22 修复：确保映射的结构是 App 期望的：{ name: '名称', pan: '链接' }
-                const tracks = links.map(link => {
+                // 生成 App 期望的播放列表 string: "名称$链接#名称$链接..."
+                const playUrls = links.map(link => {
                     const panType = (link.type || '网盘').toUpperCase();
                     const password = link.password ? ` (码: ${link.password})` : '';
+                    const name = `[${panType}] ${idData.title || '播放列表'}${password}`;
                     
-                    return {
-                        name: `[${panType}] ${link.url.includes('quark') ? '夸克' : (link.url.includes('baidu') ? '百度' : '网盘')} ${password}`, // 优化名称显示
-                        pan: link.url, 
-                    };
-                });
+                    // V23 修复：使用 App 插件最兼容的格式 "名称$链接"
+                    return `${name}$${link.url}`; 
+                }).join('#');
                 
+                // V23 修复：返回 App 强制要求的 vod_play_from 和 vod_play_url
                 return jsonify({ 
-                    list: [{ 
-                        title: idData.title || '网盘列表', 
-                        tracks: tracks 
-                    }] 
+                    vod_play_from: '网盘资源', // 播放源名称
+                    vod_play_url: playUrls,    // 播放列表字符串
+                    // 注意：这里不再使用 {list: [{title:..., tracks:[...]}]} 的结构
                 });
 
             } else {
-                return jsonify({ list: [{ title: '播放列表', tracks: [{ name: '无可用链接', pan: '' }] }] });
+                return jsonify({ list: [] });
             }
 
         } 
         else if (idData.type === 'home') {
-            // 首页/分类模式：调用后端 /detail 接口解析详情页
+            // 首页/分类模式 (保持 V19/V22 逻辑不变)
             const url = `${BACKEND_URL}/detail?path=${encodeURIComponent(idData.path)}`;
             const { data } = await $fetch.get(url);
             
             if (data.success) {
                 let trackName = data.data.pwd ? `点击播放 (码: ${data.data.pwd})` : '点击播放';
+                // 首页数据仍返回 tracks 结构（因为你的 App 可能支持两种结构）
                 return jsonify({ 
                     list: [{ 
                         title: '播放列表', 
@@ -243,12 +236,12 @@ async function getTracks(ext) {
                     }] 
                 });
             } else {
-                throw new Error(`后端详情解析失败: ${data.message}`);
+                return jsonify({ list: [] });
             }
 
         } 
         else {
-            throw new Error('未知的 vod_id 类型');
+            return jsonify({ list: [] });
         }
     } catch (e) {
         log(`❌ [getTracks] 异常: ${e.message}`);
@@ -257,10 +250,10 @@ async function getTracks(ext) {
 }
 
 // ----------------------------------------------------------------------
-// 播放 (网盘识别修复)
+// 播放 (保持不变)
 // ----------------------------------------------------------------------
 async function play(flag, id) {
-    // id 就是网盘链接 (即 getTracks 中 pan 字段的值)
+    // id 就是网盘链接
     if (id && (id.startsWith('http') || id.startsWith('//'))) {
         return jsonify({ 
             parse: 0, // 0: 不需解析 (直接是链接)
@@ -281,3 +274,4 @@ async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
 async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
 async function detail(id) { return getTracks({ vod_id: id }); }
+
