@@ -1,18 +1,23 @@
 /**
- * reboys.cn 网盘资源聚合脚本 - V3.0.0 完全重构版
+ * reboys.cn 网盘资源聚合脚本 - V2.2.0 修复版
  * 
- * 重大更新:
- * 1. 放弃API调用,改用网页爬取
- * 2. 解析HTML获取资源列表
- * 3. 修复UI显示和搜索功能
+ * 更新日志 (V2.2.0):
+ * 1. [修复] 更新了已失效的 API_TOKEN，解决了API认证失败的问题。
+ * 2. [修复] 修正了搜索结果的数据解析路径，适配了服务器返回的新JSON结构。
+ * 3. [优化] 增强了日志输出，更清晰地展示API返回和数据解析过程。
+ * 4. [兼容] 保留了对旧版数据结构的兼容性判断，以增加脚本的鲁棒性。
+ * 
+ * 基于 V2.1.0 修复版进行修改。
  */
 
 const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+// [V2.2.0 修复] 更新为从网站获取的最新有效Token
+const API_TOKEN = "eyJ0aW1lc3RhbXAiOjE3NjE2MjAzMzIsIm5vbmNlIjoiNjkwMDMxNmM2NTNjZTYuNDQ2MDcxNzYiLCJzaWduYXR1cmUiOiI1YjFkNGM5ZjNmNTcwYWZjNzU2M2I1ZDE4NDM4ZjUyZWM3MWI2MmRkZDUxMTZlYTBjNjBiNGQ2NDE3ZTNiMjE5In0=";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/favicon.ico";
 
-// ============ 工具函数 ============
-function log(msg) {
+// ============ 日志函数 ============
+function log(msg ) {
   const logMsg = `[reboys] ${msg}`;
   try { 
     if (typeof $log !== 'undefined') $log(logMsg); 
@@ -25,7 +30,10 @@ function log(msg) {
 function argsify(ext) {
   if (typeof ext === 'string') {
     try { return JSON.parse(ext); } 
-    catch (e) { return {}; }
+    catch (e) { 
+      log(`argsify解析失败: ${e.message}`);
+      return {}; 
+    }
   }
   return ext || {};
 }
@@ -34,196 +42,141 @@ function jsonify(data) {
   return JSON.stringify(data); 
 }
 
-// ============ HTTP 请求 ============
-async function httpGet(url, headers = {}) {
-  log(`[HTTP] GET: ${url}`);
-  
-  try {
-    // 优先使用 $fetch
-    if (typeof $fetch !== 'undefined' && $fetch.get) {
-      const response = await $fetch.get(url, { 
-        headers: Object.assign({ 'User-Agent': UA }, headers)
-      });
-      return response;
-    }
-    
-    // 回退到 fetch
-    if (typeof fetch !== 'undefined') {
-      const response = await fetch(url, { 
-        method: 'GET',
-        headers: Object.assign({ 'User-Agent': UA }, headers)
-      });
-      return await response.text();
-    }
-    
-    throw new Error('没有可用的HTTP客户端');
-  } catch (e) {
-    log(`[HTTP] 失败: ${e.message}`);
-    throw e;
-  }
-}
+// ============ 网盘类型识别 ============
+const PAN_TYPES = {
+  '夸克': { regex: /quark|夸克/i, id: 0 },
+  '阿里云盘': { regex: /aliyun|阿里/i, id: 1 },
+  '百度网盘': { regex: /baidu|百度/i, id: 2 },
+  'UC网盘': { regex: /uc|UC/i, id: 3 },
+  '迅雷网盘': { regex: /thunder|迅雷/i, id: 4 }
+};
 
-// ============ HTML 解析 ============
-function parseResourceCards(html) {
-  const cards = [];
+function getPanType(typeStr) {
+  if (!typeStr) return { name: '未知网盘', id: -1 };
   
-  try {
-    // 匹配模式: <a href="/s/资源名.html"> ... <img src="图片URL"> ... 资源名 ...
-    // 修改正则以匹配实际的HTML结构
-    const linkPattern = /<a[^>]*href="(\/s\/[^"]+\.html)"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"[^>]*>[\s\S]*?<\/a>/gi;
-    
-    let match;
-    let count = 0;
-    
-    while ((match = linkPattern.exec(html)) && count < 50) {
-      const detailUrl = match[1];
-      const picUrl = match[2];
-      
-      // 从URL中提取资源名 (例如: /s/她靠弹幕翻身.html -> 她靠弹幕翻身)
-      const nameMatch = detailUrl.match(/\/s\/(.+?)\.html/);
-      const resourceName = nameMatch ? decodeURIComponent(nameMatch[1]) : '未知资源';
-      
-      cards.push({
-        vod_id: detailUrl,
-        vod_name: resourceName,
-        vod_pic: picUrl.startsWith('http') ? picUrl : `${SITE_URL}${picUrl}`,
-        vod_remarks: '',
-        ext: {
-          url: `${SITE_URL}${detailUrl}`
-        }
-      });
-      
-      count++;
+  for (const [name, config] of Object.entries(PAN_TYPES)) {
+    if (config.regex.test(typeStr)) {
+      return { name, id: config.id };
     }
-    
-    log(`[Parse] 解析出 ${cards.length} 个资源`);
-  } catch (e) {
-    log(`[Parse] 解析失败: ${e.message}`);
   }
-  
-  return cards;
-}
-
-function extractPanLinks(html) {
-  const links = [];
-  
-  try {
-    // 匹配各种网盘链接
-    const patterns = [
-      // 夸克网盘
-      /(https?:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+)/gi,
-      // 阿里云盘
-      /(https?:\/\/www\.aliyundrive\.com\/s\/[a-zA-Z0-9]+)/gi,
-      /(https?:\/\/www\.alipan\.com\/s\/[a-zA-Z0-9]+)/gi,
-      // 百度网盘
-      /(https?:\/\/pan\.baidu\.com\/s\/[a-zA-Z0-9\-_]+)/gi,
-      // 通用网盘链接
-      /(https?:\/\/[^\s<>"']+\.(com|cn)\/s\/[a-zA-Z0-9\-_]+)/gi
-    ];
-    
-    for (const pattern of patterns) {
-      let match;
-      while ((match = pattern.exec(html)) !== null) {
-        const url = match[1];
-        if (!links.includes(url)) {
-          links.push(url);
-        }
-      }
-    }
-    
-    log(`[Extract] 提取到 ${links.length} 个网盘链接`);
-  } catch (e) {
-    log(`[Extract] 提取失败: ${e.message}`);
-  }
-  
-  return links;
+  return { name: '未知网盘', id: -1 };
 }
 
 function detectPanType(url) {
   if (!url) return '资源链接';
   if (url.includes('quark')) return '夸克网盘';
-  if (url.includes('aliyun') || url.includes('alipan')) return '阿里云盘';
+  if (url.includes('aliyun')) return '阿里云盘';
   if (url.includes('baidu')) return '百度网盘';
   if (url.includes('115')) return '115网盘';
-  if (url.includes('xunlei') || url.includes('thunder')) return '迅雷网盘';
+  if (url.includes('thunder')) return '迅雷网盘';
   return '网盘链接';
 }
 
-// ============ 核心功能 ============
-
-/**
- * 获取首页或分类资源
- */
-async function fetchResources(keyword = '', page = 1) {
-  log(`[Fetch] 关键词="${keyword}" 页=${page}`);
+// ============ HTTP 请求封装 ============
+async function httpGet(url, headers = {} ) {
+  log(`[HTTP] GET: ${url}`);
   
   try {
-    let url;
-    if (keyword && keyword.trim()) {
-      // 搜索URL
-      url = `${SITE_URL}/search.html?wd=${encodeURIComponent(keyword)}&page=${page}`;
-    } else {
-      // 首页
-      url = page === 1 ? SITE_URL : `${SITE_URL}/?page=${page}`;
+    if (typeof $fetch !== 'undefined' && $fetch.get) {
+      const response = await $fetch.get(url, { headers });
+      if (typeof response === 'string') {
+        try { return JSON.parse(response); } catch (e) { return response; }
+      }
+      return response;
     }
     
-    const html = await httpGet(url);
-    const cards = parseResourceCards(html);
+    if (typeof fetch !== 'undefined') {
+      const response = await fetch(url, { method: 'GET', headers: headers });
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        return await response.json();
+      }
+      const text = await response.text();
+      try { return JSON.parse(text); } catch(e) { return text; }
+    }
     
-    return cards;
+    throw new Error('没有可用的HTTP客户端');
   } catch (e) {
-    log(`[Fetch] 失败: ${e.message}`);
-    return [];
+    log(`[HTTP] 请求失败: ${e.message}`);
+    throw e;
   }
 }
 
-/**
- * 获取资源详情页的网盘链接
- */
-async function fetchResourceDetail(detailUrl) {
-  log(`[Detail] 获取: ${detailUrl}`);
+// ============ API 调用层 ============
+async function searchAPI(keyword, page = 1) {
+  const url = `${SITE_URL}/search?keyword=${encodeURIComponent(keyword)}&page=${page}`;
+  log(`[API] 搜索: "${keyword}" 第${page}页`);
   
   try {
-    const html = await httpGet(detailUrl);
-    const links = extractPanLinks(html);
+    const data = await httpGet(url, {
+      'API-TOKEN': API_TOKEN,
+      'User-Agent': UA,
+      'Accept': 'application/json'
+    } );
     
-    if (links.length === 0) {
-      log(`[Detail] 未找到网盘链接`);
-      return {
-        success: false,
-        message: '未找到网盘链接',
-        url: detailUrl
-      };
+    log(`[API] 返回数据类型: ${typeof data}`);
+    
+    if (typeof data === 'string') {
+      try {
+        const parsedData = JSON.parse(data);
+        log('[API] 字符串响应解析成功');
+        return parsedData;
+      } catch (e) {
+        log(`[API] JSON解析失败: ${data.substring(0, 100)}...`);
+        return { code: -1, message: '数据解析失败，服务器可能返回了HTML页面', data: null };
+      }
     }
     
-    log(`[Detail] 找到 ${links.length} 个链接`);
-    return {
-      success: true,
-      links: links
-    };
-    
+    return data;
   } catch (e) {
-    log(`[Detail] 失败: ${e.message}`);
-    return {
-      success: false,
-      message: e.message,
-      url: detailUrl
-    };
+    log(`[API] 异常: ${e.message}`);
+    return { code: -1, message: e.message, data: null };
+  }
+}
+
+// ============ 资源链接提取(保持不变) ============
+async function extractResourceLink(resourceUrl) {
+  log(`[Extract] 提取: ${resourceUrl}`);
+  try {
+    const pageData = await httpGet(resourceUrl, { 'User-Agent': UA } );
+    const htmlText = typeof pageData === 'string' ? pageData : JSON.stringify(pageData);
+    const panPatterns = [
+      /(https?:\/\/pan\.quark\.cn[^\s"'<>]+ )/gi,
+      /(https?:\/\/[^\s]*aliyundrive\.com[^\s"'<>]+ )/gi,
+      /(https?:\/\/pan\.baidu\.com[^\s"'<>]+ )/gi,
+      /(https?:\/\/115\.com[^\s"'<>]+ )/gi
+    ];
+    for (const pattern of panPatterns) {
+      const match = htmlText.match(pattern);
+      if (match && match[0]) {
+        const url = match[0];
+        log(`[Extract] ✓ 找到: ${url.substring(0, 50)}...`);
+        return { success: true, url: url, type: detectPanType(url) };
+      }
+    }
+    const redirectMatch = htmlText.match(/window\.open\(['"]([^'"]+)['"]\)/);
+    if (redirectMatch && redirectMatch[1]) {
+      log(`[Extract] ✓ 找到跳转链接`);
+      return { success: true, url: redirectMatch[1], type: detectPanType(redirectMatch[1]) };
+    }
+    log(`[Extract] ⚠ 未找到直接链接`);
+    return { success: false, url: resourceUrl, type: '资源页面', message: '请手动获取' };
+  } catch (e) {
+    log(`[Extract] 异常: ${e.message}`);
+    return { success: false, url: resourceUrl, type: '错误', message: e.message };
   }
 }
 
 // ============ 插件接口 ============
 
 async function getConfig() {
-  log("==== 初始化 V3.0.0 ====");
-  
+  log("==== 初始化 V2.2.0 ====");
   return jsonify({
     ver: 1,
     title: 'reboys资源聚合',
     site: SITE_URL,
     cookie: '',
     tabs: [
-      { name: '首页', ext: { id: '' } },
       { name: '短剧', ext: { id: '短剧' } },
       { name: '电影', ext: { id: '电影' } },
       { name: '电视剧', ext: { id: '电视剧' } },
@@ -235,18 +188,48 @@ async function getConfig() {
 
 async function getCards(ext) {
   ext = argsify(ext);
-  const { id: keyword = '', page = 1 } = ext;
-  
-  log(`[getCards] 关键词="${keyword}" 页=${page}`);
+  const { id: categoryName = '电影', page = 1 } = ext;
+  log(`[getCards] 分类="${categoryName}" 页=${page}`);
   
   try {
-    const cards = await fetchResources(keyword, page);
+    const apiResp = await searchAPI(categoryName, page);
+    log(`[getCards] API返回 code=${apiResp.code}`);
     
-    if (cards.length === 0) {
-      log(`[getCards] 无结果`);
+    if (apiResp.code !== 0 || !apiResp.data) {
+      log(`[getCards] API失败: ${apiResp.message || '无数据'}`);
+      return jsonify({ list: [] });
     }
     
+    // [V2.2.0 修复] 修正数据解析路径，并保持向后兼容
+    const results = apiResp.data?.data?.data?.results || // 新结构
+                    apiResp.data?.data?.results ||       // 旧结构
+                    apiResp.data?.results ||             // 更旧的结构
+                    [];
+    
+    log(`[getCards] 解析到 ${results.length} 条结果`);
+    
+    const cards = results
+      .filter(item => item && item.title)
+      .map(item => {
+        const firstLink = item.links && item.links[0] ? item.links[0].url : '';
+        const resourceUrl = firstLink || `${SITE_URL}/d/${item.id}.html`;
+        
+        return {
+          vod_id: item.id || Math.random().toString(),
+          vod_name: item.title || '未知资源',
+          vod_pic: item.image || FALLBACK_PIC,
+          vod_remarks: item.source_name ? `[${item.source_name}]` : '',
+          ext: {
+            url: resourceUrl,
+            resourceId: item.id,
+            sourceType: getPanType(item.source_name || '').id
+          }
+        };
+      });
+    
+    log(`[getCards] ✓ 返回 ${cards.length} 张卡片`);
     return jsonify({ list: cards });
+    
   } catch (e) {
     log(`[getCards] 异常: ${e.message}`);
     return jsonify({ list: [] });
@@ -262,13 +245,51 @@ async function search(ext) {
     return jsonify({ list: [] });
   }
   
-  log(`[search] 搜索="${text}" 页=${page}`);
+  log(`[search] 关键词="${text}" 页=${page}`);
   
   try {
-    const cards = await fetchResources(text, page);
+    const apiResp = await searchAPI(text, page);
+    log(`[search] API返回 code=${apiResp.code}`);
     
-    log(`[search] 返回 ${cards.length} 个结果`);
+    if (apiResp.code !== 0 || !apiResp.data) {
+      log(`[search] 搜索失败: ${apiResp.message || '无数据'}`);
+      return jsonify({ list: [] });
+    }
+    
+    // [V2.2.0 修复] 修正数据解析路径，并保持向后兼容
+    const results = apiResp.data?.data?.data?.results || // 新结构
+                    apiResp.data?.data?.results ||       // 旧结构
+                    apiResp.data?.results ||             // 更旧的结构
+                    [];
+    
+    log(`[search] 解析到 ${results.length} 条结果`);
+    
+    const cards = results
+      .filter(item => {
+        if (!item || !item.title) return false;
+        const sourceName = item.source_name || '';
+        return !sourceName.includes('迅雷') && !sourceName.includes('百度');
+      })
+      .map(item => {
+        const firstLink = item.links && item.links[0] ? item.links[0].url : '';
+        const resourceUrl = firstLink || `${SITE_URL}/d/${item.id}.html`;
+        
+        return {
+          vod_id: item.id || Math.random().toString(),
+          vod_name: item.title || '未知资源',
+          vod_pic: FALLBACK_PIC,
+          vod_remarks: `[${item.source_name || '未知来源'}]`,
+          ext: {
+            url: resourceUrl,
+            resourceId: item.id,
+            sourceType: getPanType(item.source_name || '').id
+          }
+        };
+      });
+    
+    log(`[search] ✓ 返回 ${cards.length} 个结果`);
     return jsonify({ list: cards });
+    
   } catch (e) {
     log(`[search] 异常: ${e.message}`);
     return jsonify({ list: [] });
@@ -277,42 +298,25 @@ async function search(ext) {
 
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext;
+  const { url, resourceId } = ext;
   
-  if (!url) {
-    log(`[getTracks] 缺少URL`);
+  if (!url && !resourceId) {
+    log(`[getTracks] 缺少URL和ID`);
     return jsonify({ list: [] });
   }
   
-  log(`[getTracks] 获取详情: ${url}`);
+  log(`[getTracks] URL=${url}`);
   
   try {
-    const result = await fetchResourceDetail(url);
-    
-    if (!result.success) {
-      return jsonify({
-        list: [{
-          title: '获取失败',
-          tracks: [{
-            name: result.message || '未知错误',
-            pan: result.url || url,
-            ext: {}
-          }]
-        }]
-      });
-    }
-    
-    // 返回所有找到的网盘链接
-    const tracks = result.links.map(link => ({
-      name: detectPanType(link),
-      pan: link,
-      ext: {}
-    }));
-    
+    const result = await extractResourceLink(url);
     return jsonify({
       list: [{
-        title: '网盘链接',
-        tracks: tracks
+        title: result.success ? '获取成功' : '请手动获取',
+        tracks: [{
+          name: result.type || '资源链接',
+          pan: result.url,
+          ext: {}
+        }]
       }]
     });
     
@@ -321,18 +325,13 @@ async function getTracks(ext) {
     return jsonify({
       list: [{
         title: '获取失败',
-        tracks: [{
-          name: '错误',
-          pan: url,
-          ext: {}
-        }]
+        tracks: [{ name: '错误', pan: url || '', ext: {} }]
       }]
     });
   }
 }
 
 // ============ 兼容接口 ============
-
 async function init(cfg) {
   log('[init] 初始化');
   return await getConfig();
@@ -342,29 +341,14 @@ async function home(filter) {
   log('[home] 获取首页');
   const configStr = await getConfig();
   const config = JSON.parse(configStr);
-  
-  return jsonify({ 
-    class: config.tabs, 
-    filters: {} 
-  });
+  return jsonify({ class: config.tabs, filters: {} });
 }
 
 async function category(tid, pg, filter, extend) {
   log(`[category] tid=${JSON.stringify(tid)} pg=${pg}`);
-  
-  let categoryId = '';
+  let categoryId = (typeof tid === 'object' && tid.id) ? tid.id : tid;
   let pageNum = pg || 1;
-  
-  if (typeof tid === 'object' && tid.id !== undefined) {
-    categoryId = tid.id;
-  } else if (typeof tid === 'string') {
-    categoryId = tid;
-  }
-  
-  return await getCards({ 
-    id: categoryId, 
-    page: pageNum 
-  });
+  return await getCards({ id: categoryId, page: pageNum });
 }
 
 async function detail(id) {
@@ -378,7 +362,7 @@ async function play(flag, id, flags) {
 }
 
 // ============ 导出 ============
-log('==== V3.0.0 加载完成 ====');
+log('==== V2.2.0 加载完成 ====');
 
 if (typeof globalThis !== 'undefined') {
   globalThis.init = init;
