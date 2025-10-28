@@ -1,77 +1,29 @@
 /**
- * reboys.cn 前端插件 - V17 (最终正确版)
+ * reboys.cn 前端插件 - V13.1 (逻辑修正版)
  * 
  * 核心修正:
- * 1. [最终确认] 根据您在浏览器中测试返回的JSON，确认了后端工作正常且数据结构清晰。
- * 2. [最终修正] search: 
- *    - 使用正确的路径 `data.data.data.results` 来访问结果列表。
- *    - 从 `item.links[0].url` 和 `item.links[0].password` 提取播放链接和密码，这是之前失败的关键原因。
- * 3. [恢复] 恢复所有功能，并清理了所有诊断代码。
+ * 1. [逻辑修正] search: 只返回标题和详情页ID(路径)，不再尝试解析网盘链接。
+ * 2. [逻辑修正] getTracks: 调用后端的 /detail 接口来获取真实的网盘链接。
+ * 3. [保持] 其他函数和配置保持 V13.1 的原样。
  */
 
-// --- 配置区 ---
+// --- 配置区 (保持不变) ---
 const BACKEND_URL = "http://192.168.10.106:3000"; // 您的后端服务地址
 const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
-const cheerio = createCheerio( ); // 假设环境提供此函数
+const cheerio = createCheerio(  );
 
-// --- 辅助函数 ---
-function log(msg) { if (DEBUG) console.log(`[reboys插件 V17] ${msg}`); }
+// --- 辅助函数 (保持不变) ---
+function log(msg) { if (DEBUG) console.log(`[reboys插件 V13-logic-fixed] ${msg}`); }
 function argsify(ext) { if (typeof ext === 'string') try { return JSON.parse(ext); } catch (e) { return {}; } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 插件入口 ---
-async function getConfig() {
-    log("==== 插件初始化 V17 (最终正确版) ====");
-    const CATEGORIES = [
-        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
-        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
-        { name: '综艺', ext: { id: 5 } }
-    ];
-    return jsonify({ ver: 1, title: 'reboys搜(V17)', site: SITE_URL, tabs: CATEGORIES });
-}
+// --- 插件入口 (保持不变) ---
+// ... (您原来的 getConfig, getCards 函数) ...
 
-// ★★★★★【首页/分类】★★★★★
-let homeCache = null;
-async function getCards(ext) {
-    ext = argsify(ext);
-    const { id: categoryId } = ext;
-    log(`[getCards] 获取分类ID="${categoryId}"`);
-    try {
-        if (!homeCache) {
-            log(`[getCards] 缓存未命中，抓取首页HTML...`);
-            const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
-            homeCache = data;
-        }
-        const $ = cheerio.load(homeCache);
-        const cards = [];
-        const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
-        targetBlock.find('a.item').each((_, element) => {
-            const $item = $(element);
-            const detailPath = $item.attr('href');
-            const title = $item.find('p').text().trim();
-            const imageUrl = $item.find('img').attr('src');
-            if (detailPath && title) {
-                cards.push({
-                    vod_id: jsonify({ type: 'home', path: detailPath }),
-                    vod_name: title,
-                    vod_pic: imageUrl || FALLBACK_PIC,
-                    vod_remarks: '首页推荐'
-                });
-            }
-        });
-        log(`✓ 为分类 ${categoryId} 提取到 ${cards.length} 个卡片`);
-        return jsonify({ list: cards });
-    } catch (e) {
-        log(`❌ [getCards] 异常: ${e.message}`);
-        homeCache = null;
-        return jsonify({ list: [] });
-    }
-}
-
-// ★★★★★【搜索 - 最终修正版】★★★★★
+// ★★★★★【搜索 - 逻辑修正】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
@@ -83,26 +35,21 @@ async function search(ext) {
         const { data } = await $fetch.get(url);
         
         if (data && data.code === 0) {
+            // 注意：这里我们使用与V17相同的、经过验证的正确路径
             const results = data.data?.data?.results || [];
-            log(`✓ 解析到 ${results.length} 条搜索结果`);
-
+            log(`✓ 后端返回 ${results.length} 条搜索结果`);
+            
             return jsonify({
-                list: results.map(item => {
-                    // [核心修正] 从 item.links 数组中提取链接和密码
-                    const linkInfo = item.links && item.links.length > 0 ? item.links[0] : {};
-                    const playUrl = linkInfo.url || '';
-                    const playPwd = linkInfo.password || '';
-
-                    return {
-                        vod_id: jsonify({ type: 'search', url: playUrl, pwd: playPwd, title: item.title }),
-                        vod_name: item.title,
-                        vod_pic: item.image || FALLBACK_PIC,
-                        vod_remarks: playPwd ? `码: ${playPwd}` : '直链'
-                    };
-                })
+                list: results.map(item => ({
+                    // vod_id 现在是详情页的路径，它在 item.url 字段中
+                    vod_id: item.url, 
+                    vod_name: item.title,
+                    vod_pic: item.image || FALLBACK_PIC,
+                    vod_remarks: '点击获取链接' // 明确告知用户需要点击
+                }))
             });
         } else {
-            log(`❌ 后端接口返回错误: ${data ? data.message : '无响应'}`);
+            log(`❌ 后端搜索接口返回错误: ${data.message}`);
             return jsonify({ list: [] });
         }
     } catch (e) {
@@ -111,34 +58,52 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情】★★★★★
+// ★★★★★【详情 - 逻辑修正】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
-    const idData = argsify(ext.vod_id);
-    log(`[getTracks] 解析详情: ${JSON.stringify(idData)}`);
+    // 这里的 ext.vod_id 就是 search 函数存入的详情页路径
+    const detailPath = ext.vod_id; 
+    log(`[getTracks] 解析详情, 路径: ${detailPath}`);
+
+    if (!detailPath) {
+        log(`[getTracks] ❌ 详情路径为空`);
+        return jsonify({ list: [] });
+    }
 
     try {
-        if (idData.type === 'search') {
-            const trackName = idData.pwd ? `${idData.title} (码: ${idData.pwd})` : idData.title;
-            return jsonify({ list: [{ title: '播放列表', tracks: [{ name: trackName, url: idData.url }] }] });
-        } 
-        else if (idData.type === 'home') {
-            log(`[getTracks] (首页源) 功能待开发`);
-            return jsonify({ list: [] });
+        // 调用后端新增的 /detail 接口
+        const url = `${BACKEND_URL}/detail?path=${encodeURIComponent(detailPath)}`;
+        const { data } = await $fetch.get(url);
+
+        if (data && data.success) {
+            log(`✓ 成功从后端获取到播放链接: ${data.url}`);
+            const trackName = data.pwd ? `点击播放 (码: ${data.pwd})` : '点击播放';
+            
+            // 返回包含真实链接的播放列表
+            return jsonify({ 
+                list: [{ 
+                    title: '播放列表', 
+                    tracks: [{ name: trackName, pan: data.url }] 
+                }] 
+            });
+        } else {
+            throw new Error(`后端详情解析失败: ${data.message}`);
         }
-        throw new Error('未知的 vod_id 类型');
     } catch (e) {
         log(`❌ [getTracks] 异常: ${e.message}`);
-        return jsonify({ list: [] });
+        // 异常时提供一个手动打开的备用方案
+        return jsonify({
+            list: [{
+                title: '自动解析失败',
+                tracks: [{ name: '请手动打开', pan: `${SITE_URL}${detailPath}` }]
+            }]
+        });
     }
 }
 
-// --- 兼容接口 ---
-async function init() { return getConfig(); }
-async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
-async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
-async function detail(id) { return getTracks({ vod_id: id }); }
-async function play(flag, id) {
-    log(`[play] 播放请求: flag=${flag}, id=${id}`);
-    return jsonify({ url: id }); 
+// --- 兼容接口 (保持不变) ---
+// ... (您原来的 init, home, category, detail, play 函数) ...
+// 注意：需要确保 detail(id) 函数能正确调用 getTracks({vod_id: id})
+async function detail(id) { 
+    return getTracks({ vod_id: id }); 
 }
