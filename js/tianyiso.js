@@ -1,5 +1,5 @@
 /**
- * reboys.cn 前端插件 - V13.1 (最终正确版)
+ * reboys.cn 前端插件 - V13.2 (最终正确版)
  * 
  * 核心修正:
  * 1. [正确实现] home/category: 通过抓取并解析 reboys.cn 首页HTML来获取分类数据，而不是调用搜索API。
