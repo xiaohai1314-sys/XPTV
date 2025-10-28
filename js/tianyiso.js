@@ -1,5 +1,5 @@
 /**
- * reboys.cn 前端插件 - V13 (最终正确版)
+ * reboys.cn 前端插件 - V13.1 (最终正确版)
  * 
  * 核心修正:
  * 1. [正确实现] home/category: 通过抓取并解析 reboys.cn 首页HTML来获取分类数据，而不是调用搜索API。
@@ -10,7 +10,7 @@
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://localhost:3000"; // 您的后端服务地址
+const BACKEND_URL = "http://192.168.10.106:3000"; // 您的后端服务地址
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
