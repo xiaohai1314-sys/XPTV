@@ -237,28 +237,17 @@ async function search(ext) {
 // ----------------------------------------------------------------------
 async function getTracks(ext) {
     const vod_id = ext.vod_id;
-    log(`[getTracks] ===== 开始获取详情 =====`);
-    log(`[getTracks] 收到的 vod_id: ${vod_id}`);
+    log(`[getTracks] 获取详情`);
     
     try {
         const idData = argsify(vod_id);
-        log(`[getTracks] 解析后的数据: ${JSON.stringify(idData)}`);
         log(`[getTracks] 类型: ${idData.type}`);
         
         if (idData.type === 'search') {
             const links = idData.links || [];
             log(`[getTracks] 搜索结果，链接数: ${links.length}`);
             
-            // 打印详细的链接信息
-            if (links.length > 0) {
-                log(`[getTracks] 链接详情:`);
-                links.forEach((link, idx) => {
-                    log(`[getTracks]   [${idx}] type=${link.type}, url=${link.url}, pwd=${link.password || '无'}`);
-                });
-            }
-            
             if (links.length === 0) {
-                log(`[getTracks] ⚠️ 没有找到任何链接`);
                 return jsonify({ 
                     list: [{ 
                         title: '播放列表', 
@@ -268,152 +257,7 @@ async function getTracks(ext) {
                         }] 
                     }],
                     vod_play_from: '播放列表',
-                    vod_play_url: '暂无可用链接
-            
-            // 构建播放列表
-            const tracks = links.map((link, index) => {
-                // 识别网盘类型
-                let panType = 'unknown';
-                const url = link.url || '';
-                
-                if (url.includes('quark.cn') || link.type === 'quark') {
-                    panType = '夸克';
-                } else if (url.includes('pan.baidu.com') || link.type === 'baidu') {
-                    panType = '百度';
-                } else if (url.includes('aliyundrive.com') || link.type === 'aliyun') {
-                    panType = '阿里';
-                } else if (url.includes('115.com') || link.type === '115') {
-                    panType = '115';
-                } else if (url.includes('189.cn') || link.type === 'tianyi') {
-                    panType = '天翼';
-                } else if (link.type) {
-                    panType = link.type.toUpperCase();
-                }
-                
-                const password = link.password ? ` 提取码:${link.password}` : '';
-                const name = `[${panType}] ${idData.title || '播放'}${password}`;
-                
-                log(`[getTracks] 添加: ${name}`);
-                
-                return { 
-                    name: name, 
-                    pan: url 
-                };
-            });
-            
-            // 构建 vod_play_url 格式（用$分隔多个链接）
-            const playUrls = tracks.map(t => `${t.name}$${t.pan}`).join('#');
-            
-            log(`[getTracks] 返回 ${tracks.length} 个播放链接`);
-            
-            return jsonify({ 
-                list: [{ 
-                    title: idData.title || '播放列表', 
-                    tracks: tracks 
-                }],
-                vod_play_from: '网盘列表',
-                vod_play_url: playUrls
-            });
-        } 
-        else if (idData.type === 'home') {
-            log(`[getTracks] 首页详情: ${idData.path}`);
-            
-            const url = `${BACKEND_URL}/detail?path=${encodeURIComponent(idData.path)}`;
-            const { data } = await $fetch.get(url, {
-                headers: { 'User-Agent': UA }
-            });
-            
-            if (data.success) {
-                const trackName = data.data.pwd 
-                    ? `点击播放 提取码:${data.data.pwd}` 
-                    : '点击播放';
-                const playUrl = `${trackName}$${data.data.pan}`;
-                    
-                log(`[getTracks] 首页详情解析成功`);
-                
-                return jsonify({ 
-                    list: [{ 
-                        title: '播放列表', 
-                        tracks: [{ 
-                            name: trackName, 
-                            pan: data.data.pan 
-                        }] 
-                    }],
-                    vod_play_from: '网盘',
-                    vod_play_url: playUrl
-                });
-            } else {
-                throw new Error(`后端详情解析失败: ${data.message}`);
-            }
-        } 
-        else {
-            throw new Error(`未知的 vod_id 类型: ${idData.type}`);
-        }
-    } catch (e) {
-        log(`[getTracks] 异常: ${e.message}`);
-        return jsonify({ 
-            list: [{ 
-                title: '播放列表', 
-                tracks: [{ 
-                    name: '获取链接失败', 
-                    pan: '' 
-                }] 
-            }],
-            vod_play_from: '错误',
-            vod_play_url: '获取链接失败$'
-        });
-    }
-}
-
-// ----------------------------------------------------------------------
-// 播放 (核心修复：正确处理网盘链接)
-// ----------------------------------------------------------------------
-async function play(flag, id) {
-    log(`[play] flag=${flag}, id=${id}`);
-    
-    // id 就是网盘链接，直接返回
-    if (id && (id.startsWith('http') || id.startsWith('//'))) {
-        log(`[play] 返回网盘链接: ${id.substring(0, 50)}...`);
-        return jsonify({ 
-            parse: 0,
-            url: id,
-            header: {}
-        });
-    }
-    
-    log(`[play] 无效的播放ID`);
-    return jsonify({ 
-        parse: 0,
-        url: '',
-        header: {}
-    });
-}
-
-// --- 兼容接口 ---
-async function init() { 
-    return getConfig(); 
-}
-
-async function home() { 
-    const c = await getConfig(); 
-    return jsonify({ 
-        class: JSON.parse(c).tabs 
-    }); 
-}
-
-async function category(tid, pg) { 
-    return getCards({ 
-        id: (argsify(tid)).id || tid, 
-        page: pg || 1 
-    }); 
-}
-
-async function detail(id) { 
-    return getTracks({ vod_id: id }); 
-}
-
-log('==== 插件加载完成 V21 ====');
-
+                    vod_play_url: '暂无可用链接$'
                 });
             }
             
