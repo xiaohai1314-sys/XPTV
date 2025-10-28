@@ -95,7 +95,7 @@ async function search(ext) {
         const { data } = await $fetch.get(url);
         
         if (data && data.code === 0) {
-            const results = data.data?.data?.data?.results || [];
+            const results = data.data?.data?.results || [];
             log(`✓ 后端返回 ${results.length} 条搜索结果`);
             return jsonify({
                 list: results.map(item => ({
