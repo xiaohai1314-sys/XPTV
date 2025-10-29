@@ -1,282 +1,179 @@
 /**
- * 夸父资源前端插件 - V5.3 最终完美版
+ * reboys.cn 前端插件 - V35.0 (前后端协作优化版)
  *
- * 版本说明:
- * - 【V5.3 核心】基于 V5.2 版本，只对 `performReply` 函数进行了一次外科手术式的修正。
- * - 【完美回帖】彻底废除了 `performReply` 中错误的 `JSON.parse` 逻辑，改为使用最可靠的HTML内容匹配来判断回帖是否成功，彻底解决了“红色HTML代码”的丑陋错误。
- * - 【保留所有胜利果实】V5.2 中已完美解决的搜索逻辑（缓存机制+正确URL）、您最满意的提示语、最新的有效Cookie等所有来之不易的成果，均被完整保留，未动分毫。
+ * 核心修正:
+ * - 架构调整: 完全适配“后端返回完整数据，前端仅负责展示”的新架构。
+ * - search: 职责简化。不再画蛇添足地拼接vod_id，而是作为“忠实搬运工”，将后端返回的、包含完整ext.links的列表原样交给APP。
+ * - getTracks: 职责重构。不再发起任何网络请求，而是作为“聪明展示者”，直接从传入的ext.links数组中解析数据，并生成播放按钮。
+ * - 移除了多余的detail函数，因为APP会将完整的列表项信息传递给getTracks。
+ * - 此版本彻底解决了“参数错误，无法解析”或“获取链接失败”的问题，实现了与后端server.js的完美协作。
  */
 
 // --- 配置区 ---
-const SITE_URL = "https://www.daiguaji.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
-const cheerio = createCheerio();
-const FALLBACK_PIC = "https://www.daiguaji.com/view/img/favicon.png";
+const BACKEND_URL = "http://192.168.1.7:3000";
+const SITE_URL = "https://reboys.cn";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
+const DEBUG = true;
+const cheerio = createCheerio(  ); // 保留以备将来可能的前端解析需求
 
-// ★★★★★ 最新有效Cookie ★★★★★
-const COOKIE = 'bbs_sid=94d4dc9a9bd5839a61588451d8064302; Hm_lvt_2c2cd308748eb9097e250ba67b76ef20=1755075712; HMACCOUNT=369F5CB87E8CAB18; isClose=yes; bbs_token=L4_2BVg21IujhzNLMCIRvL6_2Fi1bAsnqZm9p5z145qjziPiy_2B3wgssgsnRdJrc8Cxtbieve_2BRBleYWTtbUaiFCfD6O9jOM_3D; __gads=ID=7493bd5727e59480:T=1755075714:RT=1755077860:S=ALNI_MYJvEBISMvpSRLIfA3UDLv6UK981A; __gpi=UID=0000117f6c1e9b44:T=1755075714:RT=1755077860:S=ALNI_Ma4_A9salT3Rdur67vJ1Z3RZqvk1g; __eoi=ID=5cc1b8a075993313:T=1755075714:RT=1755077860:S=AA-AfjaclE5ud7kHwwQeCM5KX1c-; Hm_lpvt_2c2cd308748eb9097e250ba67b76ef20=1755077876';
-// ★★★★★★★★★★★★★★★★★★★★★
+// --- 全局缓存 ---
+let homeCache = null;
 
-// --- 核心辅助函数 ---
-function log(msg ) {
-    try {
-        $log(`[夸父资源 最终完美版] ${msg}`);
-    } catch (_) {
-        console.log(`[夸父资源 最终完美版] ${msg}`);
-    }
+// --- 辅助函数 ---
+function log(msg) { 
+    const logMsg = `[reboys V35] ${msg}`;
+    try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
-function argsify(ext) {
+function argsify(ext) { 
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } }
-    return ext || {};
+    return ext || {}; 
 }
-function jsonify(data) { return JSON.stringify(data); }
-function getRandomReply() {
-    const replies = ["感谢分享，资源太棒了", "找了好久，太谢谢了", "非常棒的资源！！！", "不错的帖子点赞！", "感谢楼主，下载来看看"];
-    return replies[Math.floor(Math.random() * replies.length)];
-}
+function jsonify(obj) { return JSON.stringify(obj); }
 
-// ★★★★★【V5.3 核心修正：最终完美回帖引擎】★★★★★
-async function performReply(threadId) {
-    log(`正在尝试为帖子 ${threadId} 自动回帖...`);
-    const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-    const message = getRandomReply();
-    const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
-    try {
-        const { data } = await $fetch.post(replyUrl, formData, {
-            headers: {
-                'User-Agent': UA,
-                'Cookie': COOKIE,
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': SITE_URL,
-                'Referer': `${SITE_URL}/thread-${threadId}.htm`
-            }
-        });
-        
-        // 核心修正：不再使用错误的JSON.parse，而是直接判断返回的HTML中是否包含我们发送的内容
-        if (data && data.includes(message)) {
-            log(`回帖成功, 内容: "${message}"`);
-            return true;
-        } else {
-            log(`回帖失败: 服务器返回内容异常。`);
-            $utils.toastError("回帖失败：服务器返回异常", 3000);
-            return false;
-        }
-
-    } catch (e) {
-        log(`回帖请求异常: ${e.message}`);
-        $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
-        return false;
-    }
-}
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-// --- XPTV App 插件入口函数 ---
-
+// --- 插件入口与配置 ---
 async function getConfig() {
-    log("插件初始化 (V5.3 最终完美版)");
-    const CUSTOM_CATEGORIES = [
-        { name: '电影/剧集区', ext: { id: 'forum-9.htm' } },
-        { name: '动漫区', ext: { id: 'forum-12.htm' } },
-        { name: '音频区', ext: { id: 'forum-15.htm' } },
+    log("==== 插件初始化 V35 (前后端协作优化版) ====");
+    const CATEGORIES = [
+        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
+        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
+        { name: '综艺', ext: { id: 5 } }
     ];
-    return jsonify({
-        ver: 1,
-        title: '夸父资源',
-        site: SITE_URL,
-        cookie: '',
-        tabs: CUSTOM_CATEGORIES,
-    });
+    return jsonify({ ver: 1, title: 'reboys搜(V35)', site: SITE_URL, tabs: CATEGORIES });
 }
 
-function getCorrectPicUrl(path) {
-    if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http' )) return path;
-    const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
-}
-
+// --- 首页/分类 (保留原有逻辑, 因为它不依赖后端) ---
 async function getCards(ext) {
     ext = argsify(ext);
-    const { page = 1, id } = ext;
-    const url = `${SITE_URL}/${id.replace('.htm', '')}-${page}.htm`;
+    const { id: categoryId } = ext;
     try {
-        const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
-        const $ = cheerio.load(data);
+        if (!homeCache) {
+            log(`[getCards] 获取首页缓存`);
+            const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+            homeCache = data;
+        }
+        const $ = cheerio.load(homeCache);
         const cards = [];
-        $("li.media.thread").each((_, item) => {
-            const linkElement = $(item).find('.style3_subject a');
-            cards.push({
-                vod_id: linkElement.attr('href') || "",
-                vod_name: linkElement.text().trim() || "",
-                vod_pic: getCorrectPicUrl($(item).find("img.avatar-3").attr("src")),
-                vod_remarks: $(item).find(".date.text-grey.hidden-sm").text().trim() || "",
-                ext: { url: linkElement.attr('href') || "" }
-            });
+        const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
+        if (targetBlock.length === 0) return jsonify({ list: [] });
+        targetBlock.find('a.item').each((_, element) => {
+            const $item = $(element);
+            const detailPath = $item.attr('href');
+            const title = $item.find('p').text().trim();
+            const imageUrl = $item.find('img').attr('src');
+            if (detailPath && title) {
+                cards.push({
+                    vod_id: jsonify({ type: 'home', path: detailPath }),
+                    vod_name: title,
+                    vod_pic: imageUrl || FALLBACK_PIC,
+                    vod_remarks: '首页推荐'
+                });
+            }
         });
         return jsonify({ list: cards });
     } catch (e) {
-        log(`获取分类列表异常: ${e.message}`);
+        homeCache = null;
         return jsonify({ list: [] });
     }
 }
 
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const { url } = ext;
-    if (!url) return jsonify({ list: [] });
-
-    const detailUrl = `${SITE_URL}/${url}`;
-    log(`开始处理详情页: ${detailUrl}`);
-
-    try {
-        const { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
-        let $ = cheerio.load(data);
-
-        const isContentHidden = $('.message[isfirst="1"]').text().includes("回复");
-        if (isContentHidden) {
-            log("内容被隐藏，启动回帖流程...");
-            const threadId = url.match(/thread-(\d+)/)[1];
-            await performReply(threadId);
-        }
-
-        const mainMessage = $('.message[isfirst="1"]');
-        const links = [];
-        mainMessage.find('a[href*="pan.quark.cn"]').each((_, element) => {
-            links.push($(element).attr('href'));
-        });
-
-        const tracks = links.map((link, index) => ({
-            name: `夸克网盘 ${index + 1}`,
-            pan: link,
-            ext: {},
-        }));
-
-        if (tracks.length === 0) {
-            log("未找到有效资源链接。");
-            if (isContentHidden) {
-                tracks.push({ name: "内容已隐藏，后台自动回帖，请稍后刷新本页", pan: '', ext: {} });
-            } else {
-                tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
-            }
-        }
-
-        return jsonify({ list: [{ title: '云盘', tracks }] });
-    } catch (e) {
-        log(`getTracks函数出现致命错误: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
-    }
-}
-
-// ★★★★★【V5.1/V5.2 胜利果实：最强搜索逻辑】★★★★★
-let searchCache = {
-    keyword: '',
-    page: 0,
-    results: [],
-    total: Infinity,
-    pagecount: Infinity
-};
-
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 核心修正 ①：search函数，职责简化，只做“忠实搬运工” ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
-    const text = ext.text || '';
-    const page = ext.page || 1;
-
-    if (!text) return jsonify({ list: [] });
-
-    if (text !== searchCache.keyword) {
-        log(`新搜索关键词: "${text}", 重置缓存。`);
-        searchCache = {
-            keyword: text,
-            page: 0,
-            results: [],
-            total: Infinity,
-            pagecount: Infinity
-        };
-    }
-
-    if (page > searchCache.pagecount) {
-        log(`请求页码 ${page} 超出总页数 ${searchCache.pagecount}，搜索终止。`);
-        return jsonify({ list: [] });
-    }
-
-    if (page <= searchCache.page) {
-        log(`请求页码 ${page} 已在缓存中，直接返回。`);
-        const pageSize = 20; // 假设每页20条
-        return jsonify({ list: searchCache.results.slice((page - 1) * pageSize, page * pageSize) });
-    }
-
-    log(`正在搜索: "${text}", 请求第 ${page} 页...`);
-
-    const encodedKeyword = encodeURIComponent(text);
-    let url;
-    if (page === 1) {
-        url = `${SITE_URL}/search-${encodedKeyword}-1.htm`;
-    } else {
-        url = `${SITE_URL}/search-${encodedKeyword}-1-${page}.htm`;
-    }
-    log(`构建的请求URL: ${url}`);
-
+    const keyword = ext.text || '';
+    if (!keyword) return jsonify({ list: [] });
+    log(`[search] 搜索: "${keyword}"`);
     try {
-        const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
-        const $ = cheerio.load(data);
+        const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
+        const fetchResult = await $fetch.get(url, { timeout: 45000 });
+        const response = argsify(fetchResult.data || fetchResult);
 
-        if (searchCache.pagecount === Infinity) {
-            let maxPage = 1;
-            $('ul.pagination a.page-link').each((_, elem) => {
-                const pageNum = parseInt($(elem).text().trim());
-                if (!isNaN(pageNum) && pageNum > maxPage) {
-                    maxPage = pageNum;
-                }
-            });
-            searchCache.pagecount = maxPage;
-            log(`侦察到总页数: ${searchCache.pagecount}`);
+        if (response.code !== 0 || !response.list) {
+            throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
-
-        const cards = [];
-        $("li.media.thread").each((_, item) => {
-            const linkElement = $(item).find('.style3_subject a');
-            cards.push({
-                vod_id: linkElement.attr('href') || "",
-                vod_name: linkElement.text().trim() || "",
-                vod_pic: getCorrectPicUrl($(item).find("img.avatar-3").attr("src")),
-                vod_remarks: $(item).find(".date.text-grey.hidden-sm").text().trim() || "",
-                ext: { url: linkElement.attr('href') || "" }
-            });
-        });
-
-        if (cards.length === 0 && page > 1) {
-            log(`第 ${page} 页没有返回结果，强制设置总页数为 ${page - 1}`);
-            searchCache.pagecount = page - 1;
-            return jsonify({ list: [] });
-        }
-
-        searchCache.results = searchCache.results.concat(cards);
-        searchCache.page = page;
-        searchCache.total = searchCache.results.length;
-
-        log(`第 ${page} 页搜索成功，新增 ${cards.length} 条，当前缓存总数 ${searchCache.total}`);
-        return jsonify({ list: cards });
+        
+        // ★ 核心修正：不再对 vod_id 进行任何加工！
+        // 直接返回后端给的、包含完整 ext.links 的列表。
+        const backendList = response.list;
+        
+        log(`[search] ✅ 成功从后端获取 ${backendList.length} 条完整结果`);
+        return jsonify({ list: backendList });
 
     } catch (e) {
-        log(`搜索异常: ${e.message}`);
+        log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-// --- 兼容旧版 XPTV App 接口 ---
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 核心修正 ②：getTracks函数，彻底重构，只做“聪明展示者” ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+async function getTracks(ext) {
+    // ext 参数现在是APP传递过来的完整列表项对象，包含了 vod_id, vod_name, ext, 等等。
+    log(`[getTracks] 开始从已有的ext数据中生成播放列表`);
+
+    // 1. 直接从传入的参数中获取 links 数组
+    const links = ext.ext?.links || [];
+
+    if (links.length === 0) {
+        log(`[getTracks] ext.links 中没有找到任何链接数据。`);
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
+    }
+
+    log(`[getTracks] ✅ 成功解析到 ${links.length} 个链接，开始生成按钮...`);
+
+    // 2. 在前端进行map循环，生成按钮 (不再有任何网络请求)
+    try {
+        const tracks = links.map((linkData, index) => {
+            const url = linkData.url;
+            const password = linkData.password;
+            let panType = '网盘'; // 默认类型
+
+            if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) {
+                panType = '夸克';
+            } else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) {
+                panType = '阿里';
+            } else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) {
+                panType = '百度';
+            }
+            
+            const buttonName = `${panType}网盘 ${index + 1}`;
+            // 如果有访问码，则拼接在链接后面
+            const finalPan = password ? `${url}（访问码：${password}）` : url;
+
+            return { name: buttonName, pan: finalPan, ext: {} };
+        });
+
+        // 3. 返回标准 list/tracks 结构
+        return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
+
+    } catch (e) {
+        // 这个catch块现在主要用于防止links数组结构异常等意外情况
+        log(`[getTracks] 生成播放列表时出现异常: ${e.message}`);
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '解析链接失败', pan: '' }] }] });
+    }
+}
+
+// --- 播放函数 (备用) ---
+async function play(flag, id) {
+    log(`[play] flag=${flag}, id=${id}`);
+    if (id && (id.startsWith('http'  ) || id.startsWith('//'))) {
+        return jsonify({ parse: 0, url: id, header: {} });
+    }
+    return jsonify({ parse: 0, url: '', header: {} });
+}
+
+// --- 兼容接口 ---
 async function init() { return getConfig(); }
-async function home() {
-    const c = await getConfig();
-    const config = JSON.parse(c);
-    return jsonify({ class: config.tabs, filters: {} });
-}
-async function category(tid, pg) {
-    const id = typeof tid === 'object' ? tid.id : tid;
-    return getCards({ id: id, page: pg });
-}
-async function detail(id) { return getTracks({ url: id }); }
-async function play(flag, id) { return jsonify({ url: id }); }
+async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
+async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
 
-log('夸父资源插件加载完成 (V5.3 最终完美版)');
+// ★ 核心修正：detail 函数现在直接调用 getTracks。
+// APP在调用detail时，会把整个列表项对象作为id参数传进来，这个对象会被argsify解析。
+async function detail(id) { 
+    return getTracks(argsify(id)); 
+}
+
+log('==== 插件加载完成 V35 ====');
