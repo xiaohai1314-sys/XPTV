@@ -1,39 +1,54 @@
 /**
- * reboys.cn 前端插件 - V26.0 (基于V21修改的最终版)
+ * reboys.cn 前端插件 - V30.0 (夸父逻辑终极版)
  * 
  * 核心修改:
- * - 严格遵循“后端做饭，前端吃饭”原则。
- * - search函数: 简化为只请求后端/search接口，并直接返回后端处理好的列表。移除前端缓存和解析逻辑。
- * - detail/getTracks函数: 简化为只接收纯净链接字符串(vod_id)，并将其包装成 {pan: ...} 结构返回。
- * - 其他所有函数和结构保持V21版本不变。
+ * - getTracks函数完全重写，100%模仿“夸父资源”脚本的逻辑精髓。
+ * - 接收后端传来的完整links数组。
+ * - 在前端进行map循环，为每个链接对象生成一个track。
+ * - pan字段：正确地拼接URL和密码。
+ * - name字段：正确地自定义按钮名称。
+ * - 这是与您所有成功案例逻辑完全统一的最终版本。
  */
 
-// --- 配置区 (保持不变) ---
-const BACKEND_URL = "http://192.168.10.106:3000";
+// --- 配置区 ---
+const BACKEND_URL = "http://192.168.1.7:3000";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
 const cheerio = createCheerio( );
 
-// --- 全局缓存 (searchCache不再需要，但保留以防万一) ---
-let searchCache = {};
+// --- 全局缓存 (保留，但search函数不再使用) ---
 let homeCache = null;
 
-// --- 辅助函数 (保持不变) ---
+// --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V25] ${msg}`;
-    try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
+    const logMsg = `[reboys V30] ${msg}`;
+    try { 
+        $log(logMsg); 
+    } catch (_) { 
+        if (DEBUG) console.log(logMsg); 
+    }
 }
+
 function argsify(ext) { 
-    if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } }
+    if (typeof ext === 'string') {
+        try { 
+            return JSON.parse(ext); 
+        } catch (e) { 
+            return {}; 
+        }
+    }
     return ext || {}; 
 }
-function jsonify(obj) { return JSON.stringify(obj); }
 
-// --- getConfig (保持不变) ---
+function jsonify(obj) { 
+    return JSON.stringify(obj); 
+}
+
+// --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V25 (基于V21修改) ====");
+    log("==== 插件初始化 V30 (夸父逻辑终极版) ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, 
         { name: '电影', ext: { id: 2 } },
@@ -43,13 +58,13 @@ async function getConfig() {
     ];
     return jsonify({ 
         ver: 1, 
-        title: 'reboys搜(V25)', 
+        title: 'reboys搜(V30)', 
         site: SITE_URL, 
         tabs: CATEGORIES 
     });
 }
 
-// --- 首页/分类 (保持不变) ---
+// --- 首页/分类 (保留原有逻辑) ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryId } = ext;
@@ -89,77 +104,80 @@ async function getCards(ext) {
     }
 }
 
-
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ 核心修改 1: 重写 search 函数 ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// --- 搜索函数 ---
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
-    const page = ext.page || 1; // page参数保留，但后端V20已不支持分页
-    
-    if (!keyword) {
-        log('[search] 关键词为空');
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
-    }
-    
+    if (!keyword) return jsonify({ list: [] });
     log(`[search] 搜索: "${keyword}"`);
-    
     try {
-        // 直接请求后端，后端会完成所有工作
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
-        const fetchResult = await $fetch.get(url, { 
-            headers: { 'User-Agent': UA },
-            timeout: 45000 // 给Puppeteer足够长的超时时间
-        });
-        
+        const fetchResult = await $fetch.get(url, { timeout: 45000 });
         const response = argsify(fetchResult.data || fetchResult);
-        
         if (response.code !== 0 || !response.list) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
-        
-        log(`[search] ✅ 后端一步到位返回 ${response.list.length} 条结果`);
-        
-        // 后端已经处理好了一切，直接返回它的结果
-        // V20后端不支持分页，所以pagecount和total可能不准，但list是正确的
-        return jsonify({
-            list: response.list,
-            page: 1,
-            pagecount: 1, 
-            total: response.list.length
-        });
-
+        log(`[search] ✅ 后端返回 ${response.list.length} 条结果`);
+        return jsonify({ list: response.list });
     } catch (e) {
         log(`[search] 异常: ${e.message}`);
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
+        return jsonify({ list: [] });
     }
 }
 
-
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ 核心修改 2: 重写 getTracks/detail 函数 ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 核心函数：getTracks，完全吸收“夸父资源”脚本的逻辑精髓 ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
-    // 在V20后端模式下，ext.vod_id 就是后端处理好的纯净链接字符串
-    const pureLinkString = ext.vod_id;
-    log(`[getTracks] 接收到纯净链接字符串: ${pureLinkString}`);
-    
-    // 直接将这个纯净链接字符串放入pan字段
+    // ext.vod_id 是一个JSON字符串，例如: '{"title":"...", "links": [{"type":"quark", "url":"...", "password":"123"}] }'
+    const idData = argsify(ext.vod_id);
+    const links = idData.links || []; // 提取出 links 数组
+    const title = idData.title || '未知资源';
+
+    log(`[getTracks] 开始处理"${title}", 找到 ${links.length} 个链接`);
+
+    if (links.length === 0) {
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
+    }
+
+    // 核心：完全模仿“夸父资源”的 map 循环逻辑
+    const tracks = links.map((linkData, index) => {
+        const url = linkData.url;
+        const password = linkData.password;
+        
+        // 1. 确定网盘类型，用于按钮命名
+        let panType = '网盘';
+        if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) {
+            panType = '夸克';
+        } else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) {
+            panType = '阿里';
+        } else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) {
+            panType = '百度';
+        }
+
+        // 2. 生成按钮名称，例如 "夸克网盘 1"
+        const buttonName = `${panType}网盘 ${index + 1}`;
+        
+        // 3. 在 pan 字段中拼接URL和密码
+        const finalPan = password ? `${url}（访问码：${password}）` : url;
+
+        return {
+            name: buttonName,
+            pan: finalPan,
+            ext: {}
+        };
+    });
+
+    // 4. 返回标准的 list/tracks 结构
     return jsonify({
         list: [{
-            title: '网盘资源', // 分组标题
-            tracks: [{
-                name: '点击获取', // 名字不重要
-                pan: pureLinkString,
-                ext: {}
-            }]
+            title: '云盘', // 分组标题
+            tracks: tracks // 包含所有链接按钮的数组
         }]
     });
 }
 
-
-// --- 播放函数 (保持不变) ---
+// --- 播放函数 (备用) ---
 async function play(flag, id) {
     log(`[play] flag=${flag}, id=${id}`);
     if (id && (id.startsWith('http' ) || id.startsWith('//'))) {
@@ -170,7 +188,7 @@ async function play(flag, id) {
     return jsonify({ parse: 0, url: '', header: {} });
 }
 
-// --- 兼容接口 (保持不变) ---
+// --- 兼容接口 ---
 async function init() { 
     return getConfig(); 
 }
@@ -184,9 +202,8 @@ async function category(tid, pg) {
     return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); 
 }
 
-// detail入口函数现在调用我们重写后的、极简的getTracks
 async function detail(id) { 
     return getTracks({ vod_id: id }); 
 }
 
-log('==== 插件加载完成 V25 ====');
+log('==== 插件加载完成 V30 ====');
