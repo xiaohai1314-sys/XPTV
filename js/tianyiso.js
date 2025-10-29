@@ -1,5 +1,5 @@
 /**
- * reboys.cn 前端插件 - V22.0 (最终修复版)
+ * reboys.cn 前端插件 - V23.0 (最终修复版)
  * 变更日志:
  * 1. [根本性修复] 重构 search 和 getTracks 函数，解决点击搜索结果后无法识别链接的问题。
  * 2. [架构优化] 采用“后端获取 -> 前端缓存 -> ID关联”的模式，替代不稳定的长字符串 vod_id 传递。
@@ -9,7 +9,7 @@
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.1.7:3000"; // 请确保这是你后端服务的正确地址
+const BACKEND_URL = "http://192.168.10.106:3000"; // 请确保这是你后端服务的正确地址
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
