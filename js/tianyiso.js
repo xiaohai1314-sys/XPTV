@@ -1,5 +1,5 @@
 /**
- * reboys.cn 前端插件 - V25.0 (基于V21修改的最终版)
+ * reboys.cn 前端插件 - V26.0 (基于V21修改的最终版)
  * 
  * 核心修改:
  * - 严格遵循“后端做饭，前端吃饭”原则。
@@ -9,7 +9,7 @@
  */
 
 // --- 配置区 (保持不变) ---
-const BACKEND_URL = "http://192.168.1.7:3000";
+const BACKEND_URL = "http://192.168.10.106:3000";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
