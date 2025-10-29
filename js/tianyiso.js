@@ -1,124 +1,126 @@
 /**
- * reboys.cn 前端插件 - V39.0 (ext透传最终版)
+ * reboys.cn 前端插件 - V44.0 (三步流程最终正确版)
  *
  * 版本说明:
- * - 【V39.0 终极反思】: V22-Fix 后端确认可用，问题 100% 在前端。之前所有前端修改方案均告失败。
- * - 【ext 透传架构】: 本方案回归 App 插件设计的经典模式，即“ext字段透传”。
- * - 【search 职责修正】: 
- *    1. 从后端获取的 list 数据【不做任何修改】。
- *    2. 后端返回的数据已包含 vod_id 和带有 links 的 ext 字段，完美符合框架要求。
- *    3. 直接将这个【原始、干净】的 list 返回给 App。这确保了列表一定能正常显示。
- * - 【getTracks 职责修正】:
- *    1. 假设 App 框架在调用 detail 时，会把 search 阶段的 ext 对象原样传回。
- *    2. 直接从传入的 ext 参数中提取 links 数据。
- *    3. 不再需要任何全局缓存、ID编码或二次网络请求。
- * - 【最终方案】: 此方案逻辑最简单，对 App 框架的假设最少，是与 V22-Fix 后端匹配的最终正确方案。
+ * - 【V44.0 拨乱反正】: 彻底推翻之前所有错误的两步流程假设，严格遵循“夸父”脚本揭示的“search -> detail -> play”三步流程。
+ * - 【search 职责】: 调用后端，获取数据。建立 vod_id -> links[] 的【内部缓存】。返回【干净列表】给App，确保UI正常。
+ * - 【detail/getTracks 职责】: 接收 vod_id，从缓存中查找 links[] 数组。将此数组包装成【待选按钮列表】的复杂JSON返回给App，用于渲染详情页的链接按钮。
+ * - 【play 职责】: 接收App传递来的【纯链接】(用户点击按钮后，App从按钮的'pan'字段获取)，并将其包装在 {url: id} 中返回，作为最终指令。
+ * - 【最终方案】: 此方案完美复刻了成功范例的完整逻辑链，是与 V22-Fix 后端匹配的唯一正确方案。
  */
 
 // --- 配置区 ---
 const BACKEND_URL = "http://192.168.1.7:3000";
-const SITE_URL = "https://reboys.cn";
-const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
 
 // --- 辅助函数 ---
-function log(msg ) { 
-    const logMsg = `[reboys V39] ${msg}`;
-    try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
-}
-function argsify(ext) { 
-    if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } }
-    return ext || {}; 
-}
+function log(msg ) { try { $log(`[reboys V44] ${msg}`); } catch (_) { if (DEBUG) console.log(msg); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(obj) { return JSON.stringify(obj); }
+
+// ★★★ V44 核心：链接缓存，在 search 和 detail 之间传递数据 ★★★
+let linkCache = {};
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V39.0 (ext透传最终版) ====");
-    return jsonify({ ver: 1, title: 'reboys搜(V39)', site: SITE_URL, tabs: [] });
+    log("==== 插件初始化 V44.0 (三步流程最终正确版) ====");
+    return jsonify({ ver: 1, title: 'reboys搜(V44)', site: '', tabs: [] });
 }
 
-// --- 首页/分类 (简化) ---
 async function home() { return jsonify({ class: [] }); }
 async function category(tid, pg) { return jsonify({ list: [] }); }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ V39 核心修正：search函数，对后端数据零修改，直接透传 ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 第1步：search函数，获取列表，建立缓存 ★★★
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
     if (!keyword) return jsonify({ list: [] });
 
-    log(`[search] 开始搜索: "${keyword}"`);
+    log(`[search] 新搜索: "${keyword}", 清空缓存。`);
+    linkCache = {}; 
 
     try {
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
         const fetchResult = await $fetch.get(url, { timeout: 45000 });
         const response = argsify(fetchResult.data || fetchResult);
 
-        if (response.code !== 0 || !response.list) {
-            throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
-        }
+        if (response.code !== 0) throw new Error(response.message);
         
-        // 核心修正：后端返回的 list 数据结构已经完美，不做任何修改，直接透传给 App。
-        log(`[search] ✅ 成功从后端获取 ${response.list.length} 条数据，直接透传给App。`);
+        response.list.forEach(item => {
+            if (item.vod_id) {
+                // 缓存 vod_id 到 完整的 links 数组的映射
+                linkCache[item.vod_id] = item.ext.links || [];
+            }
+        });
+        log(`[search] ✅ 缓存建立成功，共 ${Object.keys(linkCache).length} 条。`);
+
+        log(`[search] ✅ 返回 ${response.list.length} 条干净列表给App。`);
         return jsonify({ list: response.list });
 
     } catch (e) {
-        log(`[search] 搜索过程中发生异常: ${e.message}`);
+        log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ V39 核心修正：getTracks函数，从传入的 ext 对象中直接取数据 ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-async function getTracks(ext) {
-    // ext 参数现在被假定为 search 阶段的那个 ext 对象，即 { links: [...] }
-    log(`[getTracks] 开始处理详情, 接收到的 ext 对象: ${jsonify(ext)}`);
+// ★★★ 第2步：detail函数，从缓存获取链接，返回【按钮列表JSON】 ★★★
+async function detail(id) {
+    // id 是App传来的简单 vod_id, 如 "0", "1"
+    if (!id) {
+        return jsonify({ list: [] });
+    }
+    log(`[detail] 接收到ID: "${id}", 从缓存查找链接...`);
     
-    // 注意：App框架可能会把 vod_id 也包装在 ext 里，或者 ext 就是整个 item 对象。
-    // 我们做一个兼容性处理，优先从 ext.links 取，如果取不到，再尝试从 ext.ext.links 取。
-    const itemExt = ext.ext || ext;
-
-    if (!itemExt || typeof itemExt !== 'object') {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的扩展参数(ext)', pan: '' }] }] });
+    // 从缓存中查找对应的 links 数组
+    const links = linkCache[id];
+    
+    if (!links || links.length === 0) {
+        log(`[detail] ❌ 未找到ID "${id}" 对应的链接或链接为空。`);
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '未找到有效链接', pan: '' }] }] });
     }
 
-    const links = itemExt.links || [];
-    log(`[getTracks] ✅ 成功从 ext 参数中提取到 ${links.length} 个链接。`);
+    log(`[detail] ✅ 找到 ${links.length} 个链接，正在包装成按钮列表...`);
 
-    if (links.length === 0) {
-        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '未在此资源中找到链接', pan: '' }] }] });
-    }
-
-    const tracks = links.map((linkData, index) => {
-        const url = linkData.url;
-        const password = linkData.password;
+    // 模仿“夸父”的 getTracks，将 links 数组包装成 App 需要的按钮列表格式
+    const tracks = links.map((linkInfo, index) => {
+        const url = linkInfo.url;
+        const password = linkInfo.password;
         let panType = '网盘';
-        if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
-        else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
-        else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
+        if (linkInfo.type === 'quark') panType = '夸克';
+        else if (linkInfo.type === 'aliyun') panType = '阿里';
+        else if (linkInfo.type === 'baidu') panType = '百度';
         
-        const buttonName = `${panType}网盘 ${index + 1}`;
-        const finalPan = password ? `${url}（访问码：${password}）` : url;
+        const buttonName = `${panType} ${index + 1}`;
+        // ★ 关键: pan 字段里存放的是【纯链接】
+        const finalPan = password ? `${url}（码：${password}）` : url;
 
-        return { name: buttonName, pan: finalPan, ext: {} };
+        return { 
+            name: buttonName, 
+            // App点击这个按钮时，会把 pan 字段里的纯链接传给 play 函数
+            pan: url, 
+            // ext 里可以放一些额外信息，比如带密码的完整链接，用于显示或复制
+            ext: { full: finalPan } 
+        };
     });
 
+    // 返回一个符合App规范的、用于渲染按钮的复杂JSON
     return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
+}
+
+// ★★★ 第3步：play函数，接收【纯链接】，返回最终指令 ★★★
+async function play(flag, id) {
+    // 这里的 id，就是用户点击按钮后，App从按钮的 "pan" 字段里取出的【纯链接】
+    log(`[play] 接收到最终播放/下载链接: ${id}`);
+    
+    // 直接将这个纯链接包装在 {url: ...} 结构中返回
+    return jsonify({
+        parse: 0, // 0表示不使用webview解析，直接取url
+        url: id,
+        header: {}
+    });
 }
 
 // --- 兼容接口 ---
 async function init() { return getConfig(); }
-// 关键：detail 接口现在需要传递整个 ext 对象
-async function detail(id, ext_str) {
-    // App框架在调用 detail 时，通常第一个参数是 id，第二个是包含 ext 的 JSON 字符串
-    const ext = argsify(ext_str);
-    // 我们将整个 ext 对象传递给 getTracks
-    return getTracks(ext); 
-}
-async function play(flag, id) { return jsonify({ parse: 0, url: id, header: {} }); }
 
-log('==== 插件加载完成 V39.0 (ext透传最终版) ====');
+log('==== 插件加载完成 V44.0 (三步流程最终正确版) ====');
