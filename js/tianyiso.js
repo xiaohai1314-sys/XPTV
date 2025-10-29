@@ -1,146 +1,184 @@
+
 /**
- * reboys.cn 前端插件 - V45.0 (Base64链接ID最终正确版)
- *
- * 版本说明:
- * - 【V45.0 拨乱反正】: 确认了“转圈”是由于V44的全局缓存方案在App环境中失效。本方案回归无状态、最可靠的ID传递模式。
- * - 【Base64链接ID架构】:
- *    1. `search`: 获取数据后，将【只包含links的精简对象】序列化，并进行【Base64编码】，生成一个安全、简短的字符串作为 vod_id。
- *    2. `detail`: 接收到Base64的 vod_id，先【解码】再【解析】，拿到 links 数组，然后包装成按钮列表JSON返回。
- *    3. `play`: 接收按钮对应的【纯链接】并返回。
- * - 【集大成者】: 本方案结合了“ID传递”的可靠性、“Base64”的安全性、“精简对象”的高效性，并遵循了“三步流程”，是解决所有已知问题的最终形态。
+ * reboys.cn 前端插件 - V34.0 (100%完整最终分隔符版)
+ * 
+ * 最终正确架构:
+ * - search: 请求/search，获取轻量列表，vod_id是【纯净ID@@@keyword】的安全字符串。
+ * - detail: 接收到安全字符串后，用 split('@@@') 拆分出【纯净ID】和【keyword】。
+ * - getTracks: 用纯净ID和keyword请求/get_links，获取【完整的links数组】后进行map循环。
+ * - 此架构是唯一经过所有失败验证后，得出的最稳健、最正确的方案。
  */
 
 // --- 配置区 ---
 const BACKEND_URL = "http://192.168.1.7:3000";
+const SITE_URL = "https://reboys.cn";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
+const cheerio = createCheerio( );
+
+// --- 全局缓存 ---
+let homeCache = null;
 
 // --- 辅助函数 ---
-function log(msg ) { try { $log(`[reboys V45] ${msg}`); } catch (_) { if (DEBUG) console.log(msg); } }
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function log(msg) { 
+    const logMsg = `[reboys V34] ${msg}`;
+    try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
+}
+function argsify(ext) { 
+    if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } }
+    return ext || {}; 
+}
 function jsonify(obj) { return JSON.stringify(obj); }
-
-// --- Base64 Polyfill (确保 btoa 和 atob 在所有环境中可用) ---
-const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-function btoa(input = '') {
-    let str = input; let output = '';
-    for (let block = 0, charCode, i = 0, map = chars; str.charAt(i | 0) || (map = '=', i % 1); output += map.charAt(63 & block >> 8 - i % 1 * 8)) {
-        charCode = str.charCodeAt(i += 3 / 4);
-        if (charCode > 0xFF) { throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range."); }
-        block = block << 8 | charCode;
-    } return output;
-}
-function atob(input = '') {
-    let str = input.replace(/=+$/, ''); let output = '';
-    if (str.length % 4 == 1) { throw new Error("'atob' failed: The string to be decoded is not correctly encoded."); }
-    for (let bc = 0, bs = 0, buffer, i = 0; buffer = str.charAt(i++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
-        buffer = chars.indexOf(buffer);
-    } return output;
-}
-
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V45.0 (Base64链接ID最终正确版) ====");
-    return jsonify({ ver: 1, title: 'reboys搜(V45)', site: '', tabs: [] });
+    log("==== 插件初始化 V34 (完整最终分隔符版) ====");
+    const CATEGORIES = [
+        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
+        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
+        { name: '综艺', ext: { id: 5 } }
+    ];
+    return jsonify({ ver: 1, title: 'reboys搜(V34)', site: SITE_URL, tabs: CATEGORIES });
 }
 
-async function home() { return jsonify({ class: [] }); }
-async function category(tid, pg) { return jsonify({ list: [] }); }
+// --- 首页/分类 (保留原有逻辑) ---
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { id: categoryId } = ext;
+    try {
+        if (!homeCache) {
+            log(`[getCards] 获取首页缓存`);
+            const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+            homeCache = data;
+        }
+        const $ = cheerio.load(homeCache);
+        const cards = [];
+        const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
+        if (targetBlock.length === 0) return jsonify({ list: [] });
+        targetBlock.find('a.item').each((_, element) => {
+            const $item = $(element);
+            const detailPath = $item.attr('href');
+            const title = $item.find('p').text().trim();
+            const imageUrl = $item.find('img').attr('src');
+            if (detailPath && title) {
+                cards.push({
+                    vod_id: jsonify({ type: 'home', path: detailPath }),
+                    vod_name: title,
+                    vod_pic: imageUrl || FALLBACK_PIC,
+                    vod_remarks: '首页推荐'
+                });
+            }
+        });
+        return jsonify({ list: cards });
+    } catch (e) {
+        homeCache = null;
+        return jsonify({ list: [] });
+    }
+}
 
-// ★★★ 第1步：search函数，将精简links对象Base64编码后作为 vod_id ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 核心修正：search函数，使用安全分隔符拼接vod_id ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
     if (!keyword) return jsonify({ list: [] });
-
-    log(`[search] 调用后端/search, 关键词: "${keyword}"`);
+    log(`[search] 搜索: "${keyword}"`);
     try {
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
         const fetchResult = await $fetch.get(url, { timeout: 45000 });
         const response = argsify(fetchResult.data || fetchResult);
-
-        if (response.code !== 0) throw new Error(response.message);
+        if (response.code !== 0 || !response.list) {
+            throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
+        }
         
-        const listWithSafeID = response.list.map(item => {
-            // 1. 创建只包含链接的精简对象，用"l"作键名，缩短长度
-            const linkData = { l: item.ext.links || [] };
-            // 2. 序列化并进行Base64编码，生成最安全的ID
-            item.vod_id = btoa(jsonify(linkData));
-            // 3. 保持 vod_name 等字段不变，确保列表能显示
+        // ★ 核心：使用安全分隔符拼接ID和keyword
+        const listWithSafeId = response.list.map(item => {
+            item.vod_id = `${item.vod_id}@@@${keyword}`; // "simple_id@@@keyword"
             return item;
         });
         
-        log(`[search] ✅ 获取 ${listWithSafeID.length} 条数据，并将链接信息安全编码到 vod_id 中。`);
-        return jsonify({ list: listWithSafeID });
-
+        log(`[search] ✅ 后端返回 ${listWithSafeId.length} 条轻量结果`);
+        return jsonify({ list: listWithSafeId });
     } catch (e) {
         log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★ 第2步：detail函数，解码 vod_id，返回按钮列表JSON ★★★
-async function detail(id) {
-    // id 是经过Base64编码的字符串
-    if (!id) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的ID', pan: '' }] }] });
-    }
-    log(`[detail] 接收到Base64 ID: ${id.substring(0, 50)}...`);
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 核心修正：getTracks函数，使用split拆分安全字符串 ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+async function getTracks(ext) {
+    // ext.vod_id 是一个安全字符串: "simple_id@@@keyword"
+    const safeId = ext.vod_id || '';
+    const parts = safeId.split('@@@');
     
+    if (parts.length !== 2) {
+        log(`[getTracks] 接收到的vod_id格式错误: ${safeId}`);
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '参数错误，无法解析', pan: '' }] }] });
+    }
+
+    const simpleId = parts[0];
+    const keyword = parts[1];
+    
+    log(`[getTracks] 开始请求详情, id=${simpleId}, keyword=${keyword}`);
+
     try {
-        // 1. Base64解码 -> JSON解析
-        const decodedJson = atob(id);
-        const linkData = argsify(decodedJson);
-        const links = linkData.l || [];
+        // 1. 用纯净ID和keyword去后端换取完整的links数组
+        const url = `${BACKEND_URL}/get_links?id=${encodeURIComponent(simpleId)}&keyword=${encodeURIComponent(keyword)}`;
+        const fetchResult = await $fetch.get(url);
+        const response = argsify(fetchResult.data || fetchResult);
 
-        if (!Array.isArray(links)) throw new Error("解码后的数据格式不正确");
-
-        log(`[detail] ✅ 解码成功，找到 ${links.length} 个链接，正在包装成按钮列表...`);
-
-        if (links.length === 0) {
-            return jsonify({ list: [{ title: '云盘', tracks: [{ name: '未找到有效链接', pan: '' }] }] });
+        if (!response.success || !response.links) {
+            throw new Error(`后端/get_links接口错误: ${response.message}`);
         }
 
-        // 2. 模仿“夸父”的 getTracks，包装成按钮列表
-        const tracks = links.map((linkInfo, index) => {
-            const url = linkInfo.url;
-            const password = linkInfo.password;
-            let panType = '网盘';
-            if (linkInfo.type === 'quark') panType = '夸克';
-            else if (linkInfo.type === 'aliyun') panType = '阿里';
-            else if (linkInfo.type === 'baidu') panType = '百度';
-            
-            const buttonName = `${panType} ${index + 1}`;
-            const fullLinkWithPass = password ? `${url}（码：${password}）` : url;
+        const links = response.links;
+        log(`[getTracks] ✅ 成功从后端获取到 ${links.length} 个链接`);
 
-            return { 
-                name: buttonName, 
-                pan: url, // ★ 关键: pan 字段里是【纯链接】，用于传递给 play 函数
-                ext: { full: fullLinkWithPass } 
-            };
+        if (links.length === 0) {
+            return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
+        }
+
+        // 2. 在前端进行map循环，生成按钮
+        const tracks = links.map((linkData, index) => {
+            const url = linkData.url;
+            const password = linkData.password;
+            let panType = '网盘';
+            if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
+            else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
+            else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
+            
+            const buttonName = `${panType}网盘 ${index + 1}`;
+            const finalPan = password ? `${url}（访问码：${password}）` : url;
+
+            return { name: buttonName, pan: finalPan, ext: {} };
         });
 
+        // 3. 返回标准 list/tracks 结构
         return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
 
     } catch (e) {
-        log(`[detail] 异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: `ID解析失败: ${e.message}`, pan: '' }] }] });
+        log(`[getTracks] 异常: ${e.message}`);
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '获取链接失败', pan: '' }] }] });
     }
 }
 
-// ★★★ 第3步：play函数，接收【纯链接】，返回最终指令 ★★★
+// --- 播放函数 (备用) ---
 async function play(flag, id) {
-    // 这里的 id 是用户点击按钮后，App从按钮的 "pan" 字段里取出的【纯链接】
-    log(`[play] 接收到最终播放/下载链接: ${id}`);
-    
-    return jsonify({
-        parse: 0,
-        url: id,
-        header: {}
-    });
+    log(`[play] flag=${flag}, id=${id}`);
+    if (id && (id.startsWith('http' ) || id.startsWith('//'))) {
+        return jsonify({ parse: 0, url: id, header: {} });
+    }
+    return jsonify({ parse: 0, url: '', header: {} });
 }
 
 // --- 兼容接口 ---
 async function init() { return getConfig(); }
+async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
+async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
+async function detail(id) { return getTracks({ vod_id: id }); }
 
-log('==== 插件加载完成 V45.0 (Base64链接ID最终正确版) ====');
+log('==== 插件加载完成 V34 ====');
