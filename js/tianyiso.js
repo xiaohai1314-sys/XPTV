@@ -1,11 +1,12 @@
 /**
  * XPTV 插件 - reboys.cn 搜索
- * 版本: V7.0 (ext传递最终版)
+ * 版本: V8.0 (detail(id) + Base64 最终版)
  * 作者: Manus AI
  * 核心:
- * 1. 最终发现：App通过 ext 字段而非 vod_id 传递详情数据。
- * 2. search函数将单条结果的所有信息打包成对象，存入 ext 字段。
- * 3. getTracks 函数直接从传入的 ext 参数中解码数据，实现无缝、无缓存、无ID依赖的链接获取。
+ * 1. 确认App通过 detail(id) 接口进入详情页，id值为search中设置的vod_id。
+ * 2. 为防止 vod_id 过长被截断或转义，将包含所有信息的JSON字符串进行Base64编码。
+ * 3. 所有详情解析逻辑在 detail(id) 函数内闭环完成，Base64解码 -> JSON解析 -> 返回结果。
+ * 4. 此方案无任何全局变量依赖，是目前最稳健的无状态实现。
  */
 
 // ==================== 配置区 ====================
@@ -16,31 +17,41 @@ const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3
 
 // ==================== 辅助函数 ====================
 function log(msg ) { 
-    try { $log('[reboys-v7] ' + msg); } 
-    catch (_) { console.log('[reboys-v7] ' + msg); } 
-}
-
-function argsify(ext) { 
-    if (typeof ext === 'string') { 
-        try { return JSON.parse(ext); } 
-        catch (e) { return {}; }
-    } 
-    return ext || {}; 
+    try { $log('[reboys-v8] ' + msg); } 
+    catch (_) { console.log('[reboys-v8] ' + msg); } 
 }
 
 function jsonify(data) { 
     return JSON.stringify(data); 
 }
 
+// Base64 编码/解码函数 (纯JS实现，无需外部库)
+const Base64 = {
+    encode: (str) => {
+        try {
+            return btoa(unescape(encodeURIComponent(str)));
+        } catch (e) {
+            return str; // 编码失败则返回原字符串
+        }
+    },
+    decode: (str) => {
+        try {
+            return decodeURIComponent(escape(atob(str)));
+        } catch (e) {
+            return ''; // 解码失败返回空
+        }
+    }
+};
+
 // ==================== 初始化 ====================
 async function getConfig() {
-    log("插件初始化 V7.0 (ext传递最终版)");
-    return jsonify({ ver: 1, title: 'reboys搜(ext终版)', site: SITE_URL, tabs: [] });
+    log("插件初始化 V8.0 (detail+Base64最终版)");
+    return jsonify({ ver: 1, title: 'reboys搜(终版)', site: SITE_URL, tabs: [] });
 }
 
 // ==================== 搜索 (核心修正) ====================
 async function search(ext) {
-    ext = argsify(ext);
+    ext = (typeof ext === 'string' ? JSON.parse(ext) : ext) || {};
     const text = ext.text || '';
     const page = ext.page || 1; 
 
@@ -59,18 +70,18 @@ async function search(ext) {
         const results = result.data?.data?.results || result.data?.results || result.results || [];
         
         const cards = results.map(item => {
-            // ★ 核心：将所有信息打包成一个对象
-            const ext_data = {
+            const item_data = {
                 title: item.title || '未知标题',
                 links: item.links || []
             };
+            // ★ 核心：将打包好的JSON字符串进行Base64编码
+            const vod_id_b64 = Base64.encode(JSON.stringify(item_data));
+            
             return {
-                vod_id: item.unique_id || new Date().getTime(), // vod_id 随便填，App不用它
+                vod_id: vod_id_b64, // vod_id 是Base64编码后的字符串
                 vod_name: item.title || '未知标题',
                 vod_pic: item.image || FALLBACK_PIC,
-                vod_remarks: (item.links || []).length + '个网盘',
-                // ★ 核心：将打包好的对象存入 ext 字段
-                ext: ext_data
+                vod_remarks: (item.links || []).length + '个网盘'
             };
         });
         
@@ -78,7 +89,6 @@ async function search(ext) {
         const startIdx = (page - 1) * pageSize;
         const pageCards = cards.slice(startIdx, startIdx + pageSize);
 
-        log('✓ 返回 ' + pageCards.length + ' 条卡片');
         return jsonify({ list: pageCards });
         
     } catch (e) {
@@ -87,18 +97,25 @@ async function search(ext) {
     }
 }
 
-// ==================== 详情 (核心修正) ====================
-async function getTracks(ext) {
-    log('==================== getTracks V7 开始 ====================');
-    // ext 参数就是我们在 search 函数中设置的 ext_data 对象
+// ==================== 详情 (最终核心逻辑) ====================
+async function detail(id) {
+    log('==================== detail V8 开始 ====================');
+    // id 参数就是我们在 search 中设置的 Base64 编码的 vod_id
     
     try {
-        if (!ext || typeof ext.links === 'undefined') {
-            throw new Error('无效的项目数据，App未传递ext对象');
+        if (!id || typeof id !== 'string') {
+            throw new Error('无效的项目ID，App未传递数据');
         }
+        log('收到的Base64 ID(部分): ' + id.substring(0, 100));
         
-        const title = ext.title || '未知';
-        const links = ext.links || [];
+        // ★ 核心：Base64解码 -> JSON解析
+        const decoded_json = Base64.decode(id);
+        if (!decoded_json) throw new Error('Base64解码失败，ID可能被截断');
+        
+        const item = JSON.parse(decoded_json);
+        
+        const title = item.title || '未知';
+        const links = item.links || [];
 
         if (links.length === 0) throw new Error('该资源暂无可用链接');
 
@@ -116,25 +133,32 @@ async function getTracks(ext) {
         });
 
         log('✓ 成功构建 ' + tracks.length + ' 个播放项');
-        return jsonify({ list: [{ title: '播放列表', tracks: tracks }] });
+        
+        // ★ 核心：detail函数需要返回一个包含 list 字段的对象
+        return jsonify({
+            list: [{
+                // 这里可以填一些详情页的元数据，但关键是 vod_play_url
+                vod_name: title,
+                vod_play_from: "网盘",
+                // 将tracks拼接成播放器需要的格式
+                vod_play_url: tracks.map(t => `${t.name}$${t.pan}`).join('#')
+            }]
+        });
 
     } catch (e) {
         log('处理异常: ' + e.message);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: e.message, pan: '' }] }] });
+        // 返回一个空的详情结构
+        return jsonify({ list: [{ vod_name: '加载失败', vod_play_from: "错误", vod_play_url: `${e.message}$` }] });
     }
 }
 
-// ==================== 兼容接口 ====================
+
+// ==================== 兼容接口 (现在它们是次要的) ====================
 async function init() { return getConfig(); }
 async function home() { return jsonify({ class: [], filters: {} }); }
 async function category(tid, pg) { return jsonify({ list: [] }); }
-// detail 函数现在也需要正确处理
-async function detail(ext) { 
-    // App 调用 detail 时，传入的参数可能就是 search 返回的整个卡片对象
-    // 我们直接从中取出 ext 字段来调用 getTracks
-    const detail_ext = (typeof ext === 'string' ? argsify(ext) : ext);
-    return getTracks(detail_ext.ext || detail_ext); 
-}
+// getTracks 理论上不会被调用，但为以防万一保留一个空实现
+async function getTracks(ext) { return jsonify({ list: [] }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== reboys 插件加载完成 V7.0 ====');
+log('==== reboys 插件加载完成 V8.0 ====');
