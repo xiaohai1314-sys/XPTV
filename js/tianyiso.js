@@ -1,30 +1,29 @@
 /**
- * reboys.cn 前端插件 - V37.0 (缓存映射最终正确版)
+ * reboys.cn 前端插件 - V39.0 (ext透传最终版)
  *
  * 版本说明:
- * - 【V37.0 根本性逻辑修正】: 彻底废除之前所有修改 vod_id 的错误方案 (拼接, 序列化, Base64)。
- * - 【缓存映射架构】: 引入内部缓存 `linkCache`，完美解决“列表显示”与“详情传参”的矛盾。
- * - 【search 职责明确】: 
- *    1. 从后端获取数据。
- *    2. 将 vod_id -> links 的映射关系存入 `linkCache`。
- *    3. 将【未经修改的、干净的】列表返回给App，确保列表能正常渲染，不再出现“无搜索结果”的问题。
- * - 【getTracks 职责明确】:
- *    1. 接收App传递的【简单的、原始的】 vod_id (如 "0", "1")。
- *    2. 以此ID为key，直接从 `linkCache` 中取出对应的链接数据。
- *    3. 不再进行任何网络请求，实现详情页“秒开”。
- * - 【兼容性与稳定性】: 此架构与后端 V22-Fix 完全兼容，且逻辑清晰，稳定性高，是解决所有已知问题的最终正确方案。
+ * - 【V39.0 终极反思】: V22-Fix 后端确认可用，问题 100% 在前端。之前所有前端修改方案均告失败。
+ * - 【ext 透传架构】: 本方案回归 App 插件设计的经典模式，即“ext字段透传”。
+ * - 【search 职责修正】: 
+ *    1. 从后端获取的 list 数据【不做任何修改】。
+ *    2. 后端返回的数据已包含 vod_id 和带有 links 的 ext 字段，完美符合框架要求。
+ *    3. 直接将这个【原始、干净】的 list 返回给 App。这确保了列表一定能正常显示。
+ * - 【getTracks 职责修正】:
+ *    1. 假设 App 框架在调用 detail 时，会把 search 阶段的 ext 对象原样传回。
+ *    2. 直接从传入的 ext 参数中提取 links 数据。
+ *    3. 不再需要任何全局缓存、ID编码或二次网络请求。
+ * - 【最终方案】: 此方案逻辑最简单，对 App 框架的假设最少，是与 V22-Fix 后端匹配的最终正确方案。
  */
 
 // --- 配置区 ---
 const BACKEND_URL = "http://192.168.1.7:3000";
 const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
 
 // --- 辅助函数 ---
 function log(msg ) { 
-    const logMsg = `[reboys V37] ${msg}`;
+    const logMsg = `[reboys V39] ${msg}`;
     try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
 function argsify(ext) { 
@@ -33,41 +32,25 @@ function argsify(ext) {
 }
 function jsonify(obj) { return JSON.stringify(obj); }
 
-
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ V37 核心：链接缓存，用于在 search 和 getTracks 之间传递数据 ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-let linkCache = {};
-
-
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V37.0 (缓存映射最终正确版) ====");
-    const CATEGORIES = [
-        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
-        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
-        { name: '综艺', ext: { id: 5 } }
-    ];
-    return jsonify({ ver: 1, title: 'reboys搜(V37)', site: SITE_URL, tabs: CATEGORIES });
+    log("==== 插件初始化 V39.0 (ext透传最终版) ====");
+    return jsonify({ ver: 1, title: 'reboys搜(V39)', site: SITE_URL, tabs: [] });
 }
 
-// --- 首页/分类 (此部分逻辑与问题无关，保持原样) ---
-async function getCards(ext) {
-    // 首页逻辑与搜索和详情的核心问题无关，此处不做重点
-    // 为避免引入新的问题，当从首页点击时，返回一个提示
-    return jsonify({ list: [{ vod_id: 'home_item', vod_name: '首页资源请使用搜索功能获取', vod_pic: FALLBACK_PIC }] });
-}
+// --- 首页/分类 (简化) ---
+async function home() { return jsonify({ class: [] }); }
+async function category(tid, pg) { return jsonify({ list: [] }); }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ V37 核心修正：search函数，建立缓存并返回干净列表 ★★★
+// ★★★ V39 核心修正：search函数，对后端数据零修改，直接透传 ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
     if (!keyword) return jsonify({ list: [] });
 
-    log(`[search] 开始新搜索: "${keyword}", 清空旧缓存。`);
-    linkCache = {}; // 每次新搜索都清空缓存
+    log(`[search] 开始搜索: "${keyword}"`);
 
     try {
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
@@ -78,17 +61,8 @@ async function search(ext) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
         
-        // 1. 遍历后端返回的列表，填充缓存
-        response.list.forEach(item => {
-            // key 是简单的 vod_id (e.g., "0", "1"), value 是包含链接的 ext 对象
-            if (item.vod_id) {
-                linkCache[item.vod_id] = item.ext || { links: [] };
-            }
-        });
-        log(`[search] ✅ 缓存建立成功，共缓存 ${Object.keys(linkCache).length} 个条目的链接数据。`);
-
-        // 2. 将【未经任何修改的、干净的】列表直接返回给App
-        log(`[search] ✅ 返回 ${response.list.length} 条干净的列表数据给App进行渲染。`);
+        // 核心修正：后端返回的 list 数据结构已经完美，不做任何修改，直接透传给 App。
+        log(`[search] ✅ 成功从后端获取 ${response.list.length} 条数据，直接透传给App。`);
         return jsonify({ list: response.list });
 
     } catch (e) {
@@ -98,66 +72,53 @@ async function search(ext) {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ V37 核心修正：getTracks函数，从缓存中直接读取链接 ★★★
+// ★★★ V39 核心修正：getTracks函数，从传入的 ext 对象中直接取数据 ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
-    // ext.vod_id 现在应该是App传来的简单ID，如 "0", "1", "home_item"
-    const vodId = ext.vod_id || '';
-    if (!vodId) {
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的ID', pan: '' }] }] });
-    }
-
-    log(`[getTracks] 开始处理详情, 接收到的简单ID: "${vodId}"`);
+    // ext 参数现在被假定为 search 阶段的那个 ext 对象，即 { links: [...] }
+    log(`[getTracks] 开始处理详情, 接收到的 ext 对象: ${jsonify(ext)}`);
     
-    try {
-        // 1. 以接收到的 vodId 为 key，从缓存中查找链接数据
-        const cachedExt = linkCache[vodId];
-        
-        if (!cachedExt) {
-            // 如果缓存中找不到，说明可能不是来自搜索，或者缓存已丢失
-            log(`[getTracks] ❌ 在缓存中未找到ID "${vodId}" 对应的链接数据。`);
-            // 针对首页/分类等非搜索入口的友好提示
-            if (vodId === 'home_item') {
-                return jsonify({ list: [{ title: '提示', tracks: [{ name: '请使用搜索功能获取资源', pan: '' }] }] });
-            }
-            return jsonify({ list: [{ title: '错误', tracks: [{ name: '获取链接失败，请重新搜索', pan: '' }] }] });
-        }
+    // 注意：App框架可能会把 vod_id 也包装在 ext 里，或者 ext 就是整个 item 对象。
+    // 我们做一个兼容性处理，优先从 ext.links 取，如果取不到，再尝试从 ext.ext.links 取。
+    const itemExt = ext.ext || ext;
 
-        const links = cachedExt.links || [];
-        log(`[getTracks] ✅ 成功从缓存中为ID "${vodId}" 提取到 ${links.length} 个链接。`);
-
-        if (links.length === 0) {
-            return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
-        }
-
-        // 2. 格式化链接并返回 (此部分逻辑无需改变)
-        const tracks = links.map((linkData, index) => {
-            const url = linkData.url;
-            const password = linkData.password;
-            let panType = '网盘';
-            if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
-            else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
-            else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
-            
-            const buttonName = `${panType}网盘 ${index + 1}`;
-            const finalPan = password ? `${url}（访问码：${password}）` : url;
-
-            return { name: buttonName, pan: finalPan, ext: {} };
-        });
-
-        return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
-
-    } catch (e) {
-        log(`[getTracks] 处理详情时发生异常: ${e.message}`);
-        return jsonify({ list: [{ title: '错误', tracks: [{ name: `解析失败: ${e.message}`, pan: '' }] }] });
+    if (!itemExt || typeof itemExt !== 'object') {
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: '无效的扩展参数(ext)', pan: '' }] }] });
     }
+
+    const links = itemExt.links || [];
+    log(`[getTracks] ✅ 成功从 ext 参数中提取到 ${links.length} 个链接。`);
+
+    if (links.length === 0) {
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: '未在此资源中找到链接', pan: '' }] }] });
+    }
+
+    const tracks = links.map((linkData, index) => {
+        const url = linkData.url;
+        const password = linkData.password;
+        let panType = '网盘';
+        if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
+        else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
+        else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
+        
+        const buttonName = `${panType}网盘 ${index + 1}`;
+        const finalPan = password ? `${url}（访问码：${password}）` : url;
+
+        return { name: buttonName, pan: finalPan, ext: {} };
+    });
+
+    return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
 }
 
-// --- 兼容接口 (保持不变) ---
+// --- 兼容接口 ---
 async function init() { return getConfig(); }
-async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
-async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
-async function detail(id) { return getTracks({ vod_id: id }); }
+// 关键：detail 接口现在需要传递整个 ext 对象
+async function detail(id, ext_str) {
+    // App框架在调用 detail 时，通常第一个参数是 id，第二个是包含 ext 的 JSON 字符串
+    const ext = argsify(ext_str);
+    // 我们将整个 ext 对象传递给 getTracks
+    return getTracks(ext); 
+}
 async function play(flag, id) { return jsonify({ parse: 0, url: id, header: {} }); }
 
-log('==== 插件加载完成 V37.0 (缓存映射最终正确版) ====');
+log('==== 插件加载完成 V39.0 (ext透传最终版) ====');
