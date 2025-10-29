@@ -5,7 +5,7 @@
  */
 
 // ==================== 配置区 ====================
-const BACKEND_URL = "http://192.168.1.7:3000";
+const BACKEND_URL = "http://192.168.10.106:3000";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
