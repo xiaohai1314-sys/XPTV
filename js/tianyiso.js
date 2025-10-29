@@ -1,13 +1,10 @@
 /**
- * reboys.cn 前端插件 - V30.0 (夸父逻辑终极版)
+ * reboys.cn 前端插件 - V32.0 (100%完整V20后端专用版)
  * 
- * 核心修改:
- * - getTracks函数完全重写，100%模仿“夸父资源”脚本的逻辑精髓。
- * - 接收后端传来的完整links数组。
- * - 在前端进行map循环，为每个链接对象生成一个track。
- * - pan字段：正确地拼接URL和密码。
- * - name字段：正确地自定义按钮名称。
- * - 这是与您所有成功案例逻辑完全统一的最终版本。
+ * 最终逻辑:
+ * - search: 请求V20后端的/search接口，获取的列表中，vod_id已经是纯净链接。
+ * - detail/getTracks: 直接使用这个纯净链接(vod_id)，并正确地生成带编号的按钮。
+ * - 这是对V20后端返回数据的最直接、最正确的处理方式。
  */
 
 // --- 配置区 ---
@@ -23,7 +20,7 @@ let homeCache = null;
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V30] ${msg}`;
+    const logMsg = `[reboys V32] ${msg}`;
     try { 
         $log(logMsg); 
     } catch (_) { 
@@ -48,7 +45,7 @@ function jsonify(obj) {
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V30 (夸父逻辑终极版) ====");
+    log("==== 插件初始化 V32 (V20后端专用版) ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, 
         { name: '电影', ext: { id: 2 } },
@@ -58,7 +55,7 @@ async function getConfig() {
     ];
     return jsonify({ 
         ver: 1, 
-        title: 'reboys搜(V30)', 
+        title: 'reboys搜(V32)', 
         site: SITE_URL, 
         tabs: CATEGORIES 
     });
@@ -104,7 +101,7 @@ async function getCards(ext) {
     }
 }
 
-// --- 搜索函数 ---
+// --- 搜索函数：获取V20后端返回的完美列表 ---
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -117,8 +114,8 @@ async function search(ext) {
         if (response.code !== 0 || !response.list) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
-        log(`[search] ✅ 后端返回 ${response.list.length} 条结果`);
-        return jsonify({ list: response.list });
+        log(`[search] ✅ V20后端一步到位返回 ${response.list.length} 条结果`);
+        return jsonify({ list: response.list }); // 直接返回，不做任何修改
     } catch (e) {
         log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
@@ -126,56 +123,43 @@ async function search(ext) {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ 核心函数：getTracks，完全吸收“夸父资源”脚本的逻辑精髓 ★★★
+// ★★★ 核心函数：getTracks，正确处理V20后端返回的、已经是纯净链接的vod_id ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
-    // ext.vod_id 是一个JSON字符串，例如: '{"title":"...", "links": [{"type":"quark", "url":"...", "password":"123"}] }'
-    const idData = argsify(ext.vod_id);
-    const links = idData.links || []; // 提取出 links 数组
-    const title = idData.title || '未知资源';
+    // ext.vod_id 就是V20后端处理好的纯净链接字符串
+    const pureLinkString = ext.vod_id;
+    log(`[getTracks] 接收到纯净链接: ${pureLinkString}`);
 
-    log(`[getTracks] 开始处理"${title}", 找到 ${links.length} 个链接`);
-
-    if (links.length === 0) {
+    if (!pureLinkString || pureLinkString === '暂无链接') {
         return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
     }
 
-    // 核心：完全模仿“夸父资源”的 map 循环逻辑
-    const tracks = links.map((linkData, index) => {
-        const url = linkData.url;
-        const password = linkData.password;
-        
-        // 1. 确定网盘类型，用于按钮命名
-        let panType = '网盘';
-        if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) {
-            panType = '夸克';
-        } else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) {
-            panType = '阿里';
-        } else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) {
-            panType = '百度';
-        }
+    // --- 智能生成按钮名称 ---
+    let panType = '网盘';
+    if (pureLinkString.includes('quark.cn')) {
+        panType = '夸克';
+    } else if (pureLinkString.includes('aliyundrive.com')) {
+        panType = '阿里';
+    } else if (pureLinkString.includes('pan.baidu.com')) {
+        panType = '百度';
+    }
+    
+    // 因为V20后端只返回一个链接，所以我们只生成一个按钮，编号为1
+    const buttonName = `${panType}网盘 1`;
 
-        // 2. 生成按钮名称，例如 "夸克网盘 1"
-        const buttonName = `${panType}网盘 ${index + 1}`;
-        
-        // 3. 在 pan 字段中拼接URL和密码
-        const finalPan = password ? `${url}（访问码：${password}）` : url;
-
-        return {
-            name: buttonName,
-            pan: finalPan,
-            ext: {}
-        };
-    });
-
-    // 4. 返回标准的 list/tracks 结构
+    // 返回标准的 list/tracks 结构
     return jsonify({
         list: [{
             title: '云盘', // 分组标题
-            tracks: tracks // 包含所有链接按钮的数组
+            tracks: [{
+                name: buttonName,
+                pan: pureLinkString, // pan字段就是纯净链接
+                ext: {}
+            }]
         }]
     });
 }
+
 
 // --- 播放函数 (备用) ---
 async function play(flag, id) {
@@ -206,4 +190,4 @@ async function detail(id) {
     return getTracks({ vod_id: id }); 
 }
 
-log('==== 插件加载完成 V30 ====');
+log('==== 插件加载完成 V32 ====');
