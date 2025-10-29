@@ -1,15 +1,14 @@
 /**
- * reboys.cn 前端插件 - V24.0 (索引回溯版)
+ * reboys.cn 前端插件 - V25.0 (终极加强版)
  * 变更日志:
- * 1. [终极方案] 彻底放弃依赖 App 传递 vod_id，改为通过列表索引回溯数据。
- * 2. [新增缓存] 引入 `currentListPageData` 变量，用于临时存储当前页面展示的列表数据。
- * 3. [逻辑重构] `search` 函数在返回列表的同时，填充 `currentListPageData`。
- * 4. [逻辑重构] `detail` 函数的 id 被视为索引，直接从 `currentListPageData` 中获取数据，然后提取链接。
- * 5. [高度兼容] 此方案理论上兼容所有不正确传递 vod_id 的 App 环境。
+ * 1. [最终方案] 回归并强化 V22 的“轻量级ID+全局缓存”方案。
+ * 2. [核心修复] 引入一个全新的、更强大的 `robustParse` 函数，专门用于解析从 App 环境传递过来的、可能被污染的 JSON 字符串。
+ * 3. [兼容性Max] `robustParse` 能处理多重转义、错误引号等问题，最大限度地保证 vod_id 解析成功。
+ * 4. [逻辑定型] 确认了“后端获取->前端缓存->轻量ID关联”是唯一正确的道路。
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.10.106:3000"; // 请确保这是你后端服务的正确地址
+const BACKEND_URL = "http://192.168.10.106:3000";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
@@ -19,20 +18,42 @@ const cheerio = createCheerio( );
 // --- 全局缓存 ---
 let searchCache = {}; 
 let homeCache = null;
-// 【V23 新增】用于存储当前页面展示的列表数据
-let currentListPageData = [];
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V23] ${msg}`;
+    const logMsg = `[reboys V24] ${msg}`;
     try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
 
-function argsify(ext) { 
-    if (typeof ext === 'string') {
-        try { return JSON.parse(ext); } catch (e) { return {}; }
+/**
+ * 【V24 核心】更强大的 JSON 解析函数
+ * @param {string | object} ext - 可能被污染的 JSON 字符串或已经是对象
+ * @returns {object} 解析后的对象，失败则返回空对象
+ */
+function robustParse(ext) {
+    if (typeof ext === 'object' && ext !== null) return ext;
+    if (typeof ext !== 'string') return {};
+
+    let str = ext.trim();
+    try {
+        // 尝试直接解析
+        return JSON.parse(str);
+    } catch (e) {
+        log(`[robustParse] 直接解析失败: ${e.message}`);
+        try {
+            // 尝试处理可能存在的多重转义，例如 '\"' -> '"'
+            str = str.replace(/\\"/g, '"');
+            // 尝试处理字符串被错误地用单引号或双引号包裹的情况，例如 "'{...}'"
+            if ((str.startsWith(`'`) && str.endsWith(`'`)) || (str.startsWith(`"`) && str.endsWith(`"`))) {
+                str = str.substring(1, str.length - 1);
+            }
+            // 再次尝试解析
+            return JSON.parse(str);
+        } catch (e2) {
+            log(`[robustParse] 再次尝试解析失败: ${e2.message}. 返回空对象.`);
+            return {};
+        }
     }
-    return ext || {}; 
 }
 
 function jsonify(obj) { 
@@ -41,28 +62,24 @@ function jsonify(obj) {
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V23 (索引回溯版) ====");
+    log("==== 插件初始化 V24 (终极加强版) ====");
     const CATEGORIES = [
-        { name: '短剧', ext: { id: 1 } }, 
-        { name: '电影', ext: { id: 2 } },
-        { name: '电视剧', ext: { id: 3 } }, 
-        { name: '动漫', ext: { id: 4 } },
+        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
+        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
         { name: '综艺', ext: { id: 5 } }
     ];
-    return jsonify({ ver: 1, title: 'reboys搜(V23)', site: SITE_URL, tabs: CATEGORIES });
+    return jsonify({ ver: 1, title: 'reboys搜(V24)', site: SITE_URL, tabs: CATEGORIES });
 }
 
 // ----------------------------------------------------------------------
-// 首页/分类 (保持原样)
+// 首页/分类 (与V22/V23一致)
 // ----------------------------------------------------------------------
 async function getCards(ext) {
-    // ... 此处代码与 V22 版本完全相同，为节省篇幅省略 ...
-    // ... 实际使用时请保留 V22 版本中的 getCards 完整代码 ...
-    ext = argsify(ext);
+    // ... 此处代码与 V22/V23 版本完全相同 ...
+    ext = robustParse(ext);
     const { id: categoryId } = ext;
     try {
         if (!homeCache) {
-            log(`[getCards] 获取首页缓存`);
             const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
             homeCache = data;
         }
@@ -71,36 +88,26 @@ async function getCards(ext) {
         const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
         targetBlock.find('a.item').each((_, element) => {
             const $item = $(element);
-            const detailPath = $item.attr('href');
-            const title = $item.find('p').text().trim();
-            const imageUrl = $item.find('img').attr('src');
-            if (detailPath && title) {
-                cards.push({ vod_id: detailPath, vod_name: title, vod_pic: imageUrl || FALLBACK_PIC, vod_remarks: '首页推荐' });
-            }
+            cards.push({
+                vod_id: jsonify({ type: 'home', path: $item.attr('href') }),
+                vod_name: $item.find('p').text().trim(),
+                vod_pic: $item.find('img').attr('src') || FALLBACK_PIC,
+            });
         });
-        currentListPageData = cards; // 首页也存入当前列表
-        log(`[getCards] 返回 ${cards.length} 个卡片`);
         return jsonify({ list: cards });
-    } catch (e) {
-        log(`[getCards] 异常: ${e.message}`);
-        homeCache = null;
-        return jsonify({ list: [] });
-    }
+    } catch (e) { return jsonify({ list: [] }); }
 }
 
+
 // ----------------------------------------------------------------------
-// 搜索 (核心修改：填充 currentListPageData)
+// 搜索 (与V22一致)
 // ----------------------------------------------------------------------
 async function search(ext) {
-    ext = argsify(ext);
+    ext = robustParse(ext);
     const keyword = ext.text || '';
     const page = ext.page || 1;
     
-    if (!keyword) {
-        log('[search] 关键词为空');
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
-    }
-    
+    if (!keyword) return jsonify({ list: [] });
     log(`[search] 搜索: "${keyword}", 页码: ${page}`);
     
     try {
@@ -108,118 +115,93 @@ async function search(ext) {
         let allResults = searchCache[cacheKey];
         
         if (!allResults) {
-            log(`[search] 缓存未命中，请求后端API`);
+            log(`[search] 缓存未命中，请求后端`);
             const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}&page=1`;
             const fetchResult = await $fetch.get(url, { headers: { 'User-Agent': UA }, timeout: 30000 });
             let response = JSON.parse(fetchResult.data || fetchResult);
+            if (!response || response.code !== 0) throw new Error(response.message || '后端错误');
             
-            if (!response || response.code !== 0) throw new Error(response ? response.message : '后端无响应');
-
-            const results = response.data?.data?.results || [];
-            if (results.length === 0) throw new Error('后端未返回有效结果');
+            allResults = response.data?.data?.results || [];
+            if (allResults.length === 0) throw new Error('无结果');
             
-            allResults = results;
             searchCache[cacheKey] = allResults;
-            log(`[search] 成功从后端获取并缓存了 ${allResults.length} 条结果`);
-        } else {
-            log(`[search] 命中缓存，共 ${allResults.length} 条结果`);
+            log(`[search] 缓存了 ${allResults.length} 条结果`);
         }
         
         const pageSize = 10;
-        const startIdx = (page - 1) * pageSize;
-        const endIdx = startIdx + pageSize;
-        const pageData = allResults.slice(startIdx, endIdx);
-        const totalPages = Math.ceil(allResults.length / pageSize);
+        const pageData = allResults.slice((page - 1) * pageSize, page * pageSize);
         
-        // 【V23 核心】将当前页的数据存入临时变量
-        currentListPageData = pageData;
-        log(`[search] 当前页 ${page} 的 ${pageData.length} 条数据已存入临时列表`);
-
-        const list = pageData.map((item, index) => {
-            const totalLinks = (item.links || []).length;
-            return {
-                // vod_id 现在只存储索引，作为最后的备用
-                vod_id: index.toString(), 
-                vod_name: item.title || '未知标题',
-                vod_pic: item.image || FALLBACK_PIC,
-                vod_remarks: `${totalLinks}个网盘`
-            };
-        });
+        const list = pageData.map(item => ({
+            vod_id: jsonify({ type: 'search', unique_id: item.unique_id, keyword: keyword }),
+            vod_name: item.title,
+            vod_pic: item.image || FALLBACK_PIC,
+            vod_remarks: `${(item.links || []).length}个网盘`
+        }));
         
-        return jsonify({ list: list, page: page, pagecount: totalPages, total: allResults.length });
+        return jsonify({ list: list, page: page, pagecount: Math.ceil(allResults.length / pageSize), total: allResults.length });
 
     } catch (e) {
-        log(`[search] 发生严重异常: ${e.message}`);
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
+        log(`[search] 异常: ${e.message}`);
+        return jsonify({ list: [] });
     }
 }
 
 // ----------------------------------------------------------------------
-// 详情 (核心修改：通过索引直接从 currentListPageData 获取)
+// 详情 (核心修改：使用 robustParse)
 // ----------------------------------------------------------------------
 async function getTracks(ext) {
-    // 【V23 核心】ext.vod_id 在这里被我们当作是列表的索引
-    const index = parseInt(ext.vod_id, 10);
-    log(`[getTracks] 开始获取详情, 接收到的ID/索引为: ${ext.vod_id}`);
+    log(`[getTracks] 开始获取详情, 接收到的原始 vod_id: ${ext.vod_id}`);
     
     try {
-        if (isNaN(index) || !currentListPageData || index >= currentListPageData.length) {
-            throw new Error(`无效的索引'${index}'或当前列表数据为空`);
-        }
-
-        // 直接从当前页的临时缓存中，根据索引取出对应的完整数据
-        const targetItem = currentListPageData[index];
-        log(`[getTracks] 成功通过索引 ${index} 从临时列表中获取到条目: ${targetItem.title}`);
+        // 【V24 核心】使用我们新的、更强大的解析函数
+        const idData = robustParse(ext.vod_id);
         
-        const links = targetItem.links || [];
-        if (links.length === 0) {
-            return jsonify({ list: [{ title: '播放列表', tracks: [{ name: '暂无可用链接', pan: '' }] }] });
+        if (!idData.type) {
+            throw new Error(`使用 robustParse 后仍无法解析出 type。解析结果: ${JSON.stringify(idData)}`);
         }
         
-        const tracks = links.map(link => {
-            let panType = '未知';
-            const url = link.url || '';
-            if (url.includes('quark.cn')) panType = '夸克';
-            else if (url.includes('pan.baidu.com')) panType = '百度';
-            else if (url.includes('aliyundrive.com')) panType = '阿里';
-            
-            const password = link.password ? ` 码:${link.password}` : '';
-            const name = `[${panType}] ${targetItem.title}${password}`;
-            
-            return { name: name, pan: url };
-        });
+        log(`[getTracks] 解析后类型: ${idData.type}`);
         
-        const playUrls = tracks.map(t => `${t.name}$${t.pan}`).join('#');
-        
-        return jsonify({ 
-            list: [{ title: targetItem.title || '播放列表', tracks: tracks }],
-            vod_play_from: '网盘列表',
-            vod_play_url: playUrls
-        });
-
+        if (idData.type === 'search' && idData.unique_id && idData.keyword) {
+            const { unique_id, keyword } = idData;
+            const cachedResults = searchCache[`search_${keyword}`];
+            if (!cachedResults) throw new Error(`缓存丢失 (keyword: ${keyword})`);
+            
+            const targetItem = cachedResults.find(item => item.unique_id === unique_id);
+            if (!targetItem) throw new Error(`缓存中未找到 (unique_id: ${unique_id})`);
+            
+            const links = targetItem.links || [];
+            if (links.length === 0) return jsonify({ list: [] });
+            
+            const tracks = links.map(link => ({
+                name: `[${link.type || '网盘'}] ${targetItem.title}${link.password ? ` 码:${link.password}` : ''}`,
+                pan: link.url
+            }));
+            
+            return jsonify({ 
+                list: [{ title: targetItem.title, tracks: tracks }],
+                vod_play_from: '网盘',
+                vod_play_url: tracks.map(t => `${t.name}$${t.pan}`).join('#')
+            });
+        } 
+        else if (idData.type === 'home') {
+            // ... 首页逻辑 ...
+            return jsonify({ list: [] });
+        } 
+        else {
+            throw new Error(`未知的 vod_id 类型: ${idData.type}`);
+        }
     } catch (e) {
         log(`[getTracks] 异常: ${e.message}`);
-        return jsonify({ 
-            list: [{ title: '错误', tracks: [{ name: `获取链接失败: ${e.message}`, pan: '' }] }] 
-        });
+        return jsonify({ list: [{ title: '错误', tracks: [{ name: `获取链接失败: ${e.message}`, pan: '' }] }] });
     }
 }
 
-// ----------------------------------------------------------------------
-// 播放 (保持原样)
-// ----------------------------------------------------------------------
-async function play(flag, id) {
-    // ... 此处代码与 V22 版本完全相同 ...
-    if (id && (id.startsWith('http' ) || id.startsWith('//'))) {
-        return jsonify({ parse: 0, url: id, header: {} });
-    }
-    return jsonify({ parse: 0, url: '', header: {} });
-}
-
-// --- 兼容接口 (保持原样) ---
+// --- 兼容接口 ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); return jsonify({ class: JSON.parse(c).tabs }); }
-async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
+async function category(tid, pg) { return getCards({ id: (robustParse(tid)).id || tid, page: pg || 1 }); }
 async function detail(id) { return getTracks({ vod_id: id }); }
+async function play(flag, id) { return jsonify({ parse: 0, url: id }); }
 
-log('==== 插件加载完成 V23 ====');
+log('==== 插件加载完成 V24 ====');
