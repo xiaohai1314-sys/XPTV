@@ -1,27 +1,23 @@
 /**
- * reboys.cn 前端插件 - V34-Fix (与后端缓存完美协作版)
+ * reboys.cn 前端插件 - V35-AppFriendly (APP纯净链接专用版)
  * 
- * 架构说明:
- * - search: 请求后端的/search接口，获取一个“轻量”的结果列表（不含链接）。然后，将列表中的`vod_id`（索引）和`keyword`拼接成 "索引@@@关键词" 的安全字符串，以通过APP的窄通道传递。
- * - detail/getTracks: 接收到安全字符串后，用 split('@@@') 拆分出【索引】和【关键词】。然后用这两个参数去请求后端的/get_links接口。
- * - /get_links: 后端根据关键词从缓存中找到完整的搜索结果，再根据索引定位到具体条目，并返回其包含的【完整的links数组】。
- * - 此架构是为解决“APP只传vod_id”和“大包吃不下”两大核心矛盾而设计的最终方案。
+ * 核心修复：将后端返回的 links 数组转换为 APP 可识别的纯净 URL 字符串
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.10.107:3000";
+const BACKEND_URL = "http://192.168.1.7:3000";
 const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
-const cheerio = createCheerio(  );
+const cheerio = createCheerio();
 
 // --- 全局缓存 ---
 let homeCache = null;
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V34-Fix] ${msg}`;
+    const logMsg = `[reboys V35] ${msg}`;
     try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
 function argsify(ext) { 
@@ -32,13 +28,13 @@ function jsonify(obj) { return JSON.stringify(obj); }
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V34-Fix (后端缓存协作版) ====");
+    log("==== 插件初始化 V35-AppFriendly ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
         { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
         { name: '综艺', ext: { id: 5 } }
     ];
-    return jsonify({ ver: 1, title: 'reboys搜(V34-Fix)', site: SITE_URL, tabs: CATEGORIES });
+    return jsonify({ ver: 1, title: 'reboys搜(V35)', site: SITE_URL, tabs: CATEGORIES });
 }
 
 // --- 首页/分类 (保持不变) ---
@@ -76,9 +72,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ search函数，恢复您V34版本的核心逻辑：拼接安全ID ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// --- 搜索函数 (保持不变) ---
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -92,24 +86,17 @@ async function search(ext) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
         
-        // ★ 核心逻辑：使用安全分隔符拼接ID(索引)和keyword
-        const listWithSafeId = response.list.map(item => {
-            // item.vod_id 是后端返回的索引 "0", "1", "2"...
-            item.vod_id = `${item.vod_id}@@@${keyword}`; // "0@@@帝陵"
-            return item;
-        });
-        
-        log(`[search] ✅ 后端返回 ${listWithSafeId.length} 条轻量结果, 已拼接安全ID`);
-        return jsonify({ list: listWithSafeId });
+        log(`[search] ✅ 后端返回 ${response.list.length} 条结果`);
+        return jsonify({ list: response.list });
     } catch (e) {
         log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ getTracks函数，恢复您V34版本的核心逻辑：请求/get_links ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ getTracks函数 - 关键修复：将 links 数组转换为纯净 URL ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
     const safeId = ext.vod_id || '';
     const parts = safeId.split('@@@');
@@ -141,27 +128,41 @@ async function getTracks(ext) {
             return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
         }
 
-        // 2. 在前端进行map循环，生成按钮
+        // 2. ★★★ 关键修复：将 links 数组转换为 APP 可识别的纯净 URL 字符串 ★★★
         const tracks = links.map((linkData, index) => {
-            const url = linkData.url;
-            const password = linkData.password;
-            let panType = '网盘';
-            if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
-            else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
-            else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
+            const url = linkData.url || '';
+            const password = linkData.password || '';
             
+            // 识别网盘类型
+            let panType = '网盘';
+            if (linkData.type === 'quark' || url.includes('quark.cn')) panType = '夸克';
+            else if (linkData.type === 'aliyun' || url.includes('aliyundrive.com')) panType = '阿里';
+            else if (linkData.type === 'baidu' || url.includes('pan.baidu.com')) panType = '百度';
+            
+            // 按钮名称
             const buttonName = `${panType}网盘 ${index + 1}`;
-            const finalPan = password ? `${url}（访问码：${password}）` : url;
+            
+            // ★★★ 核心修复：pan 字段必须是纯净的 URL 字符串 ★★★
+            // 如果有密码，将密码拼接在 URL 后面（用特殊分隔符，让APP自己解析）
+            // 但根据您的需求，APP可能无法处理复杂格式，所以这里只返回纯URL
+            const finalUrl = url; // 只返回纯净URL
+            
+            // 如果需要传递密码，可以在 name 中显示
+            const nameWithPassword = password ? `${buttonName}（密码:${password}）` : buttonName;
 
-            return { name: buttonName, pan: finalPan, ext: {} };
+            return { 
+                name: nameWithPassword, 
+                pan: finalUrl,  // ★★★ 纯净URL字符串 ★★★
+                ext: {} 
+            };
         });
 
         // 3. 返回标准 list/tracks 结构
+        log(`[getTracks] ✅ 返回 ${tracks.length} 个纯净链接给APP`);
         return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
 
     } catch (e) {
         log(`[getTracks] 异常: ${e.message}`);
-        // 返回更明确的错误信息，方便调试
         const errorMessage = e.message.includes('缓存') ? e.message : '获取链接失败, 请尝试重新搜索';
         return jsonify({ list: [{ title: '云盘', tracks: [{ name: errorMessage, pan: '' }] }] });
     }
@@ -170,7 +171,7 @@ async function getTracks(ext) {
 // --- 播放函数 (备用) ---
 async function play(flag, id) {
     log(`[play] flag=${flag}, id=${id}`);
-    if (id && (id.startsWith('http'  ) || id.startsWith('//'))) {
+    if (id && (id.startsWith('http') || id.startsWith('//'))) {
         return jsonify({ parse: 0, url: id, header: {} });
     }
     return jsonify({ parse: 0, url: '', header: {} });
@@ -182,4 +183,4 @@ async function home() { const c = await getConfig(); return jsonify({ class: JSO
 async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
 async function detail(id) { return getTracks({ vod_id: id }); }
 
-log('==== 插件加载完成 V34-Fix ====');
+log('==== 插件加载完成 V35-AppFriendly ====');
