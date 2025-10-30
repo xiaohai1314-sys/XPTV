@@ -1,11 +1,11 @@
 /**
- * reboys.cn 前端插件 - V35-AppFriendly (APP纯净链接专用版)
+ * reboys.cn 前端插件 - V35.1-AppFriendly (APP纯净链接专用版)
  * 
  * 核心修复：将后端返回的 links 数组转换为 APP 可识别的纯净 URL 字符串
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.1.7:3000";
+const BACKEND_URL = "http://192.168.10.107:3000";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
