@@ -1,43 +1,45 @@
 /**
- * 4k热播影视 前端插件 - V4.1 (修复分类无限重复)
+ * 4k热播影视 前端插件 - V4.2 (融合找盘脚本分页机制)
  *
- * 核心变更:
- * 1. 参考找盘脚本，引入全局缓存机制，避免重复请求
- * 2. 实现正确的分页切片逻辑，防止内容重复
- * 3. 保留已验证正常的搜索功能
+ * 核心原则:
+ * 1. 引入"找盘脚本"的缓存和分页逻辑到 getCards() 函数，以解决首页分类无限重复加载的问题。
+ * 2. 保留已验证正常的搜索和详情页功能。
+ * 3. 其余部分与 V4.0 版本保持一致。
  */
 
 // --- 配置区 ---
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // 后端API地址 (仅供搜索使用)
-const API_ENDPOINT = "http://192.168.10.107:3000/search"; // 【重要】请替换成您的后端服务地址
+const API_ENDPOINT = "http://127.0.0.1:3000/search"; // 【重要】请替换成您的后端服务地址
 
-// 目标网站域名 (供首页抓取使用)
+// 目标网站域名 (供首页抓取使用 )
 const SITE_URL = "https://reboys.cn";
+
+// 首页每个分类加载的卡片数量
+const PAGE_SIZE = 48; 
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
-const PAGE_SIZE = 48; // 每页显示12个卡片
 
 // --- 全局缓存 ---
-let cardsCache = {}; // 用于缓存每个分类的所有卡片数据
+let cardsCache = {};
 
 // --- 辅助函数 ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
 function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
 function getCorrectUrl(path) {
-    if (!path || path.startsWith('http')) return path || '';
+    if (!path || path.startsWith('http' )) return path || '';
     return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V4.1 (修复分类重复) ====");
+    log("==== 插件初始化 V4.1 (融合分页机制) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -54,23 +56,20 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - 带缓存和分页的HTML抓取模式】★★★★★
+// ★★★★★【首页分类 - HTML抓取模式 - 已整合分页逻辑】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
-    const page = parseInt(ext.page || 1, 10);
-    
-    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
+    const page = ext.page || 1;
+    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page} (HTML抓取与分页模式)`);
 
     try {
-        // 构建缓存键
         const cacheKey = `category_${categoryId}`;
         let allCards = cardsCache[cacheKey];
 
-        // 如果缓存不存在，则获取并缓存所有卡片
+        // 如果缓存未命中，则从网站抓取数据并填充缓存
         if (!allCards) {
-            log(`[getCards] 缓存未命中，正在从 ${SITE_URL} 获取首页HTML...`);
-            
+            log(`[getCards] 缓存未命中 for ID ${categoryId}，正在从 ${SITE_URL} 获取首页HTML...`);
             const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
             const $ = cheerio.load(data);
             allCards = [];
@@ -81,9 +80,6 @@ async function getCards(ext) {
                 return jsonify({ list: [] });
             }
 
-            log(`[getCards] ✓ 找到分类内容块，开始提取卡片`);
-
-            // 提取所有卡片
             contentBlock.find('a.item').each((_, element) => {
                 const cardElement = $(element);
                 const detailUrl = cardElement.attr('href');
@@ -96,26 +92,19 @@ async function getCards(ext) {
                     ext: { url: getCorrectUrl(detailUrl) }
                 });
             });
-
-            // 缓存结果
-            cardsCache[cacheKey] = allCards;
-            log(`[getCards] ✓ 成功缓存 ${allCards.length} 个卡片`);
+            
+            cardsCache[cacheKey] = allCards; // 存入缓存
+            log(`[getCards] ✓ 成功抓取并缓存了 ${allCards.length} 个卡片 for ID ${categoryId}`);
         } else {
-            log(`[getCards] ✓ 使用缓存数据，共 ${allCards.length} 个卡片`);
+            log(`[getCards] ✓ 缓存命中 for ID ${categoryId}，总数: ${allCards.length}`);
         }
 
-        // 根据页码进行切片
+        // 从缓存中根据页码提取数据
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
 
-        log(`[getCards] 总数=${allCards.length}, 返回第${page}页的${pageCards.length}个卡片 (索引 ${startIdx}-${endIdx})`);
-        
-        // 如果当前页没有数据，说明已经到末尾
-        if (pageCards.length === 0) {
-            log(`[getCards] 第${page}页无数据，返回空列表`);
-        }
-
+        log(`[getCards] 返回 ${pageCards.length} 个卡片 (页码 ${page})`);
         return jsonify({ list: pageCards });
         
     } catch (e) {
@@ -124,7 +113,9 @@ async function getCards(ext) {
     }
 }
 
+
 // ★★★★★【搜索功能 - 后端API模式】★★★★★
+// 【保留修复】搜索功能保持修复后的状态，不会无限重复
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -180,7 +171,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】★★★★★
+// ★★★★★【详情页 - 与V3.0/V4.0完全相同】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const id = ext.url;
@@ -236,7 +227,8 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 ---
+
+// --- 兼容接口 (保持不变) ---
 async function init() { return getConfig(); }
 async function home() {
     const c = await getConfig();
@@ -255,5 +247,3 @@ async function play(flag, id) {
     log(`[play] 直接播放: ${id}`);
     return jsonify({ url: id }); 
 }
-
-log('==== 插件加载完成 V4.1 ====');
