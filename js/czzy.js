@@ -1,10 +1,11 @@
 /**
- * 4k热播影视 前端插件 - V4.2 (测试版 - 无缓存)
+ * 4k热播影视 前端插件 - V4.3 (一次性加载方案)
  *
- * 核心变更:
- * 1. 完全保留V4.0的HTML抓取逻辑
- * 2. 暂时移除缓存机制，只测试分页切片
- * 3. 添加详细的调试日志
+ * 核心逻辑:
+ * 1. 保持V4.0的完整HTML抓取逻辑（已验证可工作）
+ * 2. 第1页：返回所有卡片（最多48个）
+ * 3. 第2页及以后：返回空数组，停止无限加载
+ * 4. 彻底解决分类重复问题
  */
 
 // --- 配置区 ---
@@ -15,9 +16,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
-const PAGE_SIZE = 48; // 每页20个（调大一些便于测试）
 
-// --- 辅助函数 ---
+// --- 辅助函数 (与V4.0完全相同) ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
 function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
@@ -29,7 +29,7 @@ function getCorrectUrl(path) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V4.2 (测试版) ====");
+    log("==== 插件初始化 V4.3 (一次性加载方案) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -38,7 +38,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 4.2,
+        ver: 4.3,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -46,86 +46,57 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - V4.0逻辑 + 分页切片】★★★★★
+// ★★★★★【首页分类 - 一次性加载方案】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
     const page = parseInt(ext.page || 1, 10);
     
-    log(`[getCards] ========================================`);
     log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
 
+    // 【关键修改】第2页及以后直接返回空数组，停止无限加载
+    if (page > 1) {
+        log(`[getCards] 页码 > 1，返回空列表停止加载`);
+        return jsonify({ list: [] });
+    }
+
+    // 第1页：执行V4.0的完整抓取逻辑
     try {
         log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
         const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
-        
-        log(`[getCards] HTML加载成功，长度: ${data.length} 字符`);
+        const cards = [];
 
-        // 使用V4.0的选择器
         const contentBlock = $(`div.block[v-show="${categoryId} == navSelect"]`);
-        log(`[getCards] contentBlock.length = ${contentBlock.length}`);
-        
         if (contentBlock.length === 0) {
             log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块`);
-            
-            // 调试：列出所有 div.block 的 v-show 属性
-            log(`[getCards] 【调试】页面中所有的 v-show 属性：`);
-            $('div.block').each((idx, block) => {
-                const vShow = $(block).attr('v-show');
-                log(`[getCards]   [${idx}] v-show="${vShow}"`);
-            });
-            
             return jsonify({ list: [] });
         }
 
-        log(`[getCards] ✓ 找到分类内容块`);
-
-        // 提取所有卡片
-        const allCards = [];
+        // 【与V4.0完全相同】使用原始的卡片提取逻辑
         contentBlock.find('a.item').each((_, element) => {
             const cardElement = $(element);
             const detailUrl = cardElement.attr('href');
-            const imgSrc = cardElement.find('img').attr('src');
-            const title = cardElement.find('p').text().trim();
             
-            allCards.push({
+            cards.push({
                 vod_id: getCorrectUrl(detailUrl),
-                vod_name: title,
-                vod_pic: getCorrectUrl(imgSrc),
+                vod_name: cardElement.find('p').text().trim(),
+                vod_pic: getCorrectUrl(cardElement.find('img').attr('src')),
                 vod_remarks: '',
                 ext: { url: getCorrectUrl(detailUrl) }
             });
         });
 
-        log(`[getCards] ✓ 成功提取 ${allCards.length} 个卡片`);
-
-        // 分页切片（关键改动）
-        const startIdx = (page - 1) * PAGE_SIZE;
-        const endIdx = startIdx + PAGE_SIZE;
-        const pageCards = allCards.slice(startIdx, endIdx);
-
-        log(`[getCards] 分页：总数=${allCards.length}, 第${page}页返回${pageCards.length}个 (索引${startIdx}-${endIdx})`);
-        
-        if (pageCards.length === 0) {
-            log(`[getCards] 第${page}页无数据，停止加载`);
-        }
-
-        // 调试：输出前3个卡片的标题
-        if (pageCards.length > 0) {
-            log(`[getCards] 本页前3个卡片: ${pageCards.slice(0, 3).map(c => c.vod_name).join(', ')}`);
-        }
-
-        return jsonify({ list: pageCards });
+        log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片（一次性返回所有内容）`);
+        return jsonify({ list: cards });
         
     } catch (e) {
         log(`[getCards] ❌ 发生异常: ${e.message}`);
-        log(`[getCards] 异常堆栈: ${e.stack}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★【搜索功能】★★★★★
+// ★★★★★【搜索功能 - 后端API模式】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -181,7 +152,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】★★★★★
+// ★★★★★【详情页 - 与V4.0完全相同】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const id = ext.url;
@@ -237,7 +208,7 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 ---
+// --- 兼容接口 (与V4.0完全相同) ---
 async function init() { return getConfig(); }
 async function home() {
     const c = await getConfig();
@@ -257,4 +228,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('==== 插件加载完成 V4.2 (测试版) ====');
+log('==== 插件加载完成 V4.3 ====');
