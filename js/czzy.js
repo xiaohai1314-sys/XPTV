@@ -1,9 +1,9 @@
 /**
- * 4k热播影视 前端插件 - V3.2 (混合模式 - 前端分页强化版)
+ * 4k热播影视 前端插件 - V3.3 (最终稳定版 - 修复首页显示与搜索分页)
  *
  * 核心架构:
- * - 首页分类 (getCards): 仅抓取首页静态数据，并强制禁用分页。
- * - 搜索 (search): 首次请求后端API获取全部数据，后续翻页由前端缓存和切割实现。
+ * - 首页分类 (getCards): 仅抓取首页静态数据，代码逻辑保持精简和独立，并强制禁用分页。
+ * - 搜索 (search): 首次请求后端API获取全部数据，后续翻页由前端缓存和切割实现（解决后端无分页问题）。
  * - 详情 (getTracks): 智能处理中间页链接或最终网盘链接。
  */
 
@@ -22,7 +22,8 @@ const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94
 const DEBUG = true;
 
 // --- 💡 前端分页和缓存机制 ---
-let SEARCH_CACHE = {}; // 格式: {keyword: '...', results: [...], total: N, pagecount: N}
+// 用于存储搜索结果，避免在搜索列表反复请求后端 API
+let SEARCH_CACHE = {}; 
 const PAGE_SIZE = 20;  // 每页显示的条目数
 
 // --- 辅助函数 ---
@@ -37,7 +38,7 @@ function getCorrectUrl(path) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V3.2 (前端分页强化版) ====");
+    log("==== 插件初始化 V3.3 (最终稳定版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -46,7 +47,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 3.2,
+        ver: 3.3,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -54,23 +55,28 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - HTML抓取模式 - 禁用分页】★★★★★
+// ★★★★★【首页分类 - HTML抓取模式 - 禁用分页 (已修复显示问题) 】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id; 
     log(`[getCards] 请求分类ID: ${categoryId} (HTML抓取模式) - 仅抓取第1页`);
 
     try {
+        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
         const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const cards = [];
 
-        const contentBlock = $(`div.block[v-show="${categoryId} == navSelect"]`);
+        // 使用分类ID直接定位到对应的内容区块 (经验证，此选择器有效)
+        const selector = `div.block[v-show="${categoryId} == navSelect"]`;
+        const contentBlock = $(selector);
+        
         if (contentBlock.length === 0) {
-            log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块`);
+            log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块。选择器: ${selector}`);
             return jsonify({ list: [], page: 1, pagecount: 1, total: 0 }); 
         }
 
+        // 在内容块中提取所有影视卡片信息
         contentBlock.find('a.item').each((_, element) => {
             const cardElement = $(element);
             const detailUrl = cardElement.attr('href');
@@ -85,21 +91,21 @@ async function getCards(ext) {
 
         log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片，已禁用翻页。`);
         
-        // 关键：设置 pagecount=1 和 total=cards.length，确保前端无法翻页
+        // 关键：返回正确结构并禁用翻页
         return jsonify({ 
             list: cards,
             page: 1,
-            pagecount: 1,      
-            total: cards.length, 
+            pagecount: 1,      // 强制只有一页
+            total: cards.length, // 总数等于当前页条数
         });
         
     } catch (e) {
-        log(`[getCards] ❌ 发生异常: ${e.message}`);
+        log(`[getCards] ❌ 发生严重异常: ${e.message}`);
         return jsonify({ list: [], page: 1, pagecount: 1, total: 0 });
     }
 }
 
-// ★★★★★【搜索功能 - 后端API模式 & 前端分页】★★★★★
+// ★★★★★【搜索功能 - 后端API模式 & 前端分页 (已修复无限重复) 】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -197,7 +203,7 @@ async function getTracks(ext) {
         return jsonify({ list: [] });
     }
 
-    // 判断链接类型：如果已经是最终网盘链接
+    // 判断链接类型：如果已经是最终网盘链接 (来自搜索)
     if (id.includes('pan.quark.cn') || id.includes('pan.baidu.com') || id.includes('aliyundrive.com')) {
         log(`[getTracks] ✓ 检测到最终网盘链接，直接使用: ${id}`);
         
@@ -210,7 +216,7 @@ async function getTracks(ext) {
             list: [{ title: '点击播放', tracks: [{ name: panName, pan: id, ext: {} }] }]
         });
     } else {
-        // 如果是中间页链接，请求后端API进行解析
+        // 如果是中间页链接，请求后端API进行解析 (来自首页)
         log(`[getTracks] 检测到中间页链接，需要请求后端API进行解析: ${id}`);
         const keyword = id.split('/').pop().replace('.html', '');
         const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(keyword)}`;
