@@ -1,29 +1,21 @@
 /**
- * 4k热播影视 前端插件 - V4.1 (修复分类无限重复)
+ * 4k热播影视 前端插件 - V4.2 (测试版 - 无缓存)
  *
  * 核心变更:
- * 1. 参考找盘脚本，引入全局缓存机制，避免重复请求
- * 2. 实现正确的分页切片逻辑，防止内容重复
- * 3. 保留已验证正常的搜索功能
+ * 1. 完全保留V4.0的HTML抓取逻辑
+ * 2. 暂时移除缓存机制，只测试分页切片
+ * 3. 添加详细的调试日志
  */
 
 // --- 配置区 ---
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// 后端API地址 (仅供搜索使用)
-const API_ENDPOINT = "http://127.0.0.1:3000/search"; // 【重要】请替换成您的后端服务地址
-
-// 目标网站域名 (供首页抓取使用)
+const API_ENDPOINT = "http://127.0.0.1:3000/search";
 const SITE_URL = "https://reboys.cn";
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
-const PAGE_SIZE = 12; // 每页显示12个卡片
-
-// --- 全局缓存 ---
-let cardsCache = {}; // 用于缓存每个分类的所有卡片数据
+const PAGE_SIZE = 48; // 每页20个（调大一些便于测试）
 
 // --- 辅助函数 ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
@@ -37,7 +29,7 @@ function getCorrectUrl(path) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V4.1 (修复分类重复) ====");
+    log("==== 插件初始化 V4.2 (测试版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -46,7 +38,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 4.1,
+        ver: 4.2,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -54,79 +46,86 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - 带缓存和分页的HTML抓取模式】★★★★★
+// ★★★★★【首页分类 - V4.0逻辑 + 分页切片】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
     const page = parseInt(ext.page || 1, 10);
     
+    log(`[getCards] ========================================`);
     log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
 
     try {
-        // 构建缓存键
-        const cacheKey = `category_${categoryId}`;
-        let allCards = cardsCache[cacheKey];
+        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
+        const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+        const $ = cheerio.load(data);
+        
+        log(`[getCards] HTML加载成功，长度: ${data.length} 字符`);
 
-        // 如果缓存不存在，则获取并缓存所有卡片
-        if (!allCards) {
-            log(`[getCards] 缓存未命中，正在从 ${SITE_URL} 获取首页HTML...`);
+        // 使用V4.0的选择器
+        const contentBlock = $(`div.block[v-show="${categoryId} == navSelect"]`);
+        log(`[getCards] contentBlock.length = ${contentBlock.length}`);
+        
+        if (contentBlock.length === 0) {
+            log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块`);
             
-            const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
-            const $ = cheerio.load(data);
-            allCards = [];
-
-            // 使用V4.0验证过的选择器（完全相同）
-            const contentBlock = $(`div.block[v-show="${categoryId} == navSelect"]`);
-            
-            if (contentBlock.length === 0) {
-                log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块`);
-                return jsonify({ list: [] });
-            }
-
-            log(`[getCards] ✓ 找到分类内容块，开始提取卡片`);
-
-            // 使用V4.0验证过的卡片提取逻辑（完全相同）
-            contentBlock.find('a.item').each((_, element) => {
-                const cardElement = $(element);
-                const detailUrl = cardElement.attr('href');
-                
-                allCards.push({
-                    vod_id: getCorrectUrl(detailUrl),
-                    vod_name: cardElement.find('p').text().trim(),
-                    vod_pic: getCorrectUrl(cardElement.find('img').attr('src')),
-                    vod_remarks: '',
-                    ext: { url: getCorrectUrl(detailUrl) }
-                });
+            // 调试：列出所有 div.block 的 v-show 属性
+            log(`[getCards] 【调试】页面中所有的 v-show 属性：`);
+            $('div.block').each((idx, block) => {
+                const vShow = $(block).attr('v-show');
+                log(`[getCards]   [${idx}] v-show="${vShow}"`);
             });
-
-            // 缓存结果
-            cardsCache[cacheKey] = allCards;
-            log(`[getCards] ✓ 成功缓存 ${allCards.length} 个卡片`);
-        } else {
-            log(`[getCards] ✓ 使用缓存数据，共 ${allCards.length} 个卡片`);
+            
+            return jsonify({ list: [] });
         }
 
-        // 根据页码进行切片
+        log(`[getCards] ✓ 找到分类内容块`);
+
+        // 提取所有卡片
+        const allCards = [];
+        contentBlock.find('a.item').each((_, element) => {
+            const cardElement = $(element);
+            const detailUrl = cardElement.attr('href');
+            const imgSrc = cardElement.find('img').attr('src');
+            const title = cardElement.find('p').text().trim();
+            
+            allCards.push({
+                vod_id: getCorrectUrl(detailUrl),
+                vod_name: title,
+                vod_pic: getCorrectUrl(imgSrc),
+                vod_remarks: '',
+                ext: { url: getCorrectUrl(detailUrl) }
+            });
+        });
+
+        log(`[getCards] ✓ 成功提取 ${allCards.length} 个卡片`);
+
+        // 分页切片（关键改动）
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
 
-        log(`[getCards] 总数=${allCards.length}, 返回第${page}页的${pageCards.length}个卡片 (索引 ${startIdx}-${endIdx})`);
+        log(`[getCards] 分页：总数=${allCards.length}, 第${page}页返回${pageCards.length}个 (索引${startIdx}-${endIdx})`);
         
-        // 如果当前页没有数据，说明已经到末尾
         if (pageCards.length === 0) {
-            log(`[getCards] 第${page}页无数据，返回空列表`);
+            log(`[getCards] 第${page}页无数据，停止加载`);
+        }
+
+        // 调试：输出前3个卡片的标题
+        if (pageCards.length > 0) {
+            log(`[getCards] 本页前3个卡片: ${pageCards.slice(0, 3).map(c => c.vod_name).join(', ')}`);
         }
 
         return jsonify({ list: pageCards });
         
     } catch (e) {
         log(`[getCards] ❌ 发生异常: ${e.message}`);
+        log(`[getCards] 异常堆栈: ${e.stack}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★【搜索功能 - 后端API模式】★★★★★
+// ★★★★★【搜索功能】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -258,4 +257,4 @@ async function play(flag, id) {
     return jsonify({ url: id }); 
 }
 
-log('==== 插件加载完成 V4.1 ====');
+log('==== 插件加载完成 V4.2 (测试版) ====');
