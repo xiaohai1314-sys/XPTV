@@ -1,14 +1,11 @@
 /**
- * 4k热播影视 前端插件 - V3.3 (修复分页重复问题)
+ * 4k热播影视 前端插件 - V3.3 (恢复原版逻辑)
  *
- * 核心改进:
- * 1. 首页只返回一次数据（page=1），后续分页返回空列表
- * 2. 搜索结果也只返回一次（page=1），避免重复加载
- * 3. 简化逻辑，移除了会导致切换分类无法显示的状态标记
+ * 保持原版简洁设计，不做过度优化
  */
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://192.168.10.107:3000/search";
+const API_ENDPOINT = "http://127.0.0.1:3000/search";
 const SITE_URL = "https://reboys.cn";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
@@ -50,7 +47,7 @@ function getPanName(url) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V3.2 (修复分页重复) ====");
+    log("==== 插件初始化 V3.3 ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -59,7 +56,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 3.2,
+        ver: 3.3,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -67,7 +64,7 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - 修复分页重复】★★★★★
+// ★★★★★【首页分类 - 保持原版逻辑】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
@@ -75,14 +72,7 @@ async function getCards(ext) {
     
     log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
 
-    // ★★★ 关键修复：第2页及以后返回空列表 ★★★
-    // 因为首页HTML本身就没有分页，所以只返回第1页的数据
-    if (page > 1) {
-        log(`[getCards] ✓ 页码 > 1，返回空列表（首页无分页）`);
-        return jsonify({ list: [] });
-    }
-
-    // ★★★ 删除了重复加载检查，因为会导致切换分类时无法显示 ★★★
+    // ★★★ 不做分页处理，保持原版逻辑 ★★★
 
     try {
         log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
@@ -116,8 +106,6 @@ async function getCards(ext) {
 
         log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片`);
         
-        // ★★★ 不再标记已加载，允许重复访问 ★★★
-        
         return jsonify({ list: cards });
         
     } catch (e) {
@@ -126,7 +114,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【搜索功能 - 修复分页重复】★★★★★
+// ★★★★★【搜索功能 - 保持原版逻辑】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -138,13 +126,7 @@ async function search(ext) {
         return jsonify({ list: [] });
     }
 
-    // ★★★ 关键修复：搜索结果也只返回一次 ★★★
-    if (page > 1) {
-        log(`[search] ✓ 页码 > 1，返回空列表（搜索API无分页）`);
-        return jsonify({ list: [] });
-    }
-
-    // ★★★ 删除了重复搜索检查，因为用户可能需要重新搜索 ★★★
+    // ★★★ 不做分页处理，保持原版逻辑 ★★★
 
     const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(searchText)}`;
     log(`[search] 正在请求后端API: ${requestUrl}`);
@@ -182,8 +164,6 @@ async function search(ext) {
         }).filter(card => card !== null);
 
         log(`[search] ✓ API成功返回并格式化 ${cards.length} 个卡片`);
-        
-        // ★★★ 不再标记已搜索，允许重复搜索 ★★★
         
         return jsonify({ list: cards });
 
