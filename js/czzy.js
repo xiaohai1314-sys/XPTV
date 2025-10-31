@@ -1,406 +1,234 @@
 /**
- * reboys.cn 前端插件 - V21.0 (修复无限加载+网盘识别)
- * 核心修复:
- * 1. 添加搜索缓存机制（参考找盘插件）
- * 2. 完善分页结构返回
- * 3. 修复网盘链接识别和播放
+ * 4k热播影视 前端插件 - V4.0 (极端稳定版 - 消除全局状态与缓存依赖)
+ *
+ * 核心架构:
+ * - 首页分类 (getCards): 保持简洁，禁用分页。
+ * - 搜索 (search): 每次都请求 API，但只返回第一页数据，并禁用分页（解决后端无分页导致的无限重复）。
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.1.7:3000";
-const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
-const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
-const DEBUG = true;
-const cheerio = createCheerio();
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// 后端API地址 (仅供搜索使用)
+const API_ENDPOINT = "http://127.0.0.1:3000/search"; // 【重要】请替换成您的后端服务地址
 
-// --- 全局缓存 ---
-let searchCache = {}; // 核心：添加搜索缓存
+// 目标网站域名 (供首页抓取使用 )
+const SITE_URL = "https://reboys.cn";
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const cheerio = createCheerio();
+const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
+const DEBUG = true;
 
 // --- 辅助函数 ---
-function log(msg) { 
-    const logMsg = `[reboys V21] ${msg}`;
-    try { 
-        $log(logMsg); 
-    } catch (_) { 
-        if (DEBUG) console.log(logMsg); 
-    }
+function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
+function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
+function jsonify(data) { return JSON.stringify(data); }
+function getCorrectUrl(path) {
+    if (!path || path.startsWith('http' )) return path || '';
+    return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-function argsify(ext) { 
-    if (typeof ext === 'string') {
-        try { 
-            return JSON.parse(ext); 
-        } catch (e) { 
-            return {}; 
-        }
-    }
-    return ext || {}; 
-}
-
-function jsonify(obj) { 
-    return JSON.stringify(obj); 
-}
+// --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V21 (修复版) ====");
-    const CATEGORIES = [
-        { name: '短剧', ext: { id: 1 } }, 
+    log("==== 插件初始化 V4.0 (极端稳定版) ====");
+    const CUSTOM_CATEGORIES = [
+        { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
-        { name: '电视剧', ext: { id: 3 } }, 
+        { name: '电视剧', ext: { id: 3 } },
         { name: '动漫', ext: { id: 4 } },
-        { name: '综艺', ext: { id: 5 } }
+        { name: '综艺', ext: { id: 5 } },
     ];
-    return jsonify({ 
-        ver: 1, 
-        title: 'reboys搜(V21)', 
-        site: SITE_URL, 
-        tabs: CATEGORIES 
+    return jsonify({
+        ver: 4.0,
+        title: '4k热播影视',
+        site: SITE_URL,
+        cookie: '',
+        tabs: CUSTOM_CATEGORIES,
     });
 }
 
-// ----------------------------------------------------------------------
-// 首页/分类
-// ----------------------------------------------------------------------
-let homeCache = null;
-
+// ★★★★★【首页分类 - HTML抓取模式 - 禁用分页】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
-    const { id: categoryId } = ext;
-    
+    const categoryId = ext.id; 
+    log(`[getCards] 请求分类ID: ${categoryId} (HTML抓取模式)`);
+
     try {
-        if (!homeCache) {
-            log(`[getCards] 获取首页缓存`);
-            const { data } = await $fetch.get(SITE_URL, { 
-                headers: { 'User-Agent': UA } 
-            });
-            homeCache = data;
-        }
-        
-        const $ = cheerio.load(homeCache);
+        const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
+        const $ = cheerio.load(data);
         const cards = [];
-        const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
+
+        // 使用分类ID直接定位到对应的内容区块
+        const selector = `div.block[v-show="${categoryId} == navSelect"]`;
+        const contentBlock = $(selector);
         
-        if (targetBlock.length === 0) {
-            log(`[getCards] 未找到分类 ${categoryId}`);
-            return jsonify({ list: [] });
+        if (contentBlock.length === 0) {
+            log(`[getCards] ❌ 找不到ID为 ${categoryId} 的内容块。`);
+            return jsonify({ list: [], page: 1, pagecount: 1, total: 0 }); 
         }
 
-        targetBlock.find('a.item').each((_, element) => {
-            const $item = $(element);
-            const detailPath = $item.attr('href');
-            const title = $item.find('p').text().trim();
-            const imageUrl = $item.find('img').attr('src');
-            
-            if (detailPath && title) {
-                cards.push({
-                    vod_id: jsonify({ type: 'home', path: detailPath }),
-                    vod_name: title,
-                    vod_pic: imageUrl || FALLBACK_PIC,
-                    vod_remarks: '首页推荐'
-                });
-            }
+        contentBlock.find('a.item').each((_, element) => {
+            const cardElement = $(element);
+            const detailUrl = cardElement.attr('href');
+            cards.push({
+                vod_id: getCorrectUrl(detailUrl), 
+                vod_name: cardElement.find('p').text().trim(),
+                vod_pic: getCorrectUrl(cardElement.find('img').attr('src')),
+                vod_remarks: '',
+                ext: { url: getCorrectUrl(detailUrl) }
+            });
+        });
+
+        log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片，禁用翻页。`);
+        
+        // 关键：返回正确结构并禁用翻页
+        return jsonify({ 
+            list: cards,
+            page: 1,
+            pagecount: 1,      // 强制只有一页
+            total: cards.length, // 总数等于当前页条数
         });
         
-        log(`[getCards] 返回 ${cards.length} 个卡片`);
-        return jsonify({ list: cards });
     } catch (e) {
-        log(`[getCards] 异常: ${e.message}`);
-        homeCache = null;
-        return jsonify({ list: [] });
+        log(`[getCards] ❌ 发生严重异常: ${e.message}`);
+        return jsonify({ list: [], page: 1, pagecount: 1, total: 0 });
     }
 }
 
-// ----------------------------------------------------------------------
-// 搜索 (核心修复：添加缓存机制)
-// ----------------------------------------------------------------------
+// ★★★★★【搜索功能 - 放弃前端分页，禁用滚动加载】★★★★★
 async function search(ext) {
     ext = argsify(ext);
-    const keyword = ext.text || '';
-    const page = ext.page || 1;
+    const searchText = ext.text || '';
+    // 💡 忽略 ext.page，只取第一页数据
+    const page = 1; 
     
-    if (!keyword) {
-        log('[search] 关键词为空');
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
+    log(`[search] 搜索关键词: "${searchText}" (禁用滚动加载)`);
+
+    if (!searchText) {
+        return jsonify({ list: [] });
     }
-    
-    log(`[search] 搜索: "${keyword}", 页码: ${page}`);
+
+    // 每次都请求 API
+    const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(searchText)}`;
     
     try {
-        // 缓存键：关键词
-        const cacheKey = `search_${keyword}`;
-        let allResults = searchCache[cacheKey];
-        
-        // 缓存未命中，请求后端
-        if (!allResults) {
-            log(`[search] 缓存未命中，请求后端`);
-            
-            const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}&page=1`;
-            const fetchResult = await $fetch.get(url, { 
-                headers: { 'User-Agent': UA },
-                timeout: 15000
-            });
-            
-            // 解析响应
-            let response = null;
-            
-            if (typeof fetchResult === 'string') {
-                response = JSON.parse(fetchResult);
-            } else if (typeof fetchResult === 'object' && fetchResult !== null) {
-                if (fetchResult.data) {
-                    if (typeof fetchResult.data === 'string') {
-                        response = JSON.parse(fetchResult.data);
-                    } else {
-                        response = fetchResult.data;
-                    }
-                } else if (fetchResult.code !== undefined) {
-                    response = fetchResult;
-                }
-            }
-            
-            if (!response || response.code !== 0) {
-                log(`[search] 后端返回错误或无响应`);
-                return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
-            }
+        const { data: jsonString } = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+        const response = JSON.parse(jsonString);
 
-            // 提取结果（多路径兼容）
-            let results = null;
-            
-            if (response.data?.data?.results) {
-                results = response.data.data.results;
-                log(`[search] 路径1: response.data.data.results`);
-            } else if (response.data?.results) {
-                results = response.data.results;
-                log(`[search] 路径2: response.data.results`);
-            } else if (response.results) {
-                results = response.results;
-                log(`[search] 路径3: response.results`);
-            }
-            
-            if (!results || !Array.isArray(results) || results.length === 0) {
-                log(`[search] 未找到搜索结果`);
-                return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
-            }
-            
-            // 映射并缓存所有结果
-            allResults = results.map(item => {
-                const vod_id_data = {
-                    type: 'search',
-                    title: item.title || '未知标题',
-                    links: item.links || [],
-                    image: item.image || FALLBACK_PIC
-                };
-                
-                const totalLinks = (item.links || []).length;
-                const remarks = totalLinks > 0 
-                    ? `${totalLinks}个网盘` 
-                    : '暂无链接';
-
-                return {
-                    vod_id: jsonify(vod_id_data),
-                    vod_name: item.title || '未知标题',
-                    vod_pic: item.image || FALLBACK_PIC,
-                    vod_remarks: remarks
-                };
-            });
-            
-            searchCache[cacheKey] = allResults;
-            log(`[search] 缓存 ${allResults.length} 条结果`);
-        } else {
-            log(`[search] 使用缓存，共 ${allResults.length} 条结果`);
+        if (response.code !== 0 || !response.data?.data?.results) {
+            log(`[search] ❌ 后端服务返回错误或数据为空: ${response.message || '无结果'}`);
+            return jsonify({ list: [], page: 1, pagecount: 1, total: 0 });
         }
+
+        const rawResults = response.data.data.results;
         
-        // 分页处理（每页10条）
-        const pageSize = 10;
-        const startIdx = (page - 1) * pageSize;
-        const endIdx = startIdx + pageSize;
-        const pageResults = allResults.slice(startIdx, endIdx);
-        const totalPages = Math.ceil(allResults.length / pageSize);
+        // 格式化全部结果
+        const cards = rawResults.map(item => {
+            if (!item || !item.title || !item.links || item.links.length === 0) return null;
+            const finalUrl = item.links[0].url;
+            return {
+                vod_id: finalUrl, 
+                vod_name: item.title,
+                vod_pic: FALLBACK_PIC,
+                vod_remarks: item.datetime ? new Date(item.datetime).toLocaleDateString() : '未知时间',
+                ext: { url: finalUrl }
+            };
+        }).filter(card => card !== null);
         
-        log(`[search] 返回第${page}页，共${pageResults.length}条 (总计${allResults.length}条)`);
+        log(`[search] ✓ API成功返回并格式化 ${cards.length} 个卡片，已禁用滚动加载。`);
         
-        return jsonify({
-            list: pageResults,
-            page: page,
-            pagecount: totalPages,
-            total: allResults.length
+        // 关键：返回所有结果，但强制 pagecount=1，阻止 App 再次请求下一页
+        return jsonify({ 
+            list: cards,
+            page: 1,
+            pagecount: 1,      // 强制只有一页
+            total: cards.length, // 总数等于当前页条数
         });
 
     } catch (e) {
-        log(`[search] 异常: ${e.message}`);
-        return jsonify({ list: [], page: 1, pagecount: 0, total: 0 });
+        log(`[search] ❌ 请求或解析JSON时发生异常: ${e.message}`);
+        return jsonify({ list: [], page: 1, pagecount: 1, total: 0 });
     }
 }
 
-// ----------------------------------------------------------------------
-// 详情 (核心修复：返回完整的播放信息结构)
-// ----------------------------------------------------------------------
+// ★★★★★【详情页 - 智能处理模式】★★★★★
 async function getTracks(ext) {
-    const vod_id = ext.vod_id;
-    log(`[getTracks] 获取详情`);
+    ext = argsify(ext);
+    const id = ext.url;
     
-    try {
-        const idData = argsify(vod_id);
-        log(`[getTracks] 类型: ${idData.type}`);
+    if (!id) {
+        log(`[getTracks] ❌ URL为空`);
+        return jsonify({ list: [] });
+    }
+
+    // 判断链接类型：如果已经是最终网盘链接 (来自搜索)
+    if (id.includes('pan.quark.cn') || id.includes('pan.baidu.com') || id.includes('aliyundrive.com')) {
+        log(`[getTracks] ✓ 检测到最终网盘链接，直接使用: ${id}`);
         
-        if (idData.type === 'search') {
-            const links = idData.links || [];
-            log(`[getTracks] 搜索结果，链接数: ${links.length}`);
-            
-            if (links.length === 0) {
-                return jsonify({ 
-                    list: [{ 
-                        title: '播放列表', 
-                        tracks: [{ 
-                            name: '暂无可用链接', 
-                            pan: '' 
-                        }] 
-                    }],
-                    vod_play_from: '播放列表',
-                    vod_play_url: '暂无可用链接$'
-                });
+        let panName = '网盘资源';
+        if (id.includes('quark')) panName = '夸克网盘';
+        else if (id.includes('baidu')) panName = '百度网盘';
+        else if (id.includes('aliyundrive')) panName = '阿里云盘';
+
+        return jsonify({
+            list: [{ title: '点击播放', tracks: [{ name: panName, pan: id, ext: {} }] }]
+        });
+    } else {
+        // 如果是中间页链接，请求后端API进行解析 (来自首页)
+        log(`[getTracks] 检测到中间页链接，需要请求后端API进行解析: ${id}`);
+        const keyword = id.split('/').pop().replace('.html', '');
+        const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(keyword)}`;
+        
+        try {
+            const { data: jsonString } = await $fetch.get(requestUrl);
+            const response = JSON.parse(jsonString);
+            const results = response.data?.data?.results;
+
+            if (!results || results.length === 0) {
+                throw new Error("API未能解析出有效链接");
             }
+
+            const finalUrl = results[0].links[0].url;
+            log(`[getTracks] ✓ API成功解析出链接: ${finalUrl}`);
             
-            // 构建播放列表
-            const tracks = links.map((link, index) => {
-                // 识别网盘类型
-                let panType = 'unknown';
-                const url = link.url || '';
-                
-                if (url.includes('quark.cn') || link.type === 'quark') {
-                    panType = '夸克';
-                } else if (url.includes('pan.baidu.com') || link.type === 'baidu') {
-                    panType = '百度';
-                } else if (url.includes('aliyundrive.com') || link.type === 'aliyun') {
-                    panType = '阿里';
-                } else if (url.includes('115.com') || link.type === '115') {
-                    panType = '115';
-                } else if (url.includes('189.cn') || link.type === 'tianyi') {
-                    panType = '天翼';
-                } else if (link.type) {
-                    panType = link.type.toUpperCase();
-                }
-                
-                const password = link.password ? ` 提取码:${link.password}` : '';
-                const name = `[${panType}] ${idData.title || '播放'}${password}`;
-                
-                log(`[getTracks] 添加: ${name}`);
-                
-                return { 
-                    name: name, 
-                    pan: url 
-                };
+            let panName = '夸克网盘'; 
+            if (finalUrl.includes('baidu')) panName = '百度网盘';
+            else if (finalUrl.includes('aliyundrive')) panName = '阿里云盘';
+
+            return jsonify({
+                list: [{ title: '解析成功', tracks: [{ name: panName, pan: finalUrl, ext: {} }] }]
             });
-            
-            // 构建 vod_play_url 格式（用$分隔多个链接）
-            const playUrls = tracks.map(t => `${t.name}$${t.pan}`).join('#');
-            
-            log(`[getTracks] 返回 ${tracks.length} 个播放链接`);
-            
-            return jsonify({ 
-                list: [{ 
-                    title: idData.title || '播放列表', 
-                    tracks: tracks 
-                }],
-                vod_play_from: '网盘列表',
-                vod_play_url: playUrls
+
+        } catch (e) {
+            log(`[getTracks] ❌ 解析中间页时发生异常: ${e.message}`);
+            // 提供一个手动打开的备用方案
+            return jsonify({
+                list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: id, ext: {} }] }]
             });
-        } 
-        else if (idData.type === 'home') {
-            log(`[getTracks] 首页详情: ${idData.path}`);
-            
-            const url = `${BACKEND_URL}/detail?path=${encodeURIComponent(idData.path)}`;
-            const { data } = await $fetch.get(url, {
-                headers: { 'User-Agent': UA }
-            });
-            
-            if (data.success) {
-                const trackName = data.data.pwd 
-                    ? `点击播放 提取码:${data.data.pwd}` 
-                    : '点击播放';
-                const playUrl = `${trackName}$${data.data.pan}`;
-                    
-                log(`[getTracks] 首页详情解析成功`);
-                
-                return jsonify({ 
-                    list: [{ 
-                        title: '播放列表', 
-                        tracks: [{ 
-                            name: trackName, 
-                            pan: data.data.pan 
-                        }] 
-                    }],
-                    vod_play_from: '网盘',
-                    vod_play_url: playUrl
-                });
-            } else {
-                throw new Error(`后端详情解析失败: ${data.message}`);
-            }
-        } 
-        else {
-            throw new Error(`未知的 vod_id 类型: ${idData.type}`);
         }
-    } catch (e) {
-        log(`[getTracks] 异常: ${e.message}`);
-        return jsonify({ 
-            list: [{ 
-                title: '播放列表', 
-                tracks: [{ 
-                    name: '获取链接失败', 
-                    pan: '' 
-                }] 
-            }],
-            vod_play_from: '错误',
-            vod_play_url: '获取链接失败$'
-        });
     }
 }
 
-// ----------------------------------------------------------------------
-// 播放 (核心修复：正确处理网盘链接)
-// ----------------------------------------------------------------------
-async function play(flag, id) {
-    log(`[play] flag=${flag}, id=${id}`);
-    
-    // id 就是网盘链接，直接返回
-    if (id && (id.startsWith('http') || id.startsWith('//'))) {
-        log(`[play] 返回网盘链接: ${id.substring(0, 50)}...`);
-        return jsonify({ 
-            parse: 0,
-            url: id,
-            header: {}
-        });
-    }
-    
-    log(`[play] 无效的播放ID`);
-    return jsonify({ 
-        parse: 0,
-        url: '',
-        header: {}
-    });
-}
 
-// --- 兼容接口 ---
-async function init() { 
-    return getConfig(); 
+// --- 兼容接口 (保持不变) ---
+async function init() { return getConfig(); }
+async function home() {
+    const c = await getConfig();
+    const config = JSON.parse(c);
+    return jsonify({ class: config.tabs, filters: {} });
 }
-
-async function home() { 
-    const c = await getConfig(); 
-    return jsonify({ 
-        class: JSON.parse(c).tabs 
-    }); 
+async function category(tid, pg) {
+    const id = typeof tid === 'object' ? tid.id : tid;
+    // 确保 category 函数只传递 id，page 参数会被 getCards 忽略
+    return getCards({ id: id, page: pg || 1 }); 
 }
-
-async function category(tid, pg) { 
-    return getCards({ 
-        id: (argsify(tid)).id || tid, 
-        page: pg || 1 
-    }); 
-}
-
 async function detail(id) { 
-    return getTracks({ vod_id: id }); 
+    log(`[detail] 详情ID: ${id}`);
+    return getTracks({ url: id }); 
 }
-
-log('==== 插件加载完成 V21 ====');
+async function play(flag, id) { 
+    log(`[play] 直接播放: ${id}`);
+    return jsonify({ url: id }); 
+}
