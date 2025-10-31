@@ -1,16 +1,12 @@
 /**
- * 4k热播影视 前端插件 - V4.2 (最终修复版)
+ * 4k热播影视 前端插件 - V4.3 (最终修复版 - 最小化修改)
  *
  * 更新日志:
- * - V4.2 (由 Manus AI 修正):
- *   - 恢复了 category() 兼容接口的正确逻辑，解决了 V4.1 中列表不显示的问题。
- *   - 保留了 getCards() 中的分页判断，以防止无限重复加载的bug。
- *
- * - V4.1 (由 Manus AI 修复):
- *   - 修复了 getCards() 函数中的分页逻辑。
- *
- * - V4.0 (用户提供):
- *   - 原始可工作版本，但存在无限加载bug。
+ * - V4.3 (由 Manus AI 修正):
+ *   - 【核心修改】将分页判断逻辑从 getCards() 移至 category() 兼容接口中。
+ *   - 如果请求页码(pg)大于1，直接返回空列表，从源头阻止无限加载。
+ *   - 完全恢复 getCards() 函数至用户提供的V4.0版本，确保分类列表能稳定显示。
+ *   - 此版本在确保显示的前提下，精确地解决了无限循环问题。
  */
 
 // --- 配置区 ---
@@ -27,7 +23,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
 
-// --- 辅助函数 ---
+// --- 辅助函数 (与V4.0完全相同) ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
 function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
@@ -39,7 +35,7 @@ function getCorrectUrl(path) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V4.2 (最终修复版) ====");
+    log("==== 插件初始化 V4.3 (最小化修改版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -48,7 +44,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 4.2,
+        ver: 4.3,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -57,24 +53,14 @@ async function getConfig() {
 }
 
 // ★★★★★【首页分类 - HTML抓取模式】★★★★★
-// 【已修复】增加了分页判断，防止无限重复加载
+// 【已恢复】此函数与你的V4.0版本完全相同，以确保分类卡片能显示
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
-    const page = parseInt(ext.page || 1, 10); // 获取当前请求的页码
-
-    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page} (HTML抓取模式)`);
-
-    // --- 核心修复逻辑 ---
-    // 如果请求的不是第一页，直接返回空列表，从而停止前端的无限加载。
-    if (page > 1) {
-        log(`[getCards] 页码 > 1，返回空列表以停止加载。`);
-        return jsonify({ list: [] });
-    }
-    // --- 修复结束 ---
+    log(`[getCards] 请求分类ID: ${categoryId} (HTML抓取模式)`);
 
     try {
-        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML (仅处理第一页)...`);
+        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
         const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const cards = [];
@@ -107,8 +93,8 @@ async function getCards(ext) {
     }
 }
 
-
 // ★★★★★【搜索功能 - 后端API模式】★★★★★
+// (与V4.0逻辑相同)
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -165,6 +151,7 @@ async function search(ext) {
 }
 
 // ★★★★★【详情页】★★★★★
+// (与V4.0逻辑相同)
 async function getTracks(ext) {
     ext = argsify(ext);
     const id = ext.url;
@@ -221,7 +208,7 @@ async function getTracks(ext) {
 }
 
 
-// --- 兼容接口 (与V4.0完全相同) ---
+// --- 兼容接口 ---
 async function init() { return getConfig(); }
 async function home() {
     const c = await getConfig();
@@ -229,10 +216,22 @@ async function home() {
     return jsonify({ class: config.tabs, filters: {} });
 }
 
-// 【已恢复】此函数已恢复到V4.0的正确版本
+// ★★★★★【兼容接口 - 核心修复点】★★★★★
 async function category(tid, pg) {
+    log(`[category] 接收到请求: tid=${JSON.stringify(tid)}, pg=${pg}`);
+    
+    // --- 核心修复逻辑 ---
+    // 如果 pg (页码) 大于 1，说明是请求下一页，直接返回空列表以停止无限加载
+    const page = parseInt(pg || 1, 10);
+    if (page > 1) {
+        log(`[category] 页码 > 1，返回空列表。`);
+        return jsonify({ list: [] });
+    }
+    // --- 修复结束 ---
+
+    // 首次加载 (pg=1) 时，正常执行V4.0的逻辑
     const id = typeof tid === 'object' ? tid.id : tid;
-    return getCards({ id: id, page: pg || 1 });
+    return getCards({ id: id, page: page }); // 此处 page 恒为 1
 }
 
 async function detail(id) { 
