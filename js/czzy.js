@@ -1,5 +1,5 @@
 /**
- * reboys.cn 前端插件 - V38-DebugFix (修复ID格式和首页推荐问题)
+ * reboys.cn 前端插件 - V39-SuperDebug (超级调试版)
  */
 
 // --- 配置区 ---
@@ -14,7 +14,7 @@ let homeCache = null;
 
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V38] ${msg}`;
+    const logMsg = `[reboys V39] ${msg}`;
     try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
 function argsify(ext) { 
@@ -25,7 +25,7 @@ function jsonify(obj) { return JSON.stringify(obj); }
 
 // --- 插件配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V38 ====");
+    log("==== 插件初始化 V39-SuperDebug ====");
     const CATEGORIES = [
         { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
         { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
@@ -36,17 +36,35 @@ async function getConfig() {
 
 // --- 首页/分类 ---
 async function getCards(ext) {
+    log(`[getCards] ===== 开始执行 =====`);
+    log(`[getCards] 收到参数: ${JSON.stringify(ext)}`);
+    
     ext = argsify(ext);
     const { id: categoryId } = ext;
+    
+    log(`[getCards] 分类ID: ${categoryId}`);
+    
     try {
         if (!homeCache) {
+            log(`[getCards] 缓存未命中，开始获取首页`);
             const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
             homeCache = data;
+            log(`[getCards] ✅ 首页数据已缓存`);
+        } else {
+            log(`[getCards] 使用缓存的首页数据`);
         }
+        
         const $ = cheerio.load(homeCache);
         const cards = [];
         const targetBlock = $(`.home .block[v-show="${categoryId} == navSelect"]`);
-        if (targetBlock.length === 0) return jsonify({ list: [] });
+        
+        log(`[getCards] 找到的block数量: ${targetBlock.length}`);
+        
+        if (targetBlock.length === 0) {
+            log(`[getCards] ⚠️ 未找到分类block，返回空列表`);
+            return jsonify({ list: [] });
+        }
+        
         targetBlock.find('a.item').each((_, element) => {
             const $item = $(element);
             const detailPath = $item.attr('href');
@@ -54,15 +72,21 @@ async function getCards(ext) {
             const imageUrl = $item.find('img').attr('src');
             if (detailPath && title) {
                 cards.push({
-                    vod_id: 'HOME_ITEM',  // ★★★ 修改：使用特殊标记，不用JSON
+                    vod_id: 'HOME_ITEM',
                     vod_name: title,
                     vod_pic: imageUrl || FALLBACK_PIC,
                     vod_remarks: '首页推荐'
                 });
             }
         });
-        return jsonify({ list: cards });
+        
+        log(`[getCards] ✅ 提取了 ${cards.length} 个卡片`);
+        const result = jsonify({ list: cards });
+        log(`[getCards] 返回数据长度: ${result.length} 字符`);
+        return result;
+        
     } catch (e) {
+        log(`[getCards] ❌ 异常: ${e.message}`);
         homeCache = null;
         return jsonify({ list: [] });
     }
@@ -70,96 +94,127 @@ async function getCards(ext) {
 
 // --- 搜索 ---
 async function search(ext) {
+    log(`[search] ===== 开始执行 =====`);
+    log(`[search] 收到参数: ${JSON.stringify(ext)}`);
+    
     ext = argsify(ext);
     const keyword = ext.text || '';
-    if (!keyword) return jsonify({ list: [] });
-    log(`[search] 搜索: "${keyword}"`);
+    
+    if (!keyword) {
+        log(`[search] ⚠️ 关键词为空`);
+        return jsonify({ list: [] });
+    }
+    
+    log(`[search] 搜索关键词: "${keyword}"`);
+    
     try {
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
+        log(`[search] 请求URL: ${url}`);
+        
         const fetchResult = await $fetch.get(url, { timeout: 45000 });
+        log(`[search] 后端响应: ${JSON.stringify(fetchResult).substring(0, 300)}`);
+        
         const response = argsify(fetchResult.data || fetchResult);
+        
         if (response.code !== 0 || !response.list) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
+        
         log(`[search] ✅ 返回 ${response.list.length} 条结果`);
+        
+        // 打印前3条结果的vod_id，用于调试
+        response.list.slice(0, 3).forEach((item, i) => {
+            log(`[search] 结果${i}: vod_id="${item.vod_id}", name="${item.vod_name}"`);
+        });
+        
         return jsonify({ list: response.list });
     } catch (e) {
-        log(`[search] 异常: ${e.message}`);
+        log(`[search] ❌ 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ getTracks - 修复ID解析和首页推荐问题 ★★★
+// ★★★ getTracks - 超级调试版 ★★★
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function getTracks(ext) {
-    // ★★★ 第一步：获取ID字符串 ★★★
+    log(`[getTracks] ========== 开始执行 ==========`);
+    log(`[getTracks] 收到原始参数: ${JSON.stringify(ext)}`);
+    log(`[getTracks] 参数类型: ${typeof ext}`);
+    
+    // 获取ID字符串
     let safeId = '';
     
-    // 处理各种可能的参数格式
     if (typeof ext === 'string') {
         safeId = ext;
-        log(`[getTracks] 收到字符串参数: "${safeId}"`);
+        log(`[getTracks] → 参数是字符串: "${safeId}"`);
     } else if (ext && typeof ext === 'object') {
         if (ext.vod_id) {
             safeId = ext.vod_id;
-            log(`[getTracks] 从对象提取vod_id: "${safeId}"`);
+            log(`[getTracks] → 从对象中提取vod_id: "${safeId}"`);
         } else {
-            log(`[getTracks] ❌ 对象中没有vod_id字段: ${JSON.stringify(ext)}`);
-            return jsonify({ list: [] });  // 静默返回空列表
+            log(`[getTracks] → 对象中没有vod_id，字段有: ${Object.keys(ext).join(', ')}`);
+            return jsonify({ list: [] });
         }
     } else {
-        log(`[getTracks] ❌ 未知参数类型: ${typeof ext}`);
+        log(`[getTracks] → 未知参数类型`);
         return jsonify({ list: [] });
     }
 
-    // ★★★ 第二步：检查是否是首页推荐 ★★★
+    // 检查是否是首页推荐
     if (safeId === 'HOME_ITEM') {
-        log(`[getTracks] 首页推荐，不处理`);
-        return jsonify({ list: [] });  // 返回空列表，APP不会显示任何内容
+        log(`[getTracks] → 这是首页推荐，返回空列表`);
+        return jsonify({ list: [] });
     }
 
-    // ★★★ 第三步：验证ID格式（必须包含@@@） ★★★
+    // 检查是否包含分隔符
     if (!safeId.includes('@@@')) {
-        log(`[getTracks] ❌ ID缺少分隔符: "${safeId}"`);
-        log(`[getTracks] 这可能是首页推荐或其他非搜索结果`);
-        return jsonify({ list: [] });  // 静默返回，不显示错误
+        log(`[getTracks] → ID不包含'@@@'分隔符`);
+        log(`[getTracks] → 可能是首页推荐或其他类型，返回空列表`);
+        return jsonify({ list: [] });
     }
 
-    // ★★★ 第四步：拆分ID ★★★
+    // 拆分ID
     const parts = safeId.split('@@@');
+    log(`[getTracks] → 拆分结果: ${parts.length} 部分`);
+    
     if (parts.length !== 2) {
-        log(`[getTracks] ❌ ID格式错误，拆分后不是2部分: ${parts.length}`);
-        log(`[getTracks] parts: ${JSON.stringify(parts)}`);
+        log(`[getTracks] → ❌ 拆分后不是2部分`);
+        parts.forEach((part, i) => {
+            log(`[getTracks]    部分${i}: "${part}"`);
+        });
         return jsonify({
             list: [{
                 title: '提示',
-                tracks: [{ name: '数据格式异常，请重新搜索', pan: '', ext: {} }]
+                tracks: [{ name: '数据格式异常', pan: '', ext: {} }]
             }]
         });
     }
 
     const simpleId = parts[0];
     const keyword = parts[1];
-    log(`[getTracks] ✅ ID解析成功 - 索引=${simpleId}, 关键词=${keyword}`);
+    log(`[getTracks] → ✅ 解析成功`);
+    log(`[getTracks]    索引: "${simpleId}"`);
+    log(`[getTracks]    关键词: "${keyword}"`);
 
-    // ★★★ 第五步：请求后端获取链接 ★★★
+    // 请求后端
     try {
         const url = `${BACKEND_URL}/get_links?id=${encodeURIComponent(simpleId)}&keyword=${encodeURIComponent(keyword)}`;
-        log(`[getTracks] 请求后端: ${url}`);
+        log(`[getTracks] → 请求后端: ${url}`);
         
         const fetchResult = await $fetch.get(url);
-        log(`[getTracks] 后端响应: ${JSON.stringify(fetchResult.data).substring(0, 200)}`);
+        log(`[getTracks] → 后端原始响应: ${JSON.stringify(fetchResult).substring(0, 500)}`);
         
         const response = argsify(fetchResult.data || fetchResult);
+        log(`[getTracks] → 解析后: success=${response.success}, links数量=${response.links ? response.links.length : 0}`);
 
         if (!response.success) {
-            log(`[getTracks] ❌ 后端返回失败: ${response.message}`);
+            log(`[getTracks] → ❌ 后端返回失败: ${response.message}`);
             throw new Error(response.message || '后端返回失败');
         }
 
         if (!response.links || response.links.length === 0) {
-            log(`[getTracks] ⚠️ 后端返回成功但无链接`);
+            log(`[getTracks] → ⚠️ 无可用链接`);
             return jsonify({
                 list: [{
                     title: '提示',
@@ -169,53 +224,46 @@ async function getTracks(ext) {
         }
 
         const links = response.links;
-        log(`[getTracks] ✅ 成功获取 ${links.length} 个链接`);
+        log(`[getTracks] → ✅ 获取到 ${links.length} 个链接`);
 
-        // ★★★ 第六步：转换为APP格式 ★★★
+        // 转换为按钮
         const tracks = links.map((linkData, index) => {
             const url = linkData.url || '';
             const password = linkData.password || '';
             
-            // 识别网盘类型
             let panType = '网盘';
-            if (linkData.type === 'quark' || url.includes('quark.cn')) {
-                panType = '夸克';
-            } else if (linkData.type === 'aliyun' || url.includes('aliyundrive.com')) {
-                panType = '阿里';
-            } else if (linkData.type === 'baidu' || url.includes('pan.baidu.com')) {
-                panType = '百度';
-            }
+            if (linkData.type === 'quark' || url.includes('quark.cn')) panType = '夸克';
+            else if (linkData.type === 'aliyun' || url.includes('aliyundrive.com')) panType = '阿里';
+            else if (linkData.type === 'baidu' || url.includes('pan.baidu.com')) panType = '百度';
             
-            // 构造按钮名称
             let buttonName = panType + '网盘';
             if (links.length > 1) buttonName += ' [' + (index + 1) + ']';
             if (password) buttonName += ' [' + password + ']';
             
-            log(`[getTracks] 按钮 ${index + 1}: ${buttonName} -> ${url}`);
+            log(`[getTracks] → 按钮${index + 1}: "${buttonName}" -> "${url}"`);
             
-            // 返回纯净格式
-            return { 
-                name: buttonName, 
-                pan: url,
-                ext: {}
-            };
+            return { name: buttonName, pan: url, ext: {} };
         });
 
-        log(`[getTracks] ✅ 成功生成 ${tracks.length} 个按钮`);
-        
-        return jsonify({
+        const result = {
             list: [{
                 title: '云盘资源',
                 tracks: tracks
             }]
-        });
+        };
+        
+        log(`[getTracks] → ✅ 成功生成 ${tracks.length} 个按钮`);
+        log(`[getTracks] → 返回数据: ${JSON.stringify(result)}`);
+        
+        return jsonify(result);
 
     } catch (e) {
-        log(`[getTracks] ❌ 异常: ${e.message}`);
+        log(`[getTracks] → ❌ 异常: ${e.message}`);
+        log(`[getTracks] → 堆栈: ${e.stack || '无'}`);
         return jsonify({
             list: [{
                 title: '错误',
-                tracks: [{ name: `获取失败: ${e.message}`, pan: '', ext: {} }]
+                tracks: [{ name: `失败: ${e.message}`, pan: '', ext: {} }]
             }]
         });
     }
@@ -231,17 +279,29 @@ async function play(flag, id) {
 }
 
 // --- 兼容接口 ---
-async function init() { return getConfig(); }
+async function init() { 
+    log(`[init] 被调用`);
+    return getConfig(); 
+}
+
 async function home() { 
+    log(`[home] 被调用`);
     const c = await getConfig(); 
     return jsonify({ class: JSON.parse(c).tabs }); 
 }
+
 async function category(tid, pg) { 
+    log(`[category] 被调用, tid=${JSON.stringify(tid)}, pg=${pg}`);
     return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); 
 }
+
 async function detail(id) { 
-    log(`[detail] 收到原始参数: ${JSON.stringify(id)}, 类型: ${typeof id}`);
-    return getTracks(id);
+    log(`[detail] ========== 被调用 ==========`);
+    log(`[detail] 参数: ${JSON.stringify(id)}`);
+    log(`[detail] 类型: ${typeof id}`);
+    const result = await getTracks(id);
+    log(`[detail] 返回数据长度: ${result.length} 字符`);
+    return result;
 }
 
-log('==== 插件加载完成 V38 ====');
+log('==== 插件加载完成 V39-SuperDebug ====');
