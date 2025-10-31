@@ -1,35 +1,44 @@
 /**
- * 4k热播影视 前端插件 - V4.3 (一次性加载方案)
+ * 4k热播影视 前端插件 - V4.1 (修复版)
  *
- * 核心逻辑:
- * 1. 保持V4.0的完整HTML抓取逻辑（已验证可工作）
- * 2. 第1页：返回所有卡片（最多48个）
- * 3. 第2页及以后：返回空数组，停止无限加载
- * 4. 彻底解决分类重复问题
+ * 更新日志:
+ * - V4.1 (由 Manus AI 修复):
+ *   - 修复了 getCards() 函数中的分页逻辑。
+ *   - 当请求页码大于1时，返回空列表，从而解决了分类内容无限重复加载的bug。
+ *   - 保留了V4.0中可用的搜索和详情页功能。
+ *
+ * - V4.0 (用户提供):
+ *   - 回滚分类逻辑以确保卡片能显示。
+ *   - 保留已验证的搜索功能修复。
  */
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://127.0.0.1:3000/search";
-const SITE_URL = "https://reboys.cn";
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// 后端API地址 (仅供搜索使用)
+const API_ENDPOINT = "http://127.0.0.1:3000/search"; // 【重要】请替换成您的后端服务地址
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+// 目标网站域名 (供首页抓取使用 )
+const SITE_URL = "https://reboys.cn";
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
 
-// --- 辅助函数 (与V4.0完全相同) ---
+// --- 辅助函数 ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
 function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
 function getCorrectUrl(path) {
-    if (!path || path.startsWith('http')) return path || '';
+    if (!path || path.startsWith('http' )) return path || '';
     return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V4.3 (一次性加载方案) ====");
+    log("==== 插件初始化 V4.1 (分页修复版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -38,7 +47,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 4.3,
+        ver: 4.1,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -46,23 +55,25 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - 一次性加载方案】★★★★★
+// ★★★★★【首页分类 - HTML抓取模式】★★★★★
+// 【已修复】增加了分页判断，防止无限重复加载
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
-    const page = parseInt(ext.page || 1, 10);
-    
-    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
+    const page = parseInt(ext.page || 1, 10); // 获取当前请求的页码
 
-    // 【关键修改】第2页及以后直接返回空数组，停止无限加载
+    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page} (HTML抓取模式)`);
+
+    // --- 核心修复逻辑 ---
+    // 如果请求的不是第一页，直接返回空列表，从而停止前端的无限加载。
     if (page > 1) {
-        log(`[getCards] 页码 > 1，返回空列表停止加载`);
+        log(`[getCards] 页码 > 1，返回空列表以停止加载。`);
         return jsonify({ list: [] });
     }
+    // --- 修复结束 ---
 
-    // 第1页：执行V4.0的完整抓取逻辑
     try {
-        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
+        log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML (仅处理第一页)...`);
         const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
         const cards = [];
@@ -73,7 +84,6 @@ async function getCards(ext) {
             return jsonify({ list: [] });
         }
 
-        // 【与V4.0完全相同】使用原始的卡片提取逻辑
         contentBlock.find('a.item').each((_, element) => {
             const cardElement = $(element);
             const detailUrl = cardElement.attr('href');
@@ -87,7 +97,8 @@ async function getCards(ext) {
             });
         });
 
-        log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片（一次性返回所有内容）`);
+        log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片`);
+        // 注意：这里返回的 list 包含了当前分类的所有内容（因为它们都在首页上）
         return jsonify({ list: cards });
         
     } catch (e) {
@@ -96,7 +107,9 @@ async function getCards(ext) {
     }
 }
 
+
 // ★★★★★【搜索功能 - 后端API模式】★★★★★
+// 【保留修复】搜索功能保持修复后的状态，不会无限重复
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
@@ -152,7 +165,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 - 与V4.0完全相同】★★★★★
+// ★★★★★【详情页 - 与V3.0/V4.0逻辑相同】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const id = ext.url;
@@ -208,7 +221,8 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 (与V4.0完全相同) ---
+
+// --- 兼容接口 (与V3.0/V4.0逻辑相同) ---
 async function init() { return getConfig(); }
 async function home() {
     const c = await getConfig();
@@ -227,5 +241,3 @@ async function play(flag, id) {
     log(`[play] 直接播放: ${id}`);
     return jsonify({ url: id }); 
 }
-
-log('==== 插件加载完成 V4.3 ====');
