@@ -2,9 +2,9 @@
  * 4k热播影视 前端插件 - V3.2 (修复分页重复问题)
  *
  * 核心改进:
- * 1. 首页只返回一次数据，后续分页返回空列表（因为首页HTML没有分页）
- * 2. 搜索结果也只返回一次，避免重复加载
- * 3. 使用标记防止重复加载
+ * 1. 首页只返回一次数据（page=1），后续分页返回空列表
+ * 2. 搜索结果也只返回一次（page=1），避免重复加载
+ * 3. 简化逻辑，移除了会导致切换分类无法显示的状态标记
  */
 
 // --- 配置区 ---
@@ -15,34 +15,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
 
-// ★★★ 新增：分页状态管理 ★★★
-const pageState = {
-    // 记录每个分类是否已加载过
-    categoryLoaded: {},
-    // 记录每个搜索关键词是否已加载过
-    searchLoaded: {},
-    
-    isCategoryLoaded(categoryId) {
-        return this.categoryLoaded[categoryId] === true;
-    },
-    
-    setCategoryLoaded(categoryId) {
-        this.categoryLoaded[categoryId] = true;
-    },
-    
-    isSearchLoaded(keyword) {
-        return this.searchLoaded[keyword] === true;
-    },
-    
-    setSearchLoaded(keyword) {
-        this.searchLoaded[keyword] = true;
-    },
-    
-    reset() {
-        this.categoryLoaded = {};
-        this.searchLoaded = {};
-    }
-};
+// ★★★ 移除了 pageState 状态管理（会导致分类切换问题）★★★
 
 // --- 辅助函数 ---
 function log(msg) { if (DEBUG) console.log(`[4k影视插件] ${msg}`); }
@@ -109,11 +82,7 @@ async function getCards(ext) {
         return jsonify({ list: [] });
     }
 
-    // ★★★ 可选：防止同一分类重复加载（如果App会重复调用page=1）★★★
-    if (pageState.isCategoryLoaded(categoryId)) {
-        log(`[getCards] ⚠️ 分类 ${categoryId} 已加载过，返回空列表防止重复`);
-        return jsonify({ list: [] });
-    }
+    // ★★★ 删除了重复加载检查，因为会导致切换分类时无法显示 ★★★
 
     try {
         log(`[getCards] 正在从 ${SITE_URL} 获取首页HTML...`);
@@ -147,8 +116,7 @@ async function getCards(ext) {
 
         log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片`);
         
-        // 标记该分类已加载
-        pageState.setCategoryLoaded(categoryId);
+        // ★★★ 不再标记已加载，允许重复访问 ★★★
         
         return jsonify({ list: cards });
         
@@ -176,11 +144,7 @@ async function search(ext) {
         return jsonify({ list: [] });
     }
 
-    // ★★★ 防止同一关键词重复搜索 ★★★
-    if (pageState.isSearchLoaded(searchText)) {
-        log(`[search] ⚠️ 关键词 "${searchText}" 已搜索过，返回空列表防止重复`);
-        return jsonify({ list: [] });
-    }
+    // ★★★ 删除了重复搜索检查，因为用户可能需要重新搜索 ★★★
 
     const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(searchText)}`;
     log(`[search] 正在请求后端API: ${requestUrl}`);
@@ -219,8 +183,7 @@ async function search(ext) {
 
         log(`[search] ✓ API成功返回并格式化 ${cards.length} 个卡片`);
         
-        // 标记该关键词已搜索
-        pageState.setSearchLoaded(searchText);
+        // ★★★ 不再标记已搜索，允许重复搜索 ★★★
         
         return jsonify({ list: cards });
 
