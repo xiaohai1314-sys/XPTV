@@ -1,10 +1,10 @@
 /**
- * 4k热播影视 前端插件 - V3.1 (防循环优化版)
+ * 4k热播影视 前端插件 - V3.2 (修复分页重复问题)
  *
  * 核心改进:
- * 1. 添加URL缓存机制，避免重复解析
- * 2. 改进链接类型判断逻辑
- * 3. 防止首页和搜索结果的无限循环
+ * 1. 首页只返回一次数据，后续分页返回空列表（因为首页HTML没有分页）
+ * 2. 搜索结果也只返回一次，避免重复加载
+ * 3. 使用标记防止重复加载
  */
 
 // --- 配置区 ---
@@ -15,32 +15,32 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
 
-// ★★★ 新增：缓存系统 ★★★
-const cache = {
-    data: {},
-    maxAge: 30 * 60 * 1000, // 缓存30分钟
+// ★★★ 新增：分页状态管理 ★★★
+const pageState = {
+    // 记录每个分类是否已加载过
+    categoryLoaded: {},
+    // 记录每个搜索关键词是否已加载过
+    searchLoaded: {},
     
-    set(key, value) {
-        this.data[key] = {
-            value: value,
-            timestamp: Date.now()
-        };
+    isCategoryLoaded(categoryId) {
+        return this.categoryLoaded[categoryId] === true;
     },
     
-    get(key) {
-        const item = this.data[key];
-        if (!item) return null;
-        
-        if (Date.now() - item.timestamp > this.maxAge) {
-            delete this.data[key];
-            return null;
-        }
-        
-        return item.value;
+    setCategoryLoaded(categoryId) {
+        this.categoryLoaded[categoryId] = true;
     },
     
-    clear() {
-        this.data = {};
+    isSearchLoaded(keyword) {
+        return this.searchLoaded[keyword] === true;
+    },
+    
+    setSearchLoaded(keyword) {
+        this.searchLoaded[keyword] = true;
+    },
+    
+    reset() {
+        this.categoryLoaded = {};
+        this.searchLoaded = {};
     }
 };
 
@@ -53,27 +53,20 @@ function getCorrectUrl(path) {
     return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-// ★★★ 新增：智能判断链接类型 ★★★
 function getLinkType(url) {
     if (!url) return 'unknown';
-    
-    // 最终网盘链接
     if (url.includes('pan.quark.cn') || 
         url.includes('pan.baidu.com') || 
         url.includes('aliyundrive.com') ||
         url.includes('www.alipan.com')) {
         return 'pan';
     }
-    
-    // 中间页链接 (reboys.cn的详情页)
     if (url.includes(SITE_URL) || url.startsWith('/s/')) {
         return 'middle';
     }
-    
     return 'unknown';
 }
 
-// ★★★ 新增：提取网盘名称 ★★★
 function getPanName(url) {
     if (url.includes('quark')) return '夸克网盘';
     if (url.includes('baidu')) return '百度网盘';
@@ -84,7 +77,7 @@ function getPanName(url) {
 // --- App 插件入口函数 ---
 
 async function getConfig() {
-    log("==== 插件初始化 V3.1 (防循环优化版) ====");
+    log("==== 插件初始化 V3.2 (修复分页重复) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -93,7 +86,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 3.1,
+        ver: 3.2,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -101,18 +94,25 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - HTML抓取模式】★★★★★
+// ★★★★★【首页分类 - 修复分页重复】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
-    log(`[getCards] 请求分类ID: ${categoryId}`);
+    const page = ext.page || 1;
+    
+    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page}`);
 
-    // 检查缓存
-    const cacheKey = `cards_${categoryId}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-        log(`[getCards] ✓ 使用缓存数据 (${cached.length}条)`);
-        return jsonify({ list: cached });
+    // ★★★ 关键修复：第2页及以后返回空列表 ★★★
+    // 因为首页HTML本身就没有分页，所以只返回第1页的数据
+    if (page > 1) {
+        log(`[getCards] ✓ 页码 > 1，返回空列表（首页无分页）`);
+        return jsonify({ list: [] });
+    }
+
+    // ★★★ 可选：防止同一分类重复加载（如果App会重复调用page=1）★★★
+    if (pageState.isCategoryLoaded(categoryId)) {
+        log(`[getCards] ⚠️ 分类 ${categoryId} 已加载过，返回空列表防止重复`);
+        return jsonify({ list: [] });
     }
 
     try {
@@ -132,7 +132,6 @@ async function getCards(ext) {
             const detailUrl = cardElement.attr('href');
             const fullUrl = getCorrectUrl(detailUrl);
             
-            // ★★★ 关键改进：标记数据来源 ★★★
             cards.push({
                 vod_id: fullUrl,
                 vod_name: cardElement.find('p').text().trim(),
@@ -140,14 +139,17 @@ async function getCards(ext) {
                 vod_remarks: '',
                 ext: { 
                     url: fullUrl,
-                    source: 'html', // 标记来源
-                    type: 'middle'   // 标记类型
+                    source: 'html',
+                    type: 'middle'
                 }
             });
         });
 
         log(`[getCards] ✓ 成功提取 ${cards.length} 个卡片`);
-        cache.set(cacheKey, cards); // 存入缓存
+        
+        // 标记该分类已加载
+        pageState.setCategoryLoaded(categoryId);
+        
         return jsonify({ list: cards });
         
     } catch (e) {
@@ -156,22 +158,28 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【搜索功能 - 后端API模式】★★★★★
+// ★★★★★【搜索功能 - 修复分页重复】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const searchText = ext.text || '';
-    log(`[search] 搜索关键词: "${searchText}"`);
+    const page = ext.page || 1;
+    
+    log(`[search] 搜索关键词: "${searchText}", 页码: ${page}`);
 
     if (!searchText) {
         return jsonify({ list: [] });
     }
 
-    // 检查缓存
-    const cacheKey = `search_${searchText}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-        log(`[search] ✓ 使用缓存数据 (${cached.length}条)`);
-        return jsonify({ list: cached });
+    // ★★★ 关键修复：搜索结果也只返回一次 ★★★
+    if (page > 1) {
+        log(`[search] ✓ 页码 > 1，返回空列表（搜索API无分页）`);
+        return jsonify({ list: [] });
+    }
+
+    // ★★★ 防止同一关键词重复搜索 ★★★
+    if (pageState.isSearchLoaded(searchText)) {
+        log(`[search] ⚠️ 关键词 "${searchText}" 已搜索过，返回空列表防止重复`);
+        return jsonify({ list: [] });
     }
 
     const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(searchText)}`;
@@ -196,7 +204,6 @@ async function search(ext) {
             if (!item || !item.title || !item.links || item.links.length === 0) return null;
             const finalUrl = item.links[0].url;
             
-            // ★★★ 关键改进：标记数据来源 ★★★
             return {
                 vod_id: finalUrl,
                 vod_name: item.title,
@@ -204,14 +211,17 @@ async function search(ext) {
                 vod_remarks: item.datetime ? new Date(item.datetime).toLocaleDateString() : '未知时间',
                 ext: { 
                     url: finalUrl,
-                    source: 'api',  // 标记来源
-                    type: 'pan'     // 标记类型：已经是网盘链接
+                    source: 'api',
+                    type: 'pan'
                 }
             };
         }).filter(card => card !== null);
 
         log(`[search] ✓ API成功返回并格式化 ${cards.length} 个卡片`);
-        cache.set(cacheKey, cards); // 存入缓存
+        
+        // 标记该关键词已搜索
+        pageState.setSearchLoaded(searchText);
+        
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -220,7 +230,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 - 智能处理模式（防循环优化）】★★★★★
+// ★★★★★【详情页 - 智能处理模式】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = ext.url;
@@ -232,15 +242,6 @@ async function getTracks(ext) {
 
     log(`[getTracks] 处理URL: ${url}`);
     
-    // ★★★ 关键改进：优先检查缓存 ★★★
-    const cacheKey = `tracks_${url}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-        log(`[getTracks] ✓ 使用缓存的解析结果`);
-        return jsonify({ list: cached });
-    }
-
-    // 判断链接类型
     const linkType = getLinkType(url);
     log(`[getTracks] 链接类型: ${linkType}`);
 
@@ -248,17 +249,16 @@ async function getTracks(ext) {
     if (linkType === 'pan') {
         log(`[getTracks] ✓ 检测到最终网盘链接，直接使用`);
         
-        const result = [{
-            title: '点击播放',
-            tracks: [{
-                name: getPanName(url),
-                pan: url,
-                ext: {}
+        return jsonify({
+            list: [{
+                title: '点击播放',
+                tracks: [{
+                    name: getPanName(url),
+                    pan: url,
+                    ext: {}
+                }]
             }]
-        }];
-        
-        cache.set(cacheKey, result); // 缓存结果
-        return jsonify({ list: result });
+        });
     }
 
     // --- 情况B: 中间页链接，需要解析 ---
@@ -268,7 +268,6 @@ async function getTracks(ext) {
         try {
             // 从URL提取关键词
             let keyword = url.split('/').pop().replace('.html', '');
-            // 如果是完整URL，尝试提取路径部分
             if (url.includes(SITE_URL)) {
                 keyword = url.replace(SITE_URL, '').split('/').pop().replace('.html', '');
             }
@@ -291,32 +290,30 @@ async function getTracks(ext) {
             const finalUrl = firstResult.links[0].url;
             log(`[getTracks] ✓ 成功解析出网盘链接: ${finalUrl}`);
             
-            const result = [{
-                title: firstResult.title || '解析成功',
-                tracks: [{
-                    name: getPanName(finalUrl),
-                    pan: finalUrl,
-                    ext: {}
+            return jsonify({
+                list: [{
+                    title: firstResult.title || '解析成功',
+                    tracks: [{
+                        name: getPanName(finalUrl),
+                        pan: finalUrl,
+                        ext: {}
+                    }]
                 }]
-            }];
-            
-            cache.set(cacheKey, result); // 缓存结果
-            return jsonify({ list: result });
+            });
 
         } catch (e) {
             log(`[getTracks] ❌ 解析失败: ${e.message}`);
             
-            // 提供手动打开方案
-            const fallbackResult = [{
-                title: '自动解析失败',
-                tracks: [{
-                    name: '点击手动打开',
-                    pan: url,
-                    ext: {}
+            return jsonify({
+                list: [{
+                    title: '自动解析失败',
+                    tracks: [{
+                        name: '点击手动打开',
+                        pan: url,
+                        ext: {}
+                    }]
                 }]
-            }];
-            
-            return jsonify({ list: fallbackResult });
+            });
         }
     }
 
