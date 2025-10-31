@@ -1,10 +1,10 @@
 /**
- * 4k热播影视 前端插件 - V4.4 (最终版 - 绝对遵从案例)
+ * 4k热播影视 前端插件 - V4.5 (最终版 - 完全复制成功案例架构)
  *
  * 核心原则:
- * 1. 兼容接口(home, category)与用户可工作的V3.0版本完全一致。
- * 2. getCards()函数100%模仿“找盘资源”案例的成功实现，包括页码处理和缓存逻辑。
- * 3. 保留已验证正常的搜索功能修复。
+ * 1. 架构完全统一：home() -> category() -> getCards() 的调用流程与“找盘资源”案例完全一致。
+ * 2. getCards() 函数内部完整实现了“缓存+切片”逻辑，不再依赖外部函数进行分页。
+ * 3. home() 和 category() 与用户可工作的V3.0版本完全一致，确保调用链正确。
  */
 
 // --- 配置区 ---
@@ -30,7 +30,7 @@ function getCorrectUrl(path) {
 
 // --- App 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V4.4 (绝对遵从案例) ====");
+    log("==== 插件初始化 V4.5 (完全复制成功案例架构) ====");
     const CUSTOM_CATEGORIES = [
         { name: '短剧', ext: { id: 1 } },
         { name: '电影', ext: { id: 2 } },
@@ -39,7 +39,7 @@ async function getConfig() {
         { name: '综艺', ext: { id: 5 } },
     ];
     return jsonify({
-        ver: 4.4,
+        ver: 4.5,
         title: '4k热播影视',
         site: SITE_URL,
         cookie: '',
@@ -47,21 +47,20 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【首页分类 - 100%模仿“找盘”案例】★★★★★
+// ★★★★★【首页分页 - 100%复制“找盘”案例架构】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const categoryId = ext.id;
-    // 【已修正】完全按照“找盘”案例的方式处理页码
     const page = ext.page || 1; 
 
-    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page} (找盘案例模式)`);
+    log(`[getCards] 请求分类ID: ${categoryId}, 页码: ${page} (找盘案例架构)`);
 
     try {
         const cacheKey = `category_${categoryId}`;
         let allCards = cardsCache[cacheKey];
 
         if (!allCards) {
-            log(`[getCards] 缓存未命中 for ${cacheKey}，正在抓取HTML...`);
+            log(`[getCards] 缓存未命中 for ${cacheKey}，正在抓取并解析全量数据...`);
             const { data } = await $fetch.get(SITE_URL, { headers: { 'User-Agent': UA } });
             const $ = cheerio.load(data);
             
@@ -83,13 +82,13 @@ async function getCards(ext) {
                 log(`[getCards] ✓ 缓存了 ${allCards.length} 个卡片`);
             } else {
                 log(`[getCards] ❌ 找不到分类区块`);
-                cardsCache[cacheKey] = [];
+                cardsCache[cacheKey] = []; // 即使找不到也缓存空数组，防止重复请求
             }
         } else {
-            log(`[getCards] ✓ 缓存命中 for ${cacheKey}`);
+            log(`[getCards] ✓ 缓存命中 for ${cacheKey}, 总数: ${allCards.length}`);
         }
 
-        // --- 分页切片 ---
+        // --- 内部进行分页切片 ---
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
@@ -110,12 +109,10 @@ async function search(ext) {
     const page = parseInt(ext.page || 1, 10);
 
     if (page > 1) {
-        log(`[search] 请求页码 > 1，返回空列表以停止无限加载。`);
         return jsonify({ list: [] });
     }
     if (!searchText) return jsonify({ list: [] });
 
-    log(`[search] 搜索关键词: "${searchText}"`);
     const requestUrl = `${API_ENDPOINT}?keyword=${encodeURIComponent(searchText)}`;
     try {
         const { data: jsonString } = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
@@ -133,7 +130,6 @@ async function search(ext) {
                 ext: { url: item.links[0].url }
             };
         }).filter(Boolean);
-        log(`[search] ✓ API成功返回并格式化 ${cards.length} 个卡片`);
         return jsonify({ list: cards });
     } catch (e) {
         log(`[search] ❌ 异常: ${e.message}`);
@@ -188,7 +184,11 @@ async function getTracks(ext) {
 }
 
 // --- 兼容接口 (与V3.0完全相同) ---
-async function init() { return getConfig(); }
+async function init() { 
+    // 【新增】每次启动时清空缓存，确保数据最新
+    cardsCache = {};
+    return getConfig(); 
+}
 
 async function home() {
     const c = await getConfig();
