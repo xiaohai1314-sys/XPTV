@@ -1,22 +1,25 @@
 /**
- * reboys.cn 前端插件 - V39-Diag-NumericID (数字ID诊断版)
+ * reboys.cn 前端插件 - 最终版 V3 (全局关键词配合)
  * 
- * 核心诊断：
- * - 测试纯数字字符串作为 vod_id 是否能被APP框架正确传递。
- * - getTracks 函数将明确显示它接收到的ID是什么，或者是否为空。
+ * 架构说明:
+ * - search: **全局存储**搜索关键词。将资源的完整标题作为 vod_id 传递给APP。
+ * - detail/getTracks: 从**全局变量**中获取关键词，从 ext.vod_id 中获取标题，然后请求后端 /get_links。
+ * - 此方案解决了“标题唯一性”和“关键词缺失”的问题，是最简洁的实现。
  */
 
 // --- 配置区 ---
-const BACKEND_URL = "http://192.168.1.7:3000"; // 确保这是您后端服务的正确地址
+const BACKEND_URL = "http://192.168.10.107:3000"; // ★★★ 请务必修改为您的后端服务器地址 ★★★
 const SITE_URL = "https://reboys.cn";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const FALLBACK_PIC = "https://reboys.cn/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png";
 const DEBUG = true;
 const cheerio = createCheerio( );
 
+// ★★★ 核心改动：全局变量存储搜索关键词 ★★★
+let currentKeyword = ""; 
+
 // --- 辅助函数 ---
 function log(msg) { 
-    const logMsg = `[reboys V39] ${msg}`;
+    const logMsg = `[reboys Final V3] ${msg}`;
     try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); }
 }
 function argsify(ext) { 
@@ -27,21 +30,25 @@ function jsonify(obj) { return JSON.stringify(obj); }
 
 // --- 插件入口与配置 ---
 async function getConfig() {
-    log("==== 插件初始化 V39-Diag-NumericID ====");
-    return jsonify({ ver: 1, title: 'reboys搜(V39-Diag)', site: SITE_URL, tabs: [] });
+    log("==== 插件初始化 Final V3 (全局关键词配合) ====");
+    const CATEGORIES = [
+        { name: '短剧', ext: { id: 1 } }, { name: '电影', ext: { id: 2 } },
+        { name: '电视剧', ext: { id: 3 } }, { name: '动漫', ext: { id: 4 } },
+        { name: '综艺', ext: { id: 5 } }
+    ];
+    return jsonify({ ver: 1, title: 'reboys搜(Final V3)', site: SITE_URL, tabs: CATEGORIES });
 }
 
-// --- 首页/分类 (为避免干扰，暂时返回空) ---
-async function getCards(ext) {
-    return jsonify({ list: [] });
-}
-
-// --- 搜索函数 (保持不变) ---
+// --- search函数：存储关键词，并使用标题作为 vod_id ---
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
     if (!keyword) return jsonify({ list: [] });
-    log(`[search] 搜索: "${keyword}"`);
+    
+    // ★★★ 核心改动 ①：存储关键词到全局变量 ★★★
+    currentKeyword = keyword;
+    log(`[search] 搜索: "${keyword}", 关键词已存入全局变量`);
+    
     try {
         const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(keyword)}`;
         const fetchResult = await $fetch.get(url, { timeout: 45000 });
@@ -49,69 +56,76 @@ async function search(ext) {
         if (response.code !== 0 || !response.list) {
             throw new Error(`后端返回错误: ${response.message || '未知错误'}`);
         }
+        
+        // ★ 核心逻辑：后端已经将 vod_id 设置为资源的完整标题。前端直接返回。
+        log(`[search] ✅ 后端返回 ${response.list.length} 条结果`);
         return jsonify({ list: response.list });
     } catch (e) {
+        log(`[search] 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★★★ getTracks函数 - 诊断版：明确显示收到的ID ★★★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// --- getTracks函数：从全局变量中获取关键词 ---
 async function getTracks(ext) {
-    const receivedId = ext.vod_id || '';
-    log(`[getTracks] 诊断开始，收到的原始 vod_id 是: "${receivedId}"`);
+    // 接收到的 ext.vod_id 就是资源的完整标题
+    const title = ext.vod_id || ''; 
+    
+    // ★★★ 核心改动 ②：从全局变量中获取关键词 ★★★
+    const keyword = currentKeyword; 
+    
+    log(`[getTracks] 开始请求详情, 标题=${title}, 关键词=${keyword}`);
 
-    // 1. 最关键的诊断步骤：检查ID是否为空
-    if (!receivedId) {
-        log(`[getTracks] 诊断结果：收到的ID为空值！`);
-        return jsonify({ list: [{ title: '诊断报告', tracks: [{ name: '错误：插件收到的ID为空', pan: '' }] }] });
+    if (!title || !keyword) {
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: `参数错误：标题或关键词缺失 (T:${title}, K:${keyword})`, pan: '' }] }] });
     }
 
-    // 2. 如果ID不是空，我们把它显示出来，并尝试用它请求后端
-    log(`[getTracks] 诊断结果：收到非空ID，值为 "${receivedId}"。现在尝试用它请求后端...`);
     try {
-        const url = `${BACKEND_URL}/resolve_id?id=${encodeURIComponent(receivedId)}`;
-        const fetchResult = await $fetch.get(url);
+        // 1. 请求后端接口，传递标题和关键词
+        const url = `${BACKEND_URL}/get_links?id=${encodeURIComponent(title)}&keyword=${encodeURIComponent(keyword)}`;
+        const fetchResult = await $fetch.get(url, { timeout: 60000 }); // 延长超时时间应对 Puppeteer 启动
         const response = argsify(fetchResult.data || fetchResult);
 
         if (!response.success || !response.links) {
-            // 如果后端解析失败，也把收到的ID显示出来，方便排查
-            const errorMsg = `后端解析失败: ${response.message || '未知错误'}. (发送给后端的ID是: ${receivedId})`;
-            throw new Error(errorMsg);
+            throw new Error(`后端/get_links接口错误: ${response.message || '未知错误'}`);
         }
 
         const links = response.links;
+        log(`[getTracks] ✅ 成功从后端获取到 ${links.length} 个链接`);
+
         if (links.length === 0) {
             return jsonify({ list: [{ title: '云盘', tracks: [{ name: '暂无有效链接', pan: '' }] }] });
         }
 
-        // 3. 渲染链接
+        // 2. 生成按钮 (逻辑与之前保持一致)
         const tracks = links.map((linkData, index) => {
-            const url = linkData.url || '';
-            const password = linkData.password || '';
+            const url = linkData.url;
+            const password = linkData.password;
             let panType = '网盘';
-            if (linkData.type === 'quark' || url.includes('quark.cn')) panType = '夸克';
-            else if (linkData.type === 'aliyun' || url.includes('aliyundrive.com')) panType = '阿里';
-            else if (linkData.type === 'baidu' || url.includes('pan.baidu.com')) panType = '百度';
+            if (linkData.type === 'quark' || (url && url.includes('quark.cn'))) panType = '夸克';
+            else if (linkData.type === 'aliyun' || (url && url.includes('aliyundrive.com'))) panType = '阿里';
+            else if (linkData.type === 'baidu' || (url && url.includes('pan.baidu.com'))) panType = '百度';
+            
             const buttonName = `${panType}网盘 ${index + 1}`;
-            const nameWithPassword = password ? `${buttonName}（密码:${password}）` : buttonName;
-            return { name: nameWithPassword, pan: url, ext: {} };
+            const finalPan = password ? `${url}（访问码：${password}）` : url;
+
+            return { name: buttonName, pan: finalPan, ext: {} };
         });
 
+        // 3. 返回标准 list/tracks 结构
         return jsonify({ list: [{ title: '云盘', tracks: tracks }] });
 
     } catch (e) {
         log(`[getTracks] 异常: ${e.message}`);
-        return jsonify({ list: [{ title: '诊断报告', tracks: [{ name: `请求后端时出错: ${e.message}`, pan: '' }] }] });
+        // 返回更明确的错误信息
+        return jsonify({ list: [{ title: '云盘', tracks: [{ name: `获取链接失败: ${e.message}`, pan: '' }] }] });
     }
 }
 
-// --- 兼容接口 ---
+// --- 兼容接口 (保持不变) ---
 async function init() { return getConfig(); }
-async function home() { return jsonify({ class: [] }); }
-async function category(tid, pg) { return getCards({ id: (argsify(tid)).id || tid, page: pg || 1 }); }
-async function detail(id) { return getTracks({ vod_id: id }); }
-async function play(flag, id) { return jsonify({ parse: 0, url: id }); }
+async function home() { return jsonify({ class: [] }); } // 简化首页
+async function category(tid, pg) { return jsonify({ list: [] }); } // 简化分类
+async function detail(id) { return getTracks({ vod_id: id }); } // 确保将 id 传递给 getTracks
 
-log('==== 插件加载完成 V39-Diag-NumericID ====');
+log('==== 插件加载完成 Final V3 ====');
