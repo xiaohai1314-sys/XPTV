@@ -20,7 +20,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const cheerio = createCheerio();
 const FALLBACK_PIC = `${SITE_URL}/uploads/image/20250924/cd8b1274c64e589c3ce1c94a5e2873f2.png`;
 const DEBUG = true;
-const PAGE_SIZE = 12; // 每页显示12个卡片
+const PAGE_SIZE = 48; // 每页显示12个卡片
 
 // --- 全局缓存 ---
 let cardsCache = {}; // 用于缓存每个分类的所有卡片数据
