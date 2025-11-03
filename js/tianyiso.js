@@ -1,5 +1,5 @@
 /**
- * 天逸搜插件 - V1.0
+ * 天逸搜插件 - V1.1
  * 网站：https://tianyiso.com (天翼云盘搜索)
  * 功能：仅搜索功能，无分类浏览
  */
@@ -89,40 +89,57 @@ async function search(ext) {
         const { data } = await $fetch.get(searchUrl, { 
             headers: { 'User-Agent': UA } 
         });
+        
+        log(`[search] 获取到HTML数据，长度: ${data.length}`);
         const $ = cheerio.load(data);
         const cards = [];
 
-        // 解析搜索结果卡片
-        $('van-row').each((_, element) => {
-            const row = $(element);
-            const link = row.find('a');
-            const card = row.find('van-card');
-            
-            if (!link.length || !card.length) return;
-
+        // 从HTML文档分析，搜索结果在 <van-row> 标签中，每个结果包含 <a> 标签
+        // 结构: <van-row><a href="/s/xxx"><van-col><van-card>...</van-card></van-col></a></van-row>
+        
+        $('a[href^="/s/"]').each((index, element) => {
+            const link = $(element);
             const href = link.attr('href');
-            if (!href || !href.startsWith('/s/')) return;
+            
+            if (!href) return;
 
             // 提取资源ID
             const resourceId = href.replace('/s/', '');
             
-            // 提取标题（移除高亮标签）
-            const titleElement = card.find('template[\\#title] div');
-            let title = titleElement.text().trim();
-            // 清理HTML标签
-            title = title.replace(/<[^>]*>/g, '');
+            // 提取标题 - 在 template#title 里的 div 中
+            let title = '';
+            const titleDiv = link.find('div[style*="font-size:medium"]');
+            if (titleDiv.length > 0) {
+                // 获取文本内容，移除 span 标签
+                title = titleDiv.text().trim();
+            }
+            
+            if (!title) {
+                log(`[search] 第 ${index + 1} 个结果标题为空，跳过`);
+                return;
+            }
 
-            // 提取底部信息（时间、格式、大小）
-            const bottomInfo = card.find('template[\\#bottom] div').text().trim();
+            // 提取底部信息
+            let remarks = '';
+            const bottomDiv = link.find('div[style*="padding-bottom"]');
+            if (bottomDiv.length > 0) {
+                remarks = bottomDiv.text().trim();
+            }
             
             // 提取缩略图
-            const thumb = card.attr('thumb') || '/img/folder.png';
+            const thumbImg = link.find('img');
+            let thumb = '/img/folder.png';
+            if (thumbImg.length > 0) {
+                thumb = thumbImg.attr('src') || '/img/folder.png';
+            }
+
+            log(`[search] 解析第 ${index + 1} 个结果: ${title}`);
 
             cards.push({
                 vod_id: resourceId,
                 vod_name: title,
                 vod_pic: getCorrectUrl(thumb),
-                vod_remarks: bottomInfo,
+                vod_remarks: remarks,
                 ext: { 
                     url: getCorrectUrl(href),
                     resourceId: resourceId
@@ -141,6 +158,7 @@ async function search(ext) {
 
     } catch (e) {
         log(`[search] ❌ 发生异常: ${e.message}`);
+        log(`[search] 错误堆栈: ${e.stack}`);
         return jsonify({ list: [] });
     }
 }
