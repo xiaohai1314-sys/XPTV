@@ -1,5 +1,5 @@
 /**
- * 天逸搜插件 - V1.1
+ * 天逸搜插件 - V1.2
  * [span_0](start_span)网站：https://tianyiso.com (天翼云盘搜索)[span_0](end_span)
  * [span_1](start_span)[span_2](start_span)功能：仅搜索功能，无分类浏览[span_1](end_span)[span_2](end_span)
  */
