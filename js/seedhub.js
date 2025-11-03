@@ -1,4 +1,5 @@
 const cheerio = createCheerio()
+// 保持手机版的User-Agent，这是能直接获取到网盘链接的关键
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
@@ -69,6 +70,7 @@ async function getCards(ext) {
 	})
 }
 
+// ====================【修改后的函数】====================
 async function getTracks(ext) {
 	ext = argsify(ext);
 	let tracks = [];
@@ -76,40 +78,51 @@ async function getTracks(ext) {
 
 	const { data } = await $fetch.get(url, {
 		headers: {
-			'User-Agent': UA,
+			'User-Agent': UA, // 确保使用手机UA
 		},
 	});
 	
 	const $ = cheerio.load(data);
-	// 修正：移除h1文本中可能包含的'# '前缀
-	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
-	const playlist = $('.pan-links');
 	
-	if (playlist.length === 0 || playlist.find('li').length === 0) {
-		$utils.toastError('没有网盘资源'); 
+	// 标题的获取逻辑保持不变
+	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
+	
+	// **【核心修正】**
+	// 目标链接现在位于 <div class="text-center"> 下的 <a> 标签中
+	const playlistContainer = $('.text-center');
+	const links = playlistContainer.find('a');
+
+	if (links.length === 0) {
+		$utils.toastError('没有找到网盘资源'); 
 		return jsonify({ list: [] }); 
 	}
 	
-	playlist.find('li a').each((_, link) => {
-		const href = $(link).attr('data-link');
-		const originalTitle = $(link).attr('title');
+	links.each((_, link) => {
+		// 链接地址现在直接从 href 属性获取
+		const href = $(link).attr('href');
+		// 链接的标题文本作为原始标题
+		const originalTitle = $(link).text().trim();
+		
+		// 检查href是否存在且不为空
+		if (!href) {
+			return; // 跳过无效的链接
+		}
+
 		let newName = originalTitle;
 
-		// 从原始标题中提取关键词作为提示词
+		// 从原始标题中提取关键词的逻辑可以保持不变
 		const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 		
 		if (specMatch) {
-			// 将提取到的关键词数组用空格连接成一个字符串
 			const tags = specMatch.join(' ');
-			// 将帖子名和提取的标签组合成新的名称
 			newName = `${postTitle} [${tags}]`;
 		} else {
-			// 如果没有匹配到关键词，则使用帖子名作为基础名称
-			newName = postTitle;
+			// 如果没有匹配到关键词，则使用 "帖子标题 [资源]" 的格式
+			newName = `${postTitle} [${originalTitle}]`;
 		}
 
 		tracks.push({
-			name: newName, // 使用包含提示词的新名称
+			name: newName,
 			pan: href, 
 		});
 	});
@@ -123,6 +136,7 @@ async function getTracks(ext) {
 		],
 	});
 }
+// =======================================================
 
 async function getPlayinfo(ext) {
 	ext = argsify(ext)
