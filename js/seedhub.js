@@ -70,7 +70,7 @@ async function getCards(ext) {
 	})
 }
 
-// ====================【修改后的函数】====================
+// ====================【二次修正后的函数】====================
 async function getTracks(ext) {
 	ext = argsify(ext);
 	let tracks = [];
@@ -85,46 +85,67 @@ async function getTracks(ext) {
 	const $ = cheerio.load(data);
 	
 	// 标题的获取逻辑保持不变
-	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
+	const postTitle = $('h1, h2').first().text().replace(/^#\s*/, '').split(' ')[0].trim();
 	
-	// **【核心修正】**
-	// 目标链接现在位于 <div class="text-center"> 下的 <a> 标签中
-	const playlistContainer = $('.text-center');
-	const links = playlistContainer.find('a');
+	// **【核心修正 V2】**
+	// 目标链接现在位于 <a class="direct-pan"> 标签中
+	// 并且链接地址是通过 JavaScript 变量 panLink 注入到 href 属性的
+	// 我们的爬虫无法执行 JavaScript，所以需要从 script 标签中提取 panLink 变量的值。
+	
+	let panLink = '';
+	
+	// 1. 查找包含 panLink 变量的 <script> 标签
+	$('script').each((i, el) => {
+		const scriptContent = $(el).html();
+		if (scriptContent && scriptContent.includes('var panLink =')) {
+			// 2. 使用正则表达式提取 panLink 的值
+			const match = scriptContent.match(/var panLink = "(.*?)";/);
+			if (match && match[1]) {
+				panLink = match[1];
+				return false; // 找到后跳出循环
+			}
+		}
+	});
 
-	if (links.length === 0) {
-		$utils.toastError('没有找到网盘资源'); 
+	if (!panLink) {
+		$utils.toastError('未能从页面中提取到网盘链接变量。'); 
 		return jsonify({ list: [] }); 
 	}
 	
-	links.each((_, link) => {
-		// 链接地址现在直接从 href 属性获取
-		const href = $(link).attr('href');
-		// 链接的标题文本作为原始标题
-		const originalTitle = $(link).text().trim();
-		
-		// 检查href是否存在且不为空
-		if (!href) {
-			return; // 跳过无效的链接
+	// 3. 从 panLink 中提取网盘名称（可选，但能让名称更友好）
+	let panName = '网盘资源';
+	const keyNames = {
+      "baidu": "百度网盘",
+      "quark": "夸克网盘",
+      "ali": "阿里云盘",
+      "xunlei": "迅雷",
+    };
+	
+	for (const key in keyNames) {
+		if (panLink.includes(key)) {
+			panName = keyNames[key];
+			break;
 		}
+	}
 
-		let newName = originalTitle;
-
-		// 从原始标题中提取关键词的逻辑可以保持不变
-		const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
-		
-		if (specMatch) {
-			const tags = specMatch.join(' ');
-			newName = `${postTitle} [${tags}]`;
-		} else {
-			// 如果没有匹配到关键词，则使用 "帖子标题 [资源]" 的格式
-			newName = `${postTitle} [${originalTitle}]`;
+	// 4. 提取码逻辑（仅针对百度网盘）
+	let extractCode = '';
+	if (panLink.includes("baidu") && panLink.includes("?pwd=")) {
+		const match = panLink.match(/\?pwd=(.*)/);
+		if (match && match[1]) {
+			extractCode = ` (提取码: ${match[1]})`;
 		}
-
-		tracks.push({
-			name: newName,
-			pan: href, 
-		});
+	}
+	
+	// 5. 构造 tracks 数组
+	let newName = `${postTitle} [${panName}]${extractCode}`;
+	
+	// 尝试从标题中提取规格信息，如果 panLink 中没有，则不提取
+	// 这一步可以简化，直接使用 panName 作为资源名
+	
+	tracks.push({
+		name: newName,
+		pan: panLink, 
 	});
 	
 	return jsonify({
