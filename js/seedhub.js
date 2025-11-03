@@ -70,7 +70,7 @@ async function getCards(ext) {
 	})
 }
 
-// ====================【二次修正后的函数】====================
+// ====================【第三次修正后的函数】====================
 async function getTracks(ext) {
 	ext = argsify(ext);
 	let tracks = [];
@@ -82,37 +82,25 @@ async function getTracks(ext) {
 		},
 	});
 	
-	const $ = cheerio.load(data);
-	
-	// 标题的获取逻辑保持不变
-	const postTitle = $('h1, h2').first().text().replace(/^#\s*/, '').split(' ')[0].trim();
-	
-	// **【核心修正 V2】**
-	// 目标链接现在位于 <a class="direct-pan"> 标签中
-	// 并且链接地址是通过 JavaScript 变量 panLink 注入到 href 属性的
-	// 我们的爬虫无法执行 JavaScript，所以需要从 script 标签中提取 panLink 变量的值。
+	// 直接在整个页面文本中搜索 panLink 变量，避免 Cheerio 解析 script 标签内容的问题
+	const panLinkRegex = /var panLink = "(.*?)";/;
+	const match = data.match(panLinkRegex);
 	
 	let panLink = '';
-	
-	// 1. 查找包含 panLink 变量的 <script> 标签
-	$('script').each((i, el) => {
-		const scriptContent = $(el).html();
-		if (scriptContent && scriptContent.includes('var panLink =')) {
-			// 2. 使用正则表达式提取 panLink 的值
-			const match = scriptContent.match(/var panLink = "(.*?)";/);
-			if (match && match[1]) {
-				panLink = match[1];
-				return false; // 找到后跳出循环
-			}
-		}
-	});
+	if (match && match[1]) {
+		panLink = match[1];
+	}
 
 	if (!panLink) {
-		$utils.toastError('未能从页面中提取到网盘链接变量。'); 
+		$utils.toastError('未能从页面中提取到网盘链接变量。请检查网站结构是否再次变化。'); 
 		return jsonify({ list: [] }); 
 	}
 	
-	// 3. 从 panLink 中提取网盘名称（可选，但能让名称更友好）
+	// 使用 Cheerio 解析标题
+	const $ = cheerio.load(data);
+	const postTitle = $('h1, h2').first().text().replace(/^#\s*/, '').split(' ')[0].trim();
+	
+	// 提取网盘名称（可选，但能让名称更友好）
 	let panName = '网盘资源';
 	const keyNames = {
       "baidu": "百度网盘",
@@ -128,20 +116,17 @@ async function getTracks(ext) {
 		}
 	}
 
-	// 4. 提取码逻辑（仅针对百度网盘）
+	// 提取码逻辑（仅针对百度网盘）
 	let extractCode = '';
 	if (panLink.includes("baidu") && panLink.includes("?pwd=")) {
-		const match = panLink.match(/\?pwd=(.*)/);
-		if (match && match[1]) {
-			extractCode = ` (提取码: ${match[1]})`;
+		const matchPwd = panLink.match(/\?pwd=(.*)/);
+		if (matchPwd && matchPwd[1]) {
+			extractCode = ` (提取码: ${matchPwd[1]})`;
 		}
 	}
 	
-	// 5. 构造 tracks 数组
+	// 构造 tracks 数组
 	let newName = `${postTitle} [${panName}]${extractCode}`;
-	
-	// 尝试从标题中提取规格信息，如果 panLink 中没有，则不提取
-	// 这一步可以简化，直接使用 panName 作为资源名
 	
 	tracks.push({
 		name: newName,
