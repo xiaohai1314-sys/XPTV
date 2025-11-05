@@ -1,11 +1,8 @@
-// --- [修改] 只保留 searchCache ---
-const searchCache = {};
-
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-	ver: '1.3.2', // 版本号更新
+	ver: 1,
 	title: 'SeedHub',
 	site: 'https://www.seedhub.cc',
 	tabs: [
@@ -36,11 +33,10 @@ const appConfig = {
 		
 	],
 }
-async function getConfig(   ) {
+async function getConfig(  ) {
 	return jsonify(appConfig)
 }
 
-// [修改] getCards 函数，移除缓存，但保留分页解析
 async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
@@ -69,19 +65,30 @@ async function getCards(ext) {
 		})
 	})
 
-    // --- 分页解析与返回 (无缓存) ---
+    // 【🛠️ 分页修复 - 采用页码计算法】
     let pagecount = 0;
-    const pageLinks = $('.page-nav a[href*="?page="]');
-    if (pageLinks.length > 0) {
-        const pageMatch = pageLinks.last().attr('href').match(/page=(\d+)/);
-        if (pageMatch && pageMatch[1]) pagecount = parseInt(pageMatch[1], 10);
+    // 遍历所有页码链接 (span.page 内部的 a 标签)
+    $('span.page a').each((_, link) => {
+        const p = parseInt($(link).text().trim());
+        if (!isNaN(p)) {
+            // 找到最大的页码，即为总页数
+            pagecount = Math.max(pagecount, p);
+        }
+    });
+
+    if (cards.length > 0 && pagecount === 0) {
+        // 如果有内容，但没有其他页码链接 (说明只有一页结果)，则总页数设为 1
+        pagecount = 1;
+    } else if (cards.length === 0) {
+        // 如果列表为空，则强制认定总页数为当前页（并停止加载）
+        pagecount = page;
     }
-    if (pagecount === 0 && cards.length > 0) pagecount = 1;
+
 
 	return jsonify({
 		list: cards,
-        page: parseInt(page, 10),
-        pagecount: pagecount,
+        pagecount: pagecount, // 明确告诉调用方总页数
+        total: pagecount > 0 ? 99999 : 0, // 随便给个大数字，让框架知道需要分页请求
 	})
 }
 
@@ -124,6 +131,7 @@ async function getTracks(ext) {
 
 				// --- 自定义命名逻辑 ---
 				let newName = originalTitle;
+                // [修改处] 在正则表达式中加入了 '合集' 和 '次时代'
 				const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 				
 				if (specMatch) {
@@ -171,25 +179,13 @@ async function getPlayinfo(ext) {
 	return jsonify({ urls: [ext.url] })
 }
 
-// [修改] search 函数，保留高级缓存拦截
 async function search(ext) {
 	ext = argsify(ext)
 	let cards = []
 
-	let text = ext.text || '';
+	let text = encodeURIComponent(ext.text)
 	let page = ext.page || 1
-
-    // --- 缓存及拦截逻辑 ---
-    if (searchCache.keyword !== text) {
-        searchCache.keyword = text;
-        searchCache.pagecount = 0;
-    }
-    if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
-        return jsonify({ list: [], page: page, pagecount: searchCache.pagecount });
-    }
-    // --- 逻辑结束 ---
-
-	let url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`
+	let url = `${appConfig.site}/s/${text}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
 		headers: {
@@ -214,20 +210,28 @@ async function search(ext) {
 		})
 	})
 
-    // --- 分页解析与返回 ---
+    // 【🔥 搜索修复 - 采用页码计算法】
     let pagecount = 0;
-    const pageLinks = $('.page-nav a[href*="?page="]');
-    if (pageLinks.length > 0) {
-        const pageMatch = pageLinks.last().attr('href').match(/page=(\d+)/);
-        if (pageMatch && pageMatch[1]) pagecount = parseInt(pageMatch[1], 10);
-    }
-    if (pagecount === 0 && cards.length > 0) pagecount = 1;
+    // 遍历所有页码链接 (span.page 内部的 a 标签)
+    $('span.page a').each((_, link) => {
+        const p = parseInt($(link).text().trim());
+        if (!isNaN(p)) {
+            // 找到最大的页码，即为总页数
+            pagecount = Math.max(pagecount, p);
+        }
+    });
 
-    searchCache.pagecount = pagecount; // 更新缓存中的总页数
+    if (cards.length > 0 && pagecount === 0) {
+        // 如果有内容，但没有其他页码链接 (说明只有一页结果)，则总页数设为 1
+        pagecount = 1;
+    } else if (cards.length === 0) {
+        // 如果列表为空，则强制认定总页数为当前页（并停止加载）
+        pagecount = page;
+    }
 
 	return jsonify({
 		list: cards,
-        page: parseInt(page, 10),
-        pagecount: pagecount,
+        pagecount: pagecount, // 明确告诉调用方总页数
+        total: pagecount > 0 ? 99999 : 0, // 随便给个大数字，让框架知道需要分页请求
 	})
 }
