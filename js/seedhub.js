@@ -109,7 +109,7 @@ async function getTracks(ext) {
 
 				// --- 保留你自定义的命名逻辑 ---
 				let newName = originalTitle;
-				const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
+				const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|次世代|合集|原盘|REMUX|[\d\.]+G[B]?)/ig);
 				
 				if (specMatch) {
 					const tags = specMatch.join(' ');
