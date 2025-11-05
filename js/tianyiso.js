@@ -1,129 +1,262 @@
 const cheerio = createCheerio()
 const CryptoJS = createCryptoJS()
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
-// ⚠️ 【关键修改】指向你的本地代理服务器地址
-const PROXY_SERVER_URL = "http://192.168.1.7:3000/api"; 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
-const headers = {
-  'User-Agent': UA,
+let appConfig = {
+    ver: 1,
+    title: '廠長',
+    site: 'https://www.czzymovie.com',
 }
-
-const appConfig = {
-  ver: 3.0,
-  title: "天逸搜 (本地代理)",
-  site: PROXY_SERVER_URL,
-  tabs: [{
-    name: '请确保本地服务器已运行',
-    ext: {
-      url: '/'
-    },
-  }]
-}
-
-// --- 辅助函数 ---
-
-function argsify(ext) { 
-    return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {});
-}
-
-function jsonify(data) { 
-    return JSON.stringify(data);
-}
-
-// --- 插件兼容接口 ---
 
 async function getConfig() {
-  return jsonify(appConfig)
+    let config = appConfig
+    config.tabs = await getTabs()
+    return jsonify(config)
+}
+
+async function getTabs() {
+    let list = []
+    let ignore = ['关于', '公告', '官方', '备用', '群', '地址', '求片']
+    function isIgnoreClassName(className) {
+        return ignore.some((element) => className.includes(element))
+    }
+
+    const { data } = await $fetch.get(appConfig.site, {
+        headers: {
+            'User-Agent': UA,
+        },
+    })
+    const $ = cheerio.load(data)
+
+    let allClass = $('ul.submenu_mi > li > a')
+    allClass.each((i, e) => {
+        const name = $(e).text()
+        const href = $(e).attr('href')
+        const isIgnore = isIgnoreClassName(name)
+        if (isIgnore) return
+
+        list.push({
+            name,
+            ext: {
+                url: appConfig.site + href,
+            },
+        })
+    })
+
+    return list
 }
 
 async function getCards(ext) {
-  return jsonify({
-    list: [],
-  })
+    ext = argsify(ext)
+    let cards = []
+    let { page = 1, url } = ext
+
+    if (page > 1) {
+        url += `/page/${page}`
+    }
+
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+        },
+    })
+
+    const $ = cheerio.load(data)
+
+    $('.bt_img.mi_ne_kd.mrb ul > li').each((_, element) => {
+        const href = $(element).find('a').attr('href')
+        const title = $(element).find('img').attr('alt')
+        const cover = $(element).find('img').attr('data-original')
+        const subTitle = $(element).find('.jidi span').text()
+        const hdinfo = $(element).find('.hdinfo span').text()
+        cards.push({
+            vod_id: href,
+            vod_name: title,
+            vod_pic: cover,
+            vod_remarks: subTitle || hdinfo,
+            ext: {
+                url: href,
+            },
+        })
+    })
+
+    return jsonify({
+        list: cards,
+    })
 }
 
-/**
- * 【修改】getTracks 直接调用代理 API 获取最终链接和密码
- */
 async function getTracks(ext) {
-  const { url } = argsify(ext) // url 现在是 http://localhost:3000/api/getTracks...
-  
-  // 构造代理 API 的 URL，传入 tianyiso 的原始详情页 URL
-  // 注意：Node.js 服务器要求传入 tianyiso 的完整 URL，所以这里重新构造一下。
-  const tianyisoDetailUrl = url.replace(PROXY_SERVER_URL + '/getTracks?url=', '').replace(PROXY_SERVER_URL, 'https://www.tianyiso.com');
+    ext = argsify(ext)
+    let tracks = []
+    let url = ext.url
 
-  const proxyApiUrl = `${PROXY_SERVER_URL}/getTracks?url=${encodeURIComponent(tianyisoDetailUrl)}`;
-  
-  try {
-      // 插件现在只负责发起对代理服务器的请求
-      const response = await $fetch.get(proxyApiUrl, {
-          headers,
-          timeout: 8000 // 增加超时时间，等待Node.js服务器处理
-      });
-      
-      return response.data; // 假设服务器返回了 App 期望的 JSON 格式数据
-      
-  } catch (e) {
-      console.log(`[getTracks] 代理请求失败: ${e.message}`);
-      return jsonify({
-          list: [{
-              title: "代理服务连接失败",
-              tracks: [{
-                  name: `请检查代理服务是否运行`,
-                  pan: tianyisoDetailUrl,
-              }]
-          }]
-      });
-  }
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+        },
+    })
+
+    const $ = cheerio.load(data)
+
+    $('.paly_list_btn a').each((_, e) => {
+        const name = $(e).text()
+        const href = $(e).attr('href')
+        tracks.push({
+            name: `${name}`,
+            pan: '',
+            ext: {
+                url: href,
+            },
+        })
+    })
+
+    const panlist = $('.ypbt_down_list')
+    if (panlist) {
+        panlist.find('ul li').each((_, e) => {
+            const name = $(e).find('a').text().trim()
+            const href = $(e).find('a').attr('href')
+            if (!/ali|quark|115|uc/.test(href)) return
+            tracks.push({
+                name: name,
+                pan: href,
+            })
+        })
+    }
+
+    // $utils.toastInfo('不能看的在群裡回報')
+
+    return jsonify({
+        list: [
+            {
+                title: '默认分组',
+                tracks,
+            },
+        ],
+    })
 }
 
 async function getPlayinfo(ext) {
-  return jsonify({
-    urls: [],
-  })
+    ext = argsify(ext)
+    const url = ext.url
+
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+        },
+    })
+    let playurl
+
+    try {
+        const $ = cheerio.load(data)
+
+        // 1
+        const jsurl = $('iframe').attr('src')
+        if (jsurl) {
+            let headers = {
+                'user-agent': UA,
+            }
+            if (jsurl.includes('player-v2')) {
+                headers['sec-fetch-dest'] = 'iframe'
+                headers['sec-fetch-mode'] = 'navigate'
+                headers['referer'] = `${appConfig.site}/`
+            }
+
+            const jsres = await $fetch.get(jsurl, { headers: headers })
+            const $2 = cheerio.load(jsres.data)
+            const scripts = $2('script')
+            if (scripts.length - 2 > 0) {
+                let code = scripts.eq(scripts.length - 2).text()
+
+                if (code.includes('var player')) {
+                    let player = code.match(/var player = "(.*?)"/)
+                    let rand = code.match(/var rand = "(.*?)"/)
+
+                    function decrypt(text, key, iv, type) {
+                        let key_value = CryptoJS.enc.Utf8.parse(key || 'PBfAUnTdMjNDe6pL')
+                        let iv_value = CryptoJS.enc.Utf8.parse(iv || 'sENS6bVbwSfvnXrj')
+                        let content
+                        if (type) {
+                            content = CryptoJS.AES.encrypt(text, key_value, {
+                                iv: iv_value,
+                                mode: CryptoJS.mode.CBC,
+                                padding: CryptoJS.pad.Pkcs7,
+                            })
+                        } else {
+                            content = CryptoJS.AES.decrypt(text, key_value, {
+                                iv: iv_value,
+                                padding: CryptoJS.pad.Pkcs7,
+                            }).toString(CryptoJS.enc.Utf8)
+                        }
+                        return content
+                    }
+
+                    let content = JSON.parse(decrypt(player[1], 'VFBTzdujpR9FWBhe', rand[1]))
+                    $print(JSON.stringify(content))
+                    playurl = content.url
+                } else {
+                    let data = code.split('"data":"')[1].split('"')[0]
+                    let encrypted = data.split('').reverse().join('')
+                    let temp = ''
+                    for (let i = 0x0; i < encrypted.length; i = i + 0x2) {
+                        temp += String.fromCharCode(parseInt(encrypted[i] + encrypted[i + 0x1], 0x10))
+                    }
+                    playurl = temp.substring(0x0, (temp.length - 0x7) / 0x2) + temp.substring((temp.length - 0x7) / 0x2 + 0x7)
+                }
+            }
+        } else {
+            // 2
+            const script = $('script:contains(window.wp_nonce)')
+            if (script.length > 0) {
+                let code = script.eq(0).text()
+                let group = code.match(/(var.*)eval\((\w*\(\w*\))\)/)
+                const md5 = CryptoJS
+                const result = eval(group[1] + group[2])
+                playurl = result.match(/url:.*?['"](.*?)['"]/)[1]
+            }
+        }
+    } catch (error) {
+        $print(error)
+    }
+
+    return jsonify({ urls: [playurl], headers: [{ 'User-Agent': UA }] })
 }
 
-/**
- * 【修改】search 直接调用代理 API 获取搜索结果
- */
 async function search(ext) {
-  ext = argsify(ext)
-  let text = encodeURIComponent(ext.text)
-  let page = ext.page || 1
+    ext = argsify(ext)
+    let cards = []
 
-  // 调用代理服务器的搜索接口
-  const proxyApiUrl = `${PROXY_SERVER_URL}/search?k=${text}&page=${page}`;
-  
-  try {
-      // 插件现在只负责发起对代理服务器的请求
-      const response = await $fetch.get(proxyApiUrl, {
-        headers,
-        timeout: 8000 // 增加超时时间，等待Node.js服务器处理
-      })
-      
-      return response.data; // 假设服务器返回了 App 期望的 JSON 格式数据
+    let text = encodeURIComponent(ext.text)
+    let page = ext.page || 1
+    let url = `${appConfig.site}/daoyongjiek0shibushiyoubing?q=${text}$f=_all&p=${page}`
 
-  } catch (e) {
-      console.log(`[search] 代理请求失败 (超时/网络错误): ${e.message}`)
-      return jsonify({
-          list: [],
-      })
-  }
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+        },
+    })
+
+    const $ = cheerio.load(data)
+
+    $('div.bt_img > ul li').each((_, element) => {
+        const href = $(element).find('a').attr('href')
+        const title = $(element).find('img.thumb').attr('alt')
+        const cover = $(element).find('img.thumb').attr('data-original')
+        const subTitle = $(element).find('.jidi span').text()
+        const hdinfo = $(element).find('.hdinfo .qb').text()
+        cards.push({
+            vod_id: href,
+            vod_name: title,
+            vod_pic: cover,
+            vod_remarks: subTitle || hdinfo,
+            url: href,
+            ext: {
+                url: href,
+            },
+        })
+    })
+
+    return jsonify({
+        list: cards,
+    })
 }
-
-// --- 兼容接口 (保留) ---
-
-async function init() { return getConfig(); }
-async function home() { 
-    const c = await getConfig();
-    const config = JSON.parse(c);
-    return jsonify({ class: config.tabs, filters: {} }); 
-}
-async function category(tid, pg) { return jsonify({ list: [] }); }
-async function detail(id) { 
-    // detail 接口应该返回 getTracks 需要的 url
-    // 我们这里构造一个假的 URL，让 getTracks 知道要用这个路径去调用代理 API
-    return getTracks({ url: `https://www.tianyiso.com${id}` }); 
-}
-async function play(flag, id) { return jsonify({ url: id }); }
