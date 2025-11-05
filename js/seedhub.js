@@ -69,7 +69,6 @@ async function getCards(ext) {
 	})
 }
 
-// --- [START] FINAL MODIFIED FUNCTION ---
 async function getTracks(ext) {
 	ext = argsify(ext);
 	const detailUrl = ext.url;
@@ -107,9 +106,10 @@ async function getTracks(ext) {
 			if (match && match[1]) {
 				const finalPanUrl = match[1];
 
-				// --- 保留你自定义的命名逻辑 ---
+				// --- 自定义命名逻辑 ---
 				let newName = originalTitle;
-				const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|次世代|合集|原盘|REMUX|[\d\.]+G[B]?)/ig);
+                // [修改处] 在正则表达式中加入了 '合集' 和 '次时代'
+				const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 				
 				if (specMatch) {
 					const tags = specMatch.join(' ');
@@ -121,13 +121,13 @@ async function getTracks(ext) {
 
 				return {
 					name: newName,
-					pan: finalPanUrl, // 使用成功提取到的最终网盘链接
+					pan: finalPanUrl,
 				};
 			}
 		} catch (error) {
 			console.log(`解析链接 "${originalTitle}" 失败: ${error.message}`);
 		}
-		return null; // 解析失败返回 null
+		return null;
 	});
 
 	// 等待所有解析完成
@@ -142,13 +142,12 @@ async function getTracks(ext) {
 	return jsonify({
 		list: [
 			{
-				title: postTitle, // 使用帖子标题作为分组名
+				title: postTitle,
 				tracks,
 			},
 		],
 	});
 }
-// --- [END] FINAL MODIFIED FUNCTION ---
 
 async function getPlayinfo(ext) {
 	ext = argsify(ext)
