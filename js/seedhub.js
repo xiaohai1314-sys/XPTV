@@ -65,9 +65,16 @@ async function getCards(ext) {
 		})
 	})
 
-    // 【🛠️ 分类页修复】判断是否有下一页链接 (span.next > a)
-    const hasNextPageLink = $('span.next > a').length > 0;
-    const lastPage = !hasNextPageLink;
+    // 【🛠️ 修正分页判断】
+    // 1. 尝试使用分页链接判断 (如果存在 a 标签，就认为有下一页)
+    const hasNextPageLink = $('span.next a').length > 0;
+    let lastPage = !hasNextPageLink;
+
+    if (cards.length === 0) {
+        // 2. 【最终保险】如果当前页没有抓到任何卡片，强制认定为最后一页。
+        // 这是最可靠的停止信号。
+        lastPage = true;
+    }
 
 	return jsonify({
 		list: cards,
@@ -193,12 +200,18 @@ async function search(ext) {
 		})
 	})
 
-    // 【🔥 搜索修复】使用准确的选择器判断是否存在“下一页”的链接
-    const hasNextPageLink = $('span.next > a').length > 0;
-    const lastPage = !hasNextPageLink;
+    // 【🔥 修正搜索分页判断】
+    // 1. 尝试使用分页链接判断 (如果存在 a 标签，就认为有下一页)
+    const hasNextPageLink = $('span.next a').length > 0;
+    let lastPage = !hasNextPageLink;
+
+    if (cards.length === 0) {
+        // 2. 【最终保险】如果当前页没有抓到任何卡片，强制认定为最后一页。
+        lastPage = true;
+    }
 
 	return jsonify({
 		list: cards,
         last: lastPage, // 告诉调用方是否是最后一页
 	})
-} 
+}
