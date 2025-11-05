@@ -1,12 +1,8 @@
-// 全局搜索缓存对象
-const searchCache = {};
-
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-	// 版本号，方便管理更新
-	ver: '1.1.0',
+	ver: 1,
 	title: 'SeedHub',
 	site: 'https://www.seedhub.cc',
 	tabs: [
@@ -41,25 +37,24 @@ async function getConfig(  ) {
 	return jsonify(appConfig)
 }
 
-// [MODIFIED] getCards 函数，已加入分页修复
 async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
 	let { page = 1, id } = ext
-	const url = appConfig.site + id + `?page=${page}`
+	const url =appConfig.site + id + `?page=${page}`
 	const { data } = await $fetch.get(url, {
-		headers: {
-			"User-Agent": UA,
-		},
-	});
+    headers: {
+		"User-Agent": UA,
+  	  },
+});
 	
 	const $ = cheerio.load(data)
 	const videos = $('.cover')
 	videos.each((_, e) => {
-		const href = $(e).find('a').attr('href')
-		const title = $(e).find('a img').attr('alt')
-		const cover = $(e).find('a img').attr('src')
-		cards.push({
+	const href = $(e).find('a').attr('href')
+	const title = $(e).find('a img').attr('alt')
+	const cover = $(e).find('a img').attr('src')
+	cards.push({
 			vod_id: href,
 			vod_name: title,
 			vod_pic: cover,
@@ -70,35 +65,21 @@ async function getCards(ext) {
 		})
 	})
 
-	// --- 分页逻辑 ---
-	let pagecount = 0;
-	const pageLinks = $('.page-nav a[href*="?page="]');
-	if (pageLinks.length > 0) {
-		const lastPageLink = pageLinks.last();
-		const lastPageHref = lastPageLink.attr('href');
-		const pageMatch = lastPageHref.match(/page=(\d+)/);
-		if (pageMatch && pageMatch[1]) {
-			pagecount = parseInt(pageMatch[1], 10);
-		}
-	}
-	if (pagecount === 0 && cards.length > 0) {
-		pagecount = 1;
-	}
+    // 【🛠️ 分类页修复】判断是否有下一页链接 (span.next > a)
+    const hasNextPageLink = $('span.next > a').length > 0;
+    const lastPage = !hasNextPageLink;
 
 	return jsonify({
 		list: cards,
-		page: parseInt(page, 10),
-		pagecount: pagecount,
-		limit: videos.length,
-		total: 0
+        last: lastPage, // 告诉调用方是否是最后一页
 	})
 }
 
-// [MODIFIED] getTracks 函数，已修复网盘链接获取
 async function getTracks(ext) {
 	ext = argsify(ext);
 	const detailUrl = ext.url;
 
+	// 1. 获取详情页 HTML
 	const { data: detailHtml } = await $fetch.get(detailUrl, {
 		headers: { 'User-Agent': UA },
 	});
@@ -111,22 +92,29 @@ async function getTracks(ext) {
 		return jsonify({ list: [] }); 
 	}
 
+	// 提取帖子主标题，用于后续命名
 	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
 
+	// 2. 并行处理所有网盘链接的解析
 	const trackPromises = panLinkElements.get().map(async (link) => {
 		const intermediateUrl = appConfig.site + $(link).attr('href');
 		const originalTitle = $(link).attr('title') || $(link).text().trim();
 		
 		try {
+			// 3. 获取中间页的 HTML
 			const { data: intermediateHtml } = await $fetch.get(intermediateUrl, {
 				headers: { 'User-Agent': UA },
 			});
 
+			// 4. 使用正则表达式从 HTML 文本中直接提取 panLink
 			const match = intermediateHtml.match(/var panLink = "([^"]+)"/);
 			
 			if (match && match[1]) {
 				const finalPanUrl = match[1];
+
+				// --- 自定义命名逻辑 ---
 				let newName = originalTitle;
+                // [修改处] 在正则表达式中加入了 '合集' 和 '次时代'
 				const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 				
 				if (specMatch) {
@@ -135,6 +123,7 @@ async function getTracks(ext) {
 				} else {
 					newName = postTitle;
 				}
+				// --- 自定义命名逻辑结束 ---
 
 				return {
 					name: newName,
@@ -147,6 +136,7 @@ async function getTracks(ext) {
 		return null;
 	});
 
+	// 等待所有解析完成
 	const resolvedTracks = await Promise.all(trackPromises);
 	const tracks = resolvedTracks.filter(track => track !== null);
 
@@ -172,25 +162,13 @@ async function getPlayinfo(ext) {
 	return jsonify({ urls: [ext.url] })
 }
 
-// [MODIFIED] search 函数，已加入分页修复和缓存功能
 async function search(ext) {
 	ext = argsify(ext)
-	let text = ext.text || '';
-	let page = ext.page || 1;
-
-    // 1. 生成缓存 Key
-    const cacheKey = `${text}_${page}`;
-
-    // 2. 检查缓存是否存在
-    if (searchCache[cacheKey]) {
-        console.log(`[CACHE] Hit for search: ${cacheKey}`);
-        return jsonify(searchCache[cacheKey]); // 命中缓存，直接返回
-    }
-
-    console.log(`[CACHE] Miss for search: ${cacheKey}. Fetching from network...`);
-	
 	let cards = []
-	let url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`
+
+	let text = encodeURIComponent(ext.text)
+	let page = ext.page || 1
+	let url = `${appConfig.site}/s/${text}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
 		headers: {
@@ -201,10 +179,10 @@ async function search(ext) {
 	const $ = cheerio.load(data)
 	const videos = $('.cover')
 	videos.each((_, e) => {
-		const href = $(e).find('a').attr('href')
-		const title = $(e).find('a img').attr('alt')
-		const cover = $(e).find('a img').attr('src')
-		cards.push({
+	const href = $(e).find('a').attr('href')
+	const title = $(e).find('a img').attr('alt')
+	const cover = $(e).find('a img').attr('src')
+	cards.push({
 			vod_id: href,
 			vod_name: title,
 			vod_pic: cover,
@@ -215,33 +193,12 @@ async function search(ext) {
 		})
 	})
 
-	// --- 分页逻辑 ---
-	let pagecount = 0;
-	const pageLinks = $('.page-nav a[href*="?page="]');
-	if (pageLinks.length > 0) {
-		const lastPageLink = pageLinks.last();
-		const lastPageHref = lastPageLink.attr('href');
-		const pageMatch = lastPageHref.match(/page=(\d+)/);
-		if (pageMatch && pageMatch[1]) {
-			pagecount = parseInt(pageMatch[1], 10);
-		}
-	}
-	if (pagecount === 0 && cards.length > 0) {
-		pagecount = 1;
-	}
+    // 【🔥 搜索修复】使用准确的选择器判断是否存在“下一页”的链接
+    const hasNextPageLink = $('span.next > a').length > 0;
+    const lastPage = !hasNextPageLink;
 
-    // 3. 准备要返回的数据对象
-	const result = {
+	return jsonify({
 		list: cards,
-		page: parseInt(page, 10),
-		pagecount: pagecount,
-		limit: videos.length,
-		total: 0
-	};
-
-    // 4. 将结果存入缓存
-    searchCache[cacheKey] = result;
-
-    // 5. 返回结果
-	return jsonify(result);
-}
+        last: lastPage, // 告诉调用方是否是最后一页
+	})
+} 
