@@ -33,7 +33,7 @@ const appConfig = {
 		
 	],
 }
-async function getConfig( ) {
+async function getConfig(  ) {
 	return jsonify(appConfig)
 }
 
@@ -69,12 +69,12 @@ async function getCards(ext) {
 	})
 }
 
-// --- [START] MODIFIED FUNCTION ---
+// --- [START] FINAL MODIFIED FUNCTION ---
 async function getTracks(ext) {
 	ext = argsify(ext);
 	const detailUrl = ext.url;
 
-	// 1. 获取详情页的 HTML
+	// 1. 获取详情页 HTML
 	const { data: detailHtml } = await $fetch.get(detailUrl, {
 		headers: { 'User-Agent': UA },
 	});
@@ -83,14 +83,17 @@ async function getTracks(ext) {
 	const panLinkElements = $('.pan-links li a');
 	
 	if (panLinkElements.length === 0) {
-		$utils.toastError('没有找到网盘资源条目'); 
+		$utils.toastError('没有网盘资源条目'); 
 		return jsonify({ list: [] }); 
 	}
-	
-	// 2. 使用 Promise.all 并行处理所有网盘链接的解析
+
+	// 提取帖子主标题，用于后续命名
+	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
+
+	// 2. 并行处理所有网盘链接的解析
 	const trackPromises = panLinkElements.get().map(async (link) => {
 		const intermediateUrl = appConfig.site + $(link).attr('href');
-		const title = $(link).attr('title') || $(link).text().trim();
+		const originalTitle = $(link).attr('title') || $(link).text().trim();
 		
 		try {
 			// 3. 获取中间页的 HTML
@@ -103,20 +106,32 @@ async function getTracks(ext) {
 			
 			if (match && match[1]) {
 				const finalPanUrl = match[1];
+
+				// --- 保留你自定义的命名逻辑 ---
+				let newName = originalTitle;
+				const specMatch = originalTitle.match(/(\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
+				
+				if (specMatch) {
+					const tags = specMatch.join(' ');
+					newName = `${postTitle} [${tags}]`;
+				} else {
+					newName = postTitle;
+				}
+				// --- 自定义命名逻辑结束 ---
+
 				return {
-					name: title,
-					pan: finalPanUrl, // 成功提取到最终的网盘链接
+					name: newName,
+					pan: finalPanUrl, // 使用成功提取到的最终网盘链接
 				};
 			}
 		} catch (error) {
-			console.log(`解析链接 "${title}" 失败: ${error.message}`);
+			console.log(`解析链接 "${originalTitle}" 失败: ${error.message}`);
 		}
 		return null; // 解析失败返回 null
 	});
 
 	// 等待所有解析完成
 	const resolvedTracks = await Promise.all(trackPromises);
-	// 过滤掉解析失败的 (null)
 	const tracks = resolvedTracks.filter(track => track !== null);
 
 	if (tracks.length === 0) {
@@ -127,13 +142,13 @@ async function getTracks(ext) {
 	return jsonify({
 		list: [
 			{
-				title: '网盘资源', 
+				title: postTitle, // 使用帖子标题作为分组名
 				tracks,
 			},
 		],
 	});
 }
-// --- [END] MODIFIED FUNCTION ---
+// --- [END] FINAL MODIFIED FUNCTION ---
 
 async function getPlayinfo(ext) {
 	ext = argsify(ext)
