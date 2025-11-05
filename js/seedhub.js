@@ -1,8 +1,11 @@
+// --- [修改] 只保留 searchCache ---
+const searchCache = {};
+
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-	ver: 1,
+	ver: '1.3.2', // 版本号更新
 	title: 'SeedHub',
 	site: 'https://www.seedhub.cc',
 	tabs: [
@@ -33,10 +36,11 @@ const appConfig = {
 		
 	],
 }
-async function getConfig(  ) {
+async function getConfig(   ) {
 	return jsonify(appConfig)
 }
 
+// [修改] getCards 函数，移除缓存，但保留分页解析
 async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
@@ -65,20 +69,19 @@ async function getCards(ext) {
 		})
 	})
 
-    // 【🛠️ 修正分页判断】
-    // 1. 尝试使用分页链接判断 (如果存在 a 标签，就认为有下一页)
-    const hasNextPageLink = $('span.next a').length > 0;
-    let lastPage = !hasNextPageLink;
-
-    if (cards.length === 0) {
-        // 2. 【最终保险】如果当前页没有抓到任何卡片，强制认定为最后一页。
-        // 这是最可靠的停止信号。
-        lastPage = true;
+    // --- 分页解析与返回 (无缓存) ---
+    let pagecount = 0;
+    const pageLinks = $('.page-nav a[href*="?page="]');
+    if (pageLinks.length > 0) {
+        const pageMatch = pageLinks.last().attr('href').match(/page=(\d+)/);
+        if (pageMatch && pageMatch[1]) pagecount = parseInt(pageMatch[1], 10);
     }
+    if (pagecount === 0 && cards.length > 0) pagecount = 1;
 
 	return jsonify({
 		list: cards,
-        last: lastPage, // 告诉调用方是否是最后一页
+        page: parseInt(page, 10),
+        pagecount: pagecount,
 	})
 }
 
@@ -121,7 +124,6 @@ async function getTracks(ext) {
 
 				// --- 自定义命名逻辑 ---
 				let newName = originalTitle;
-                // [修改处] 在正则表达式中加入了 '合集' 和 '次时代'
 				const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
 				
 				if (specMatch) {
@@ -169,13 +171,25 @@ async function getPlayinfo(ext) {
 	return jsonify({ urls: [ext.url] })
 }
 
+// [修改] search 函数，保留高级缓存拦截
 async function search(ext) {
 	ext = argsify(ext)
 	let cards = []
 
-	let text = encodeURIComponent(ext.text)
+	let text = ext.text || '';
 	let page = ext.page || 1
-	let url = `${appConfig.site}/s/${text}/?page=${page}`
+
+    // --- 缓存及拦截逻辑 ---
+    if (searchCache.keyword !== text) {
+        searchCache.keyword = text;
+        searchCache.pagecount = 0;
+    }
+    if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
+        return jsonify({ list: [], page: page, pagecount: searchCache.pagecount });
+    }
+    // --- 逻辑结束 ---
+
+	let url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
 		headers: {
@@ -200,18 +214,20 @@ async function search(ext) {
 		})
 	})
 
-    // 【🔥 修正搜索分页判断】
-    // 1. 尝试使用分页链接判断 (如果存在 a 标签，就认为有下一页)
-    const hasNextPageLink = $('span.next a').length > 0;
-    let lastPage = !hasNextPageLink;
-
-    if (cards.length === 0) {
-        // 2. 【最终保险】如果当前页没有抓到任何卡片，强制认定为最后一页。
-        lastPage = true;
+    // --- 分页解析与返回 ---
+    let pagecount = 0;
+    const pageLinks = $('.page-nav a[href*="?page="]');
+    if (pageLinks.length > 0) {
+        const pageMatch = pageLinks.last().attr('href').match(/page=(\d+)/);
+        if (pageMatch && pageMatch[1]) pagecount = parseInt(pageMatch[1], 10);
     }
+    if (pagecount === 0 && cards.length > 0) pagecount = 1;
+
+    searchCache.pagecount = pagecount; // 更新缓存中的总页数
 
 	return jsonify({
 		list: cards,
-        last: lastPage, // 告诉调用方是否是最后一页
+        page: parseInt(page, 10),
+        pagecount: pagecount,
 	})
 }
