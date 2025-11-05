@@ -1,7 +1,7 @@
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
-// 【🚀 引入全局缓存】用于存储总页数等信息
+// 【🚀 引入全局缓存】用于存储总页数等信息（可选，但用于保险）
 const searchCache = {}
 
 const appConfig = {
@@ -44,16 +44,7 @@ async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
 	let { page = 1, id } = ext
-    
-    // 【✅ 缓存读取】如果不是第一页，且缓存中有 pagecount，直接使用缓存
-    let pagecount = searchCache.pagecount || 0;
-    if (page > 1 && pagecount > 0) {
-        // 如果当前页码超过了缓存中的总页数，直接返回空列表，阻止加载
-        if (page > pagecount) {
-            return jsonify({ list: [], pagecount: pagecount, total: 0 });
-        }
-    }
-    
+	
 	const url =appConfig.site + id + `?page=${page}`
 	const { data } = await $fetch.get(url, {
     headers: {
@@ -78,42 +69,41 @@ async function getCards(ext) {
 		})
 	})
 
-    // 【🛠️ 页码计算与缓存存储】只在第一页或缓存无效时才计算
-    if (page === 1 || pagecount === 0) {
-        // 遍历所有页码链接 (span.page 内部的 a 标签)
-        $('span.page a').each((_, link) => {
-            const p = parseInt($(link).text().trim());
-            if (!isNaN(p)) {
-                // 找到最大的页码，即为总页数
-                pagecount = Math.max(pagecount, p);
-            }
-        });
+    // 【🛠️ 核心修正逻辑 - 页码计算和停止信号】
+    let pagecount = 0;
+    
+    // 1. 尝试计算总页数（如果页面上有页码链接）
+    $('span.page a').each((_, link) => {
+        const p = parseInt($(link).text().trim());
+        if (!isNaN(p)) {
+            pagecount = Math.max(pagecount, p);
+        }
+    });
 
-        // 如果有内容，但没有其他页码链接，则总页数设为 1
-        if (cards.length > 0 && pagecount === 0) {
-            pagecount = 1;
-        } 
+    // 2. 修正逻辑：如果列表为空，说明已经翻到头了
+    if (cards.length === 0) {
+        // 总页数就是前一页
+        pagecount = page - 1; 
+        if (pagecount < 1) pagecount = 1; // 至少保证 pagecount 是 1
         
-        // 【✅ 缓存写入】将计算结果存入缓存
-        searchCache.pagecount = pagecount;
+    } else if (pagecount === 0) {
+        // 修正逻辑：如果列表不为空，但计算出的页码为 0，说明只有一页结果
+        pagecount = page; // 当前页就是总页数
     }
     
-    // 【最终保险】如果列表为空，强制认定总页数为当前页（并停止加载）
-    if (cards.length === 0) {
-        pagecount = page - 1; // 假定请求当前页失败，总页数为上一页
-        if (pagecount < 1) pagecount = 1; // 至少为 1
-        searchCache.pagecount = pagecount;
-    }
-
-
+    // 将计算出的总页数存入缓存，供下次请求使用（保险）
+    searchCache.pagecount = pagecount;
+    
+    // 【✅ 返回字段】返回 pagecount 和 total (模仿参考脚本)
 	return jsonify({
 		list: cards,
         pagecount: pagecount, // 明确告诉调用方总页数
-        total: pagecount > 0 ? 99999 : 0, // 随便给个大数字，让框架知道需要分页请求
+        total: cards.length,  // 模仿参考脚本，返回当前页的卡片数量
 	})
 }
 
 async function getTracks(ext) {
+    // ... (保持不变，与分页无关) ...
 	ext = argsify(ext);
 	const detailUrl = ext.url;
 
@@ -206,16 +196,6 @@ async function search(ext) {
 
 	let text = encodeURIComponent(ext.text)
 	let page = ext.page || 1
-	
-    // 【✅ 缓存读取】如果不是第一页，且缓存中有 pagecount，直接使用缓存
-    let pagecount = searchCache.pagecount || 0;
-    if (page > 1 && pagecount > 0) {
-        // 如果当前页码超过了缓存中的总页数，直接返回空列表，阻止加载
-        if (page > pagecount) {
-            return jsonify({ list: [], pagecount: pagecount, total: 0 });
-        }
-    }
-    
 	let url = `${appConfig.site}/s/${text}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
@@ -241,36 +221,35 @@ async function search(ext) {
 		})
 	})
 
-    // 【🔥 页码计算与缓存存储】只在第一页或缓存无效时才计算
-    if (page === 1 || pagecount === 0) {
-        // 遍历所有页码链接 (span.page 内部的 a 标签)
-        $('span.page a').each((_, link) => {
-            const p = parseInt($(link).text().trim());
-            if (!isNaN(p)) {
-                // 找到最大的页码，即为总页数
-                pagecount = Math.max(pagecount, p);
-            }
-        });
-
-        // 如果有内容，但没有其他页码链接，则总页数设为 1
-        if (cards.length > 0 && pagecount === 0) {
-            pagecount = 1;
+    // 【🔥 核心修正逻辑 - 页码计算和停止信号】
+    let pagecount = 0;
+    
+    // 1. 尝试计算总页数（如果页面上有页码链接）
+    $('span.page a').each((_, link) => {
+        const p = parseInt($(link).text().trim());
+        if (!isNaN(p)) {
+            pagecount = Math.max(pagecount, p);
         }
-        
-        // 【✅ 缓存写入】将计算结果存入缓存
-        searchCache.pagecount = pagecount;
+    });
+
+    // 2. 修正逻辑：如果列表为空，说明已经翻到头了
+    if (cards.length === 0) {
+        // 总页数就是前一页
+        pagecount = page - 1; 
+        if (pagecount < 1) pagecount = 1; // 至少保证 pagecount 是 1
+
+    } else if (pagecount === 0) {
+        // 修正逻辑：如果列表不为空，但计算出的页码为 0，说明只有一页结果
+        pagecount = page; // 当前页就是总页数
     }
     
-    // 【最终保险】如果列表为空，强制认定总页数为当前页（并停止加载）
-    if (cards.length === 0) {
-        pagecount = page - 1; // 假定请求当前页失败，总页数为上一页
-        if (pagecount < 1) pagecount = 1; // 至少为 1
-        searchCache.pagecount = pagecount;
-    }
+    // 将计算出的总页数存入缓存，供下次请求使用（保险）
+    searchCache.pagecount = pagecount;
 
+    // 【✅ 返回字段】返回 pagecount 和 total (模仿参考脚本)
 	return jsonify({
 		list: cards,
         pagecount: pagecount, // 明确告诉调用方总页数
-        total: pagecount > 0 ? 99999 : 0, // 随便给个大数字，让框架知道需要分页请求
+        total: cards.length,  // 模仿参考脚本，返回当前页的卡片数量
 	})
 }
