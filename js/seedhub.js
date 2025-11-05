@@ -1,6 +1,9 @@
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
+// 【🚀 引入全局缓存】用于存储总页数等信息
+const searchCache = {}
+
 const appConfig = {
 	ver: 1,
 	title: 'SeedHub',
@@ -41,6 +44,16 @@ async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
 	let { page = 1, id } = ext
+    
+    // 【✅ 缓存读取】如果不是第一页，且缓存中有 pagecount，直接使用缓存
+    let pagecount = searchCache.pagecount || 0;
+    if (page > 1 && pagecount > 0) {
+        // 如果当前页码超过了缓存中的总页数，直接返回空列表，阻止加载
+        if (page > pagecount) {
+            return jsonify({ list: [], pagecount: pagecount, total: 0 });
+        }
+    }
+    
 	const url =appConfig.site + id + `?page=${page}`
 	const { data } = await $fetch.get(url, {
     headers: {
@@ -65,23 +78,31 @@ async function getCards(ext) {
 		})
 	})
 
-    // 【🛠️ 分页修复 - 采用页码计算法】
-    let pagecount = 0;
-    // 遍历所有页码链接 (span.page 内部的 a 标签)
-    $('span.page a').each((_, link) => {
-        const p = parseInt($(link).text().trim());
-        if (!isNaN(p)) {
-            // 找到最大的页码，即为总页数
-            pagecount = Math.max(pagecount, p);
-        }
-    });
+    // 【🛠️ 页码计算与缓存存储】只在第一页或缓存无效时才计算
+    if (page === 1 || pagecount === 0) {
+        // 遍历所有页码链接 (span.page 内部的 a 标签)
+        $('span.page a').each((_, link) => {
+            const p = parseInt($(link).text().trim());
+            if (!isNaN(p)) {
+                // 找到最大的页码，即为总页数
+                pagecount = Math.max(pagecount, p);
+            }
+        });
 
-    if (cards.length > 0 && pagecount === 0) {
-        // 如果有内容，但没有其他页码链接 (说明只有一页结果)，则总页数设为 1
-        pagecount = 1;
-    } else if (cards.length === 0) {
-        // 如果列表为空，则强制认定总页数为当前页（并停止加载）
-        pagecount = page;
+        // 如果有内容，但没有其他页码链接，则总页数设为 1
+        if (cards.length > 0 && pagecount === 0) {
+            pagecount = 1;
+        } 
+        
+        // 【✅ 缓存写入】将计算结果存入缓存
+        searchCache.pagecount = pagecount;
+    }
+    
+    // 【最终保险】如果列表为空，强制认定总页数为当前页（并停止加载）
+    if (cards.length === 0) {
+        pagecount = page - 1; // 假定请求当前页失败，总页数为上一页
+        if (pagecount < 1) pagecount = 1; // 至少为 1
+        searchCache.pagecount = pagecount;
     }
 
 
@@ -185,6 +206,16 @@ async function search(ext) {
 
 	let text = encodeURIComponent(ext.text)
 	let page = ext.page || 1
+	
+    // 【✅ 缓存读取】如果不是第一页，且缓存中有 pagecount，直接使用缓存
+    let pagecount = searchCache.pagecount || 0;
+    if (page > 1 && pagecount > 0) {
+        // 如果当前页码超过了缓存中的总页数，直接返回空列表，阻止加载
+        if (page > pagecount) {
+            return jsonify({ list: [], pagecount: pagecount, total: 0 });
+        }
+    }
+    
 	let url = `${appConfig.site}/s/${text}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
@@ -210,23 +241,31 @@ async function search(ext) {
 		})
 	})
 
-    // 【🔥 搜索修复 - 采用页码计算法】
-    let pagecount = 0;
-    // 遍历所有页码链接 (span.page 内部的 a 标签)
-    $('span.page a').each((_, link) => {
-        const p = parseInt($(link).text().trim());
-        if (!isNaN(p)) {
-            // 找到最大的页码，即为总页数
-            pagecount = Math.max(pagecount, p);
-        }
-    });
+    // 【🔥 页码计算与缓存存储】只在第一页或缓存无效时才计算
+    if (page === 1 || pagecount === 0) {
+        // 遍历所有页码链接 (span.page 内部的 a 标签)
+        $('span.page a').each((_, link) => {
+            const p = parseInt($(link).text().trim());
+            if (!isNaN(p)) {
+                // 找到最大的页码，即为总页数
+                pagecount = Math.max(pagecount, p);
+            }
+        });
 
-    if (cards.length > 0 && pagecount === 0) {
-        // 如果有内容，但没有其他页码链接 (说明只有一页结果)，则总页数设为 1
-        pagecount = 1;
-    } else if (cards.length === 0) {
-        // 如果列表为空，则强制认定总页数为当前页（并停止加载）
-        pagecount = page;
+        // 如果有内容，但没有其他页码链接，则总页数设为 1
+        if (cards.length > 0 && pagecount === 0) {
+            pagecount = 1;
+        }
+        
+        // 【✅ 缓存写入】将计算结果存入缓存
+        searchCache.pagecount = pagecount;
+    }
+    
+    // 【最终保险】如果列表为空，强制认定总页数为当前页（并停止加载）
+    if (cards.length === 0) {
+        pagecount = page - 1; // 假定请求当前页失败，总页数为上一页
+        if (pagecount < 1) pagecount = 1; // 至少为 1
+        searchCache.pagecount = pagecount;
     }
 
 	return jsonify({
