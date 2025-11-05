@@ -1,8 +1,12 @@
+// 全局搜索缓存对象
+const searchCache = {};
+
 const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
-	ver: 1,
+	// 版本号，方便管理更新
+	ver: '1.1.0',
 	title: 'SeedHub',
 	site: 'https://www.seedhub.cc',
 	tabs: [
@@ -37,24 +41,25 @@ async function getConfig(  ) {
 	return jsonify(appConfig)
 }
 
+// [MODIFIED] getCards 函数，已加入分页修复
 async function getCards(ext) {
 	ext = argsify(ext)
 	let cards = []
 	let { page = 1, id } = ext
-	const url =appConfig.site + id + `?page=${page}`
+	const url = appConfig.site + id + `?page=${page}`
 	const { data } = await $fetch.get(url, {
-    headers: {
-		"User-Agent": UA,
-  	  },
-});
+		headers: {
+			"User-Agent": UA,
+		},
+	});
 	
 	const $ = cheerio.load(data)
 	const videos = $('.cover')
 	videos.each((_, e) => {
-	const href = $(e).find('a').attr('href')
-	const title = $(e).find('a img').attr('alt')
-	const cover = $(e).find('a img').attr('src')
-	cards.push({
+		const href = $(e).find('a').attr('href')
+		const title = $(e).find('a img').attr('alt')
+		const cover = $(e).find('a img').attr('src')
+		cards.push({
 			vod_id: href,
 			vod_name: title,
 			vod_pic: cover,
@@ -64,11 +69,32 @@ async function getCards(ext) {
 			},
 		})
 	})
-		return jsonify({
+
+	// --- 分页逻辑 ---
+	let pagecount = 0;
+	const pageLinks = $('.page-nav a[href*="?page="]');
+	if (pageLinks.length > 0) {
+		const lastPageLink = pageLinks.last();
+		const lastPageHref = lastPageLink.attr('href');
+		const pageMatch = lastPageHref.match(/page=(\d+)/);
+		if (pageMatch && pageMatch[1]) {
+			pagecount = parseInt(pageMatch[1], 10);
+		}
+	}
+	if (pagecount === 0 && cards.length > 0) {
+		pagecount = 1;
+	}
+
+	return jsonify({
 		list: cards,
+		page: parseInt(page, 10),
+		pagecount: pagecount,
+		limit: videos.length,
+		total: 0
 	})
 }
 
+// [MODIFIED] getTracks 函数，已修复网盘链接获取
 async function getTracks(ext) {
 	ext = argsify(ext);
 	const detailUrl = ext.url;
@@ -146,14 +172,25 @@ async function getPlayinfo(ext) {
 	return jsonify({ urls: [ext.url] })
 }
 
-// --- [START] FINAL SEARCH FUNCTION WITH PAGINATION FIX ---
+// [MODIFIED] search 函数，已加入分页修复和缓存功能
 async function search(ext) {
 	ext = argsify(ext)
-	let cards = []
+	let text = ext.text || '';
+	let page = ext.page || 1;
 
-	let text = encodeURIComponent(ext.text)
-	let page = ext.page || 1
-	let url = `${appConfig.site}/s/${text}/?page=${page}`
+    // 1. 生成缓存 Key
+    const cacheKey = `${text}_${page}`;
+
+    // 2. 检查缓存是否存在
+    if (searchCache[cacheKey]) {
+        console.log(`[CACHE] Hit for search: ${cacheKey}`);
+        return jsonify(searchCache[cacheKey]); // 命中缓存，直接返回
+    }
+
+    console.log(`[CACHE] Miss for search: ${cacheKey}. Fetching from network...`);
+	
+	let cards = []
+	let url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`
 
 	const { data } = await $fetch.get(url, {
 		headers: {
@@ -178,39 +215,33 @@ async function search(ext) {
 		})
 	})
 
-	// --- 准确的分页逻辑 ---
+	// --- 分页逻辑 ---
 	let pagecount = 0;
-	// 选择所有在 .page-nav 容器里的、包含 href 属性的页码链接
 	const pageLinks = $('.page-nav a[href*="?page="]');
-
 	if (pageLinks.length > 0) {
-		// 获取最后一个页码链接
 		const lastPageLink = pageLinks.last();
 		const lastPageHref = lastPageLink.attr('href');
-		
-		// 从 href 中用正则表达式提取页码数字
 		const pageMatch = lastPageHref.match(/page=(\d+)/);
 		if (pageMatch && pageMatch[1]) {
 			pagecount = parseInt(pageMatch[1], 10);
 		}
 	}
-
-	// 如果找不到任何页码链接（比如只有一页或没有结果）
-	if (pagecount === 0) {
-		// 如果有搜索结果，说明总页数就是1
-		if (cards.length > 0) {
-			pagecount = 1;
-		}
-		// 如果没有搜索结果，pagecount 保持为 0，也是正确的
+	if (pagecount === 0 && cards.length > 0) {
+		pagecount = 1;
 	}
 
-	return jsonify({
+    // 3. 准备要返回的数据对象
+	const result = {
 		list: cards,
-		// --- 将分页信息添加到返回结果中 ---
 		page: parseInt(page, 10),
 		pagecount: pagecount,
 		limit: videos.length,
-		total: 0 // total 字段前端估算意义不大，设为0或不返回均可
-	})
+		total: 0
+	};
+
+    // 4. 将结果存入缓存
+    searchCache[cacheKey] = result;
+
+    // 5. 返回结果
+	return jsonify(result);
 }
-// --- [END] FINAL SEARCH FUNCTION ---
