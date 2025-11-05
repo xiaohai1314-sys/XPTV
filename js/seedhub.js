@@ -1,5 +1,4 @@
 const cheerio = createCheerio()
-// 保持手机版的User-Agent，这是能直接获取到网盘链接的关键
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 const appConfig = {
@@ -70,79 +69,71 @@ async function getCards(ext) {
 	})
 }
 
-// ====================【第三次修正后的函数】====================
+// --- [START] MODIFIED FUNCTION ---
 async function getTracks(ext) {
 	ext = argsify(ext);
-	let tracks = [];
-	let url = ext.url;
+	const detailUrl = ext.url;
 
-	const { data } = await $fetch.get(url, {
-		headers: {
-			'User-Agent': UA, // 确保使用手机UA
-		},
+	// 1. 获取详情页的 HTML
+	const { data: detailHtml } = await $fetch.get(detailUrl, {
+		headers: { 'User-Agent': UA },
 	});
 	
-	// 直接在整个页面文本中搜索 panLink 变量，避免 Cheerio 解析 script 标签内容的问题
-	const panLinkRegex = /var panLink = "(.*?)";/;
-	const match = data.match(panLinkRegex);
+	const $ = cheerio.load(detailHtml);
+	const panLinkElements = $('.pan-links li a');
 	
-	let panLink = '';
-	if (match && match[1]) {
-		panLink = match[1];
-	}
-
-	if (!panLink) {
-		$utils.toastError('未能从页面中提取到网盘链接变量。请检查网站结构是否再次变化。'); 
+	if (panLinkElements.length === 0) {
+		$utils.toastError('没有找到网盘资源条目'); 
 		return jsonify({ list: [] }); 
 	}
 	
-	// 使用 Cheerio 解析标题
-	const $ = cheerio.load(data);
-	const postTitle = $('h1, h2').first().text().replace(/^#\s*/, '').split(' ')[0].trim();
-	
-	// 提取网盘名称（可选，但能让名称更友好）
-	let panName = '网盘资源';
-	const keyNames = {
-      "baidu": "百度网盘",
-      "quark": "夸克网盘",
-      "ali": "阿里云盘",
-      "xunlei": "迅雷",
-    };
-	
-	for (const key in keyNames) {
-		if (panLink.includes(key)) {
-			panName = keyNames[key];
-			break;
-		}
-	}
+	// 2. 使用 Promise.all 并行处理所有网盘链接的解析
+	const trackPromises = panLinkElements.get().map(async (link) => {
+		const intermediateUrl = appConfig.site + $(link).attr('href');
+		const title = $(link).attr('title') || $(link).text().trim();
+		
+		try {
+			// 3. 获取中间页的 HTML
+			const { data: intermediateHtml } = await $fetch.get(intermediateUrl, {
+				headers: { 'User-Agent': UA },
+			});
 
-	// 提取码逻辑（仅针对百度网盘）
-	let extractCode = '';
-	if (panLink.includes("baidu") && panLink.includes("?pwd=")) {
-		const matchPwd = panLink.match(/\?pwd=(.*)/);
-		if (matchPwd && matchPwd[1]) {
-			extractCode = ` (提取码: ${matchPwd[1]})`;
+			// 4. 使用正则表达式从 HTML 文本中直接提取 panLink
+			const match = intermediateHtml.match(/var panLink = "([^"]+)"/);
+			
+			if (match && match[1]) {
+				const finalPanUrl = match[1];
+				return {
+					name: title,
+					pan: finalPanUrl, // 成功提取到最终的网盘链接
+				};
+			}
+		} catch (error) {
+			console.log(`解析链接 "${title}" 失败: ${error.message}`);
 		}
-	}
-	
-	// 构造 tracks 数组
-	let newName = `${postTitle} [${panName}]${extractCode}`;
-	
-	tracks.push({
-		name: newName,
-		pan: panLink, 
+		return null; // 解析失败返回 null
 	});
+
+	// 等待所有解析完成
+	const resolvedTracks = await Promise.all(trackPromises);
+	// 过滤掉解析失败的 (null)
+	const tracks = resolvedTracks.filter(track => track !== null);
+
+	if (tracks.length === 0) {
+		$utils.toastError('所有网盘链接解析均失败');
+		return jsonify({ list: [] });
+	}
 	
 	return jsonify({
 		list: [
 			{
-				title: postTitle, // 使用帖子标题作为分组名
+				title: '网盘资源', 
 				tracks,
 			},
 		],
 	});
 }
-// =======================================================
+// --- [END] MODIFIED FUNCTION ---
 
 async function getPlayinfo(ext) {
 	ext = argsify(ext)
