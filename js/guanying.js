@@ -1,5 +1,5 @@
 /**
- * 观影网脚本 - v18.0 (架构升级版)
+ * 观影网脚本 - v18.1 (架构升级版 - 增加搜索缓存)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
@@ -14,8 +14,8 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.0,
-    title: '观影网 (后端版 )', // 标题变更以区分
+    ver: 18.1,
+    title: '观影网 (后端缓存版 )', // 标题变更以区分
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -37,21 +37,19 @@ const searchCache = {
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`);
+function log(msg ) { try { $log(`[观影网 V18.1] ${msg}`); } catch (_) { console.log(`[观影网 V18.1] ${msg}`);
 } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {};
 } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data);
 }
 
-// ★ 【Cookie 和 fetchWithCookie 已被移除】
-
-// --- init (与V17.0完全一致) ---
+// --- init ---
 async function init(ext) {
     return jsonify({});
 }
 
-// --- getConfig (与V17.0完全一致) ---
+// --- getConfig ---
 async function getConfig() {
     return jsonify(appConfig);
 }
@@ -107,7 +105,7 @@ async function getTracks(ext) {
     }
 }
 
-// --- 【改造】search (新增搜索缓存逻辑) ---
+// --- 【替换】search (新增搜索缓存逻辑) ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || ''; // 确保 text 可用
