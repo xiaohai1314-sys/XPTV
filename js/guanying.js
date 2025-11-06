@@ -1,13 +1,13 @@
 /**
- * 观影网脚本 - v18.2 (稳定版)
+ * 观影网脚本 - v18.3 (兼容性最终版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
  * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
  *
- * --- v18.2 更新 ---
- * 1. 【健壮性修复】修正 tabs 配置，使用纯粹的分类ID，配合后端修复，彻底解决分类加载404和undefined的问题。
- * 2. 【保留优化】保留 v18.1 的前端搜索缓存机制，提升搜索和翻页性能。
+ * --- v18.3 更新 ---
+ * 1. 【兼容性修复】为 category 入口函数增加默认ID，解决部分App框架在加载首页时未传入分类ID导致的“缺少ID”错误。
+ * 2. 【保留优化】保留 v18.2 的健壮性修复和搜索缓存机制。
  */
 
 // ================== 配置区 ==================
@@ -15,10 +15,9 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.2, // 版本号更新
+    ver: 18.3, // 版本号更新
     title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
-    // ★★★ 【核心修改】tabs.ext 定义 ★★★
     tabs: [
         { name: '电影', ext: { id: 'mv' } },
         { name: '剧集', ext: { id: 'tv' } },
@@ -26,7 +25,6 @@ const appConfig = {
     ],
 };
 
-// ★ 前端搜索缓存对象 (来自v18.1的优化 )
 const searchCache = {
     keyword: '',
     fullList: [],
@@ -36,7 +34,7 @@ const searchCache = {
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.2] ${msg}`); } catch (_) { console.log(`[观影网 V18.2] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V18.3] ${msg}`); } catch (_) { console.log(`[观影网 V18.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -55,11 +53,9 @@ async function getConfig() {
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// --- getCards (现在会发送更规范的请求) ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
-    // 现在 id 会是 'mv', 'tv' 等，page 是页码
     const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
     log(`请求后端获取卡片列表: ${url}`);
 
@@ -78,7 +74,6 @@ async function getCards(ext) {
     }
 }
 
-// --- getTracks (无改动) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const detailUrl = ext.url; 
@@ -101,7 +96,6 @@ async function getTracks(ext) {
     }
 }
 
-// --- search (实现前端缓存与分页) ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text;
@@ -157,9 +151,39 @@ async function search(ext) {
     });
 }
 
-// --- getPlayinfo (无改动) ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
     return jsonify({ urls: [panLink] });
+}
+
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★★★ 【核心修改】兼容性入口函数 ★★★
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+async function home() {
+    // home函数现在只负责返回分类信息
+    return jsonify({ class: appConfig.tabs, filters: {} });
+}
+
+async function category(tid, pg) {
+    // 【关键修改】如果tid(分类ID)为空，则默认使用第一个分类的ID
+    const id = tid || appConfig.tabs[0].ext.id;
+    log(`兼容入口 category 调用: tid=${tid}, pg=${pg}, 最终使用id=${id}`);
+    return getCards({ id: id, page: pg });
+}
+
+async function detail(id) {
+    // detail的参数通常是URL的一部分，这里保持不变
+    return getTracks({ url: id });
+}
+
+async function play(vod_id, vod_name, ext) {
+    // play的参数通常是完整的，这里保持不变
+    return jsonify({ url: ext.url, name: vod_name, play: ext.url });
+}
+
+async function test(ext) {
+    return getConfig();
 }
