@@ -1,22 +1,24 @@
 /**
- * 观影网脚本 - v18.2 (搜索缓存增强版)
+ * 观影网脚本 - v18.1 (搜索缓存优化版)
  *
- * --- 更新说明 ---
- * 基于 v18.0 架构升级版
- * ✨ 新增搜索缓存机制,防止搜索结果无限重复
- * ✨ 前端智能分页,一次加载所有结果后自动切割
- * ✨ 关键词变化自动重置缓存
- * ✨ 页码越界保护,避免空白页面
+ * --- 核心思想 ---
+ * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
+ * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
+ * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
+ *
+ * --- v18.1 更新 ---
+ * 1. 新增前端搜索缓存机制，解决后端搜索接口无分页导致重复加载和无限循环的问题。
+ * 2. 对于同一关键词，只进行一次网络请求，后续翻页操作由前端在本地完成，极大提升性能和用户体验。
  */
 
 // ================== 配置区 ==================
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+// ★ 指向你的后端服务器地址
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
-const PAGE_SIZE = 20; // 每页显示的项目数量
 
 const appConfig = {
-    ver: 18.1,
-    title: '观影网 (搜索缓存版)',
+    ver: 18.1, // 版本号更新
+    title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
         { name: '电影', ext: { id: 'mv?page=' } },
@@ -25,60 +27,40 @@ const appConfig = {
     ],
 };
 
-// ================== 搜索缓存对象 ==================
+// ★ 新增：前端搜索缓存对象
 const searchCache = {
-    keyword: '',      // 当前搜索关键词
-    allData: [],      // 完整数据列表
-    pagecount: 0,     // 总页数
-    total: 0,         // 总记录数
-    loaded: false     // 是否已加载
+    keyword: '',
+    fullList: [], // 存储完整搜索结果
+    // 假设App或框架每页显示20条 ，如果不是，可以调整这个值
+    pageSize: 20 
 };
 
-// ================== 工具函数 ==================
-function log(msg) { 
-    try { 
-        $log(`[观影网 V18.1] ${msg}`); 
-    } catch (_) { 
-        console.log(`[观影网 V18.1] ${msg}`); 
-    } 
-}
-
-function argsify(ext) { 
-    if (typeof ext === 'string') { 
-        try { 
-            return JSON.parse(ext); 
-        } catch (e) { 
-            return {}; 
-        } 
-    } 
-    return ext || {}; 
-}
-
-function jsonify(data) { 
-    return JSON.stringify(data); 
-}
 
 // ================== 核心函数 ==================
 
+function log(msg ) { try { $log(`[观影网 V18.1] ${msg}`); } catch (_) { console.log(`[观影网 V18.1] ${msg}`); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+
+
+// --- init ---
 async function init(ext) {
     return jsonify({});
 }
 
+// --- getConfig ---
 async function getConfig() {
     return jsonify(appConfig);
 }
 
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+// --- getCards (无改动) ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
-    
-    // 参数验证
-    if (!id) {
-        log(`❌ 缺少分类ID参数，ext: ${JSON.stringify(ext)}`);
-        $utils.toastError('分类ID缺失', 3000);
-        return jsonify({ list: [] });
-    }
-    
     const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
     log(`请求后端获取卡片列表: ${url}`);
 
@@ -97,6 +79,7 @@ async function getCards(ext) {
     }
 }
 
+// --- getTracks (无改动) ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const detailUrl = ext.url; 
@@ -119,164 +102,75 @@ async function getTracks(ext) {
     }
 }
 
-// ================== 【核心改造】搜索函数 - 带缓存机制 ==================
+// --- 【改造】search (实现前端缓存与分页) ---
 async function search(ext) {
     ext = argsify(ext);
-    const text = ext.text || '';
+    const text = ext.text;
     const page = ext.page || 1;
-    
+
+    // 如果没有搜索词，直接返回空
     if (!text) {
-        log('❌ 搜索关键词为空');
-        return jsonify({ list: [], pagecount: 0, total: 0 });
+        return jsonify({ list: [] });
     }
 
-    log(`🔍 搜索请求 - 关键词: "${text}", 页码: ${page}`);
-
-    // ===== 步骤1: 检测关键词是否变化,变化则重置缓存 =====
+    // 1. 检查是否是新的搜索关键词
     if (searchCache.keyword !== text) {
-        log(`📝 检测到新关键词 "${text}", 清空旧缓存`);
+        log(`新关键词搜索: "${text}"，将从后端获取数据。`);
+        // 是新关键词，清空缓存并发起网络请求
         searchCache.keyword = text;
-        searchCache.allData = [];
-        searchCache.pagecount = 0;
-        searchCache.total = 0;
-        searchCache.loaded = false;
-    }
+        searchCache.fullList = []; // 清空旧数据
 
-    // ===== 步骤2: 如果已加载过,直接从缓存切割数据 =====
-    if (searchCache.loaded && searchCache.allData.length > 0) {
-        log(`✅ 命中缓存, 总数据: ${searchCache.total}条, 请求第${page}页`);
+        const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}`;
+        log(`请求后端执行搜索: ${url}`);
         
-        // 页码越界保护
-        if (page > searchCache.pagecount) {
-            log(`⚠️ 页码越界 (请求: ${page}, 总页数: ${searchCache.pagecount})`);
-            return jsonify({ 
-                list: [], 
-                pagecount: searchCache.pagecount, 
-                total: searchCache.total 
-            });
+        try {
+            const { data } = await $fetch.get(url);
+            const result = JSON.parse(data);
+
+            if (result.status !== "success") {
+                throw new Error(result.message || '后端返回错误');
+            }
+            
+            // 将后端返回的完整列表存入缓存
+            searchCache.fullList = result.list || [];
+            log(`✅ 成功从后端获取到 ${searchCache.fullList.length} 个搜索结果并已缓存。`);
+
+        } catch (e) {
+            log(`❌ 搜索异常: ${e.message}`);
+            $utils.toastError(`加载失败: ${e.message}`, 4000);
+            // 请求失败时，清空关键词，以便下次可以重试
+            searchCache.keyword = ''; 
+            return jsonify({ list: [] });
         }
-
-        // 切割当前页数据
-        const startIndex = (page - 1) * PAGE_SIZE;
-        const endIndex = startIndex + PAGE_SIZE;
-        const pageData = searchCache.allData.slice(startIndex, endIndex);
-        
-        log(`📄 返回缓存数据: ${pageData.length}条 (索引 ${startIndex}-${endIndex})`);
-        
-        return jsonify({ 
-            list: pageData, 
-            pagecount: searchCache.pagecount, 
-            total: searchCache.total 
-        });
+    } else {
+        log(`命中缓存关键词: "${text}"，直接从本地缓存分页。`);
     }
 
-    // ===== 步骤3: 首次搜索,请求后端加载所有数据 =====
-    log(`🌐 首次搜索 "${text}", 正在请求后端...`);
-    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}`;
+    // 2. 从缓存中进行前端分页
+    const { fullList, pageSize } = searchCache;
+    const pagecount = Math.ceil(fullList.length / pageSize);
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
     
-    try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
-        
-        if (result.status !== "success") {
-            throw new Error(result.message || '后端返回错误');
-        }
+    // 使用 slice 截取当前页的数据
+    const paginatedList = fullList.slice(start, end);
+    
+    log(`前端分页: 第 ${page} 页, 共 ${pagecount} 页。返回 ${paginatedList.length} 条数据。`);
 
-        // 保存所有数据到缓存
-        searchCache.allData = result.list || [];
-        searchCache.total = searchCache.allData.length;
-        searchCache.pagecount = Math.ceil(searchCache.total / PAGE_SIZE) || 1;
-        searchCache.loaded = true;
-
-        log(`✅ 成功加载 ${searchCache.total} 条结果, 共 ${searchCache.pagecount} 页`);
-
-        // 如果没有结果
-        if (searchCache.total === 0) {
-            $utils.toastError(`未找到 "${text}" 的相关结果`, 3000);
-            return jsonify({ list: [], pagecount: 0, total: 0 });
-        }
-
-        // 切割第一页数据
-        const pageData = searchCache.allData.slice(0, PAGE_SIZE);
-        
-        log(`📄 返回第1页数据: ${pageData.length}条`);
-        
-        return jsonify({ 
-            list: pageData, 
-            pagecount: searchCache.pagecount, 
-            total: searchCache.total 
-        });
-
-    } catch (e) {
-        log(`❌ 搜索异常: ${e.message}`);
-        $utils.toastError(`搜索失败: ${e.message}`, 4000);
-        
-        // 出错时重置缓存状态
-        searchCache.loaded = false;
-        
-        return jsonify({ list: [], pagecount: 0, total: 0 });
-    }
+    // 3. 返回分页后的数据
+    return jsonify({ 
+        list: paginatedList,
+        // 虽然App可能不使用这些值，但返回它们是良好实践
+        page: page,
+        pagecount: pagecount,
+        total: fullList.length
+    });
 }
 
-// ================== 播放信息 ==================
+
+// --- getPlayinfo (无改动) ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
     return jsonify({ urls: [panLink] });
-}
-
-// ================== 兼容性入口函数 ==================
-// 以下函数确保与不同播放器的兼容性
-
-async function home(filter) {
-    const config = await getConfig();
-    const configObj = JSON.parse(config);
-    return jsonify({
-        class: configObj.tabs,
-        filters: {}
-    });
-}
-
-async function homeVod() {
-    return jsonify({});
-}
-
-async function category(tid, pg, filter, extend) {
-    log(`📂 category调用 - tid: ${JSON.stringify(tid)}, pg: ${pg}`);
-    
-    // 处理不同的参数传递方式
-    let id, page;
-    
-    if (typeof tid === 'object') {
-        // 方式1: tid 是对象 {id: 'mv?page=', ...}
-        id = tid.id;
-        page = pg || 1;
-    } else if (typeof tid === 'string') {
-        // 方式2: tid 是字符串 'mv?page='
-        id = tid;
-        page = pg || 1;
-    } else {
-        log(`❌ 无法识别的tid类型: ${typeof tid}`);
-        return jsonify({ list: [] });
-    }
-    
-    return getCards({ id, page });
-}
-
-async function detail(id) {
-    log(`🔍 detail调用 - id: ${id}`);
-    return getTracks({ url: id });
-}
-
-async function play(flag, id, flags) {
-    log(`▶️ play调用 - flag: ${flag}, id: ${id}`);
-    return jsonify({ 
-        parse: 0,
-        url: id,
-        header: {}
-    });
-}
-
-async function test(inReq, outResp) {
-    return await getConfig();
 }
