@@ -1,14 +1,13 @@
 /**
- * 观影网脚本 - v18.1 (分页控制最终版)
+ * 观影网脚本 - v18.2 (终极完整版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
  * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
- * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
  *
- * --- v18.1 更新 ---
- * search函数现在会处理并返回后端提供的 pagecount 字段，以实现精准的分页控制，
- * 从根源上避免App对不存在的页面发起请求。
+ * --- v18.2 更新日志 ---
+ * 1. 【分页控制】search函数现在会处理并返回后端提供的 pagecount 字段，实现精准分页。
+ * 2. 【分类修正】修正了 appConfig 中分类 id 的错误格式，确保分类页能正常加载。
  */
 
 // ================== 配置区 ==================
@@ -17,37 +16,38 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.1.7:5000'; 
 
 const appConfig = {
-    ver: 18.1, // 版本号更新
+    ver: 18.2, // 版本号更新
     title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
-        { name: '剧集', ext: { id: 'tv?page=' } },
-        { name: '动漫', ext: { id: 'ac?page=' } },
+        // 【核心修改】id只保留纯粹的分类名
+        { name: '电影', ext: { id: 'mv' } },
+        { name: '剧集', ext: { id: 'tv' } },
+        { name: '动漫', ext: { id: 'ac' } },
     ],
 };
 
 // ================== 核心函数 ==================
 
-function log(msg  ) { try { $log(`[观影网 V18.1] ${msg}`); } catch (_) { console.log(`[观影网 V18.1] ${msg}`); } }
+function log(msg  ) { try { $log(`[观影网 V18.2] ${msg}`); } catch (_) { console.log(`[观影网 V18.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- init (无变化) ---
+// --- init ---
 async function init(ext) {
     return jsonify({});
 }
 
-// --- getConfig (无变化) ---
+// --- getConfig ---
 async function getConfig() {
     return jsonify(appConfig);
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心API调用逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// --- 【改造】getCards (无变化) ---
+// --- getCards ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
@@ -69,7 +69,7 @@ async function getCards(ext) {
     }
 }
 
-// --- 【改造】getTracks (无变化) ---
+// --- getTracks ---
 async function getTracks(ext) {
     ext = argsify(ext);
     const detailUrl = ext.url; 
@@ -92,9 +92,7 @@ async function getTracks(ext) {
     }
 }
 
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【最终版 search 函数】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
+// --- search ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text;
@@ -126,7 +124,7 @@ async function search(ext) {
     }
 }
 
-// --- 【原封不动】getPlayinfo ---
+// --- getPlayinfo ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
