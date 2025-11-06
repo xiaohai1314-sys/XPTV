@@ -1,10 +1,13 @@
 /**
- * 观影网脚本 - v18.1 (前端缓存分页版)
+ * 观影网脚本 - v18.2 (分类修复版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
  * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
  * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
+ *
+ * --- v18.2 更新日志 ---
+ * - 【修复】修正了 appConfig.tabs 中的 id 格式，解决了分类页面因 URL 拼接错误导致 404 的问题。
  *
  * --- v18.1 更新日志 ---
  * - 【新增】前端搜索缓存机制 (gySearchCache)，避免对同一关键词的重复后端请求。
@@ -17,13 +20,15 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.1, // 版本号更新
+    ver: 18.2, // 版本号更新
     title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
-        { name: '剧集', ext: { id: 'tv?page=' } },
-        { name: '动漫', ext: { id: 'ac?page=' } },
+        // ▼▼▼【修复】id只保留纯粹的路径部分 ，不再包含 "?page=" ▼▼▼
+        { name: '电影', ext: { id: 'mv' } },
+        { name: '剧集', ext: { id: 'tv' } },
+        { name: '动漫', ext: { id: 'ac' } },
+        // ▲▲▲ 修复结束 ▲▲▲
     ],
 };
 
@@ -31,14 +36,14 @@ const appConfig = {
 const gySearchCache = {
     keyword: '',    // 存储当前搜索的关键词
     results: [],    // 存储从后端获取到的完整结果列表
-    pageSize: 20,   // 定义前端每页显示多少条数据（可按需调整 ）
+    pageSize: 20,   // 定义前端每页显示多少条数据（可按需调整）
 };
 // ▲▲▲ 新增：前端搜索缓存对象 ▲▲▲
 
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.1] ${msg}`); } catch (_) { console.log(`[观影网 V18.1] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V18.2] ${msg}`); } catch (_) { console.log(`[观影网 V18.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -53,7 +58,7 @@ async function getConfig() {
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 // --- getCards (无变动) ---
@@ -101,27 +106,24 @@ async function getTracks(ext) {
     }
 }
 
-// --- 【改造】search (实现前端缓存和分页) ---
+// --- search (v18.1版，实现前端缓存和分页) ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text;
     const page = ext.page || 1;
 
-    // 如果没有搜索词，直接返回空
     if (!text) {
         return jsonify({ list: [] });
     }
 
-    // 1. 检查关键词是否变化，如果变化则清空缓存
     if (gySearchCache.keyword !== text) {
         log(`新关键词搜索: "${text}"，清空旧缓存。`);
         gySearchCache.keyword = text;
-        gySearchCache.results = []; // 重置结果
+        gySearchCache.results = [];
     } else {
         log(`翻页/重复搜索: "${text}"，页码: ${page}`);
     }
 
-    // 2. 检查缓存中是否已有数据
     if (gySearchCache.results.length > 0) {
         log("✅ 命中前端缓存，执行纯前端分页。");
         const start = (page - 1) * gySearchCache.pageSize;
@@ -131,9 +133,7 @@ async function search(ext) {
         return jsonify({ list: pageResults });
     }
 
-    // 3. 如果缓存为空，则执行后端请求 (仅在首次搜索时)
     log("缓存未命中，开始向后端请求数据...");
-    // 注意：后端不支持分页，因此请求URL中不包含page参数
     const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}`;
     log(`请求后端执行搜索: ${url}`);
 
@@ -145,11 +145,9 @@ async function search(ext) {
             throw new Error(result.message || '后端返回错误');
         }
 
-        // 4. 将从后端获取的完整数据存入缓存
         gySearchCache.results = result.list || [];
         log(`✅ 成功从后端获取到 ${gySearchCache.results.length} 条完整结果，并已存入缓存。`);
 
-        // 5. 从缓存中切片出第一页的数据并返回
         const start = (page - 1) * gySearchCache.pageSize;
         const end = start + gySearchCache.pageSize;
         const pageResults = gySearchCache.results.slice(start, end);
@@ -160,7 +158,6 @@ async function search(ext) {
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
-        // 清空关键词，以便下次能重新请求
         gySearchCache.keyword = ''; 
         return jsonify({ list: [] });
     }
