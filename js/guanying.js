@@ -1,5 +1,5 @@
 /**
- * 观影网脚本 - v18.1 (搜索缓存增强版)
+ * 观影网脚本 - v18.2 (搜索缓存增强版)
  *
  * --- 更新说明 ---
  * 基于 v18.0 架构升级版
@@ -71,6 +71,14 @@ async function getConfig() {
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
+    
+    // 参数验证
+    if (!id) {
+        log(`❌ 缺少分类ID参数，ext: ${JSON.stringify(ext)}`);
+        $utils.toastError('分类ID缺失', 3000);
+        return jsonify({ list: [] });
+    }
+    
     const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
     log(`请求后端获取卡片列表: ${url}`);
 
@@ -215,4 +223,60 @@ async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
     return jsonify({ urls: [panLink] });
+}
+
+// ================== 兼容性入口函数 ==================
+// 以下函数确保与不同播放器的兼容性
+
+async function home(filter) {
+    const config = await getConfig();
+    const configObj = JSON.parse(config);
+    return jsonify({
+        class: configObj.tabs,
+        filters: {}
+    });
+}
+
+async function homeVod() {
+    return jsonify({});
+}
+
+async function category(tid, pg, filter, extend) {
+    log(`📂 category调用 - tid: ${JSON.stringify(tid)}, pg: ${pg}`);
+    
+    // 处理不同的参数传递方式
+    let id, page;
+    
+    if (typeof tid === 'object') {
+        // 方式1: tid 是对象 {id: 'mv?page=', ...}
+        id = tid.id;
+        page = pg || 1;
+    } else if (typeof tid === 'string') {
+        // 方式2: tid 是字符串 'mv?page='
+        id = tid;
+        page = pg || 1;
+    } else {
+        log(`❌ 无法识别的tid类型: ${typeof tid}`);
+        return jsonify({ list: [] });
+    }
+    
+    return getCards({ id, page });
+}
+
+async function detail(id) {
+    log(`🔍 detail调用 - id: ${id}`);
+    return getTracks({ url: id });
+}
+
+async function play(flag, id, flags) {
+    log(`▶️ play调用 - flag: ${flag}, id: ${id}`);
+    return jsonify({ 
+        parse: 0,
+        url: id,
+        header: {}
+    });
+}
+
+async function test(inReq, outResp) {
+    return await getConfig();
 }
