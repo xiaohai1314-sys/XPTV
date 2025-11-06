@@ -1,19 +1,20 @@
 /**
- * 观影网脚本 - v18.2 (搜索最终优化版)
+ * 观影网脚本 - v18.3 (最终完整版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
  * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
  * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
  *
- * v18.1 更新:
- * - 新增前端搜索缓存，参考海绵脚本实现。
- * - 解决搜索翻页时因后端无分页信息而导致的循环重复问题。
- * 
  * v18.2 更新:
  * - 根据后端行为进行最终优化。
  * - 搜索时仅请求一次，获取全部结果并缓存。
  * - 后续翻页请求直接返回空，彻底解决重复问题并提升效率。
+ * 
+ * v18.3 更新:
+ * - 添加了必要的兼容入口函数 (home, category, detail, play)。
+ * - 修复了因缺少入口函数导致点击分类时 ID 为 undefined 的问题。
+ * - 优化了 category 函数的逻辑，使其更健壮。
  */
 
 // ================== 配置区 ==================
@@ -22,7 +23,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/6
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.2, // 版本号更新
+    ver: 18.3, // 版本号更新
     title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
@@ -34,7 +35,7 @@ const appConfig = {
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.2] ${msg}`); } catch (_) { console.log(`[观影网 V18.2] ${msg}`); } }
+function log(msg ) { try { $log(`[观影网 V18.3] ${msg}`); } catch (_) { console.log(`[观影网 V18.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 
@@ -49,7 +50,7 @@ async function getConfig() {
 }
 
 // =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心API调用逻辑】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
 // --- getCards ---
@@ -166,4 +167,65 @@ async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
     return jsonify({ urls: [panLink] });
+}
+
+// ================== 兼容入口 (必须添加) ==================
+
+/**
+ * 首页，提供分类信息
+ */
+async function home() { 
+    const config = appConfig;
+    log("调用 home，返回分类列表。");
+    return jsonify({ class: config.tabs, filters: {} }); 
+}
+
+/**
+ * 分类页加载，由APP框架调用
+ * @param {string} tid - 分类ID或名称
+ * @param {string} pg - 页码
+ * @param {boolean} filter - 是否筛选
+ * @param {object} ext - 扩展参数
+ */
+async function category(tid, pg, filter, ext) { 
+    log(`调用 category: tid=${tid}, pg=${pg}`);
+    // tid 在某些框架下可能是分类的 name，如 "电影"
+    // 我们需要根据 name 找到配置中的 ext.id
+    const tabConfig = appConfig.tabs.find(tab => tab.name === tid);
+    
+    // 如果通过名字找到了配置，就用配置里的id；否则直接用tid（兼容id直接传入的情况）
+    const id = tabConfig ? tabConfig.ext.id : tid;
+    
+    if (!id) {
+        log(`❌ category 错误: 无法为 tid "${tid}" 找到对应的 ID。`);
+        return jsonify({ list: [] });
+    }
+
+    return getCards({ id: id, page: pg }); 
+}
+
+/**
+ * 详情页加载，由APP框架调用
+ * @param {string} id - 影片的 vod_id，在我们的逻辑里它就是详情API URL
+ */
+async function detail(id) { 
+    log(`调用 detail: id=${id}`);
+    // 这里的 id 是 vod_id，也就是我们之前在 getCards 中设置的 ext.url
+    return getTracks({ url: id }); 
+}
+
+/**
+ * 播放页处理，由APP框架调用
+ * @param {string} flag - 播放源标识
+ * @param {string} id - 播放链接，在我们的逻辑里它就是网盘链接
+ * @param {object} flags - 所有播放源
+ */
+async function play(flag, id, flags) {
+    log(`调用 play: id=${id}`);
+    // 对于网盘资源，我们不需要解析，直接将链接返回给APP处理
+    return jsonify({
+        parse: 0, // 0表示不使用webview解析
+        url: id,  // 直接返回网盘链接
+        header: { "User-Agent": UA } // 可以附加一个UA
+    });
 }
