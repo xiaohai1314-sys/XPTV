@@ -1,5 +1,5 @@
 /**
- * 观影网脚本 - v18.1 (架构升级版 - 增加搜索缓存)
+ * 观影网脚本 - v18.0 (架构升级版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
@@ -8,17 +8,17 @@
  */
 
 // ================== 配置区 ==================
-// ★ 后端不再需要cheerio
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-// ★ 指向你的后端服务器地址
+// ★ 指向你的后端服务器地址。请确保这个IP和端口是正确的。
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.1,
-    title: '观影网 (后端缓存版 )', // 标题变更以区分
+    ver: 18.0,
+    title: '观影网 (后端版 )', // 标题变更以区分
     site: 'https://www.gying.org/',
     tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
+        // 这里的 id 结构是正确的，它会被传递给后端作为分类路径的一部分。
+        { name: '电影', ext: { id: 'mv?page=' } }, 
         { name: '剧集', ext: { id: 'tv?page=' } },
         { name: '动漫', ext: { id: 'ac?page=' } },
     ],
@@ -33,11 +33,9 @@ const searchCache = {
 };
 // ★★★★★★★★★★★★★★★★★
 
-// ★★★★★【Cookie相关逻辑已全部移除】★★★★★
-
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.1] ${msg}`); } catch (_) { console.log(`[观影网 V18.1] ${msg}`);
+function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`);
 } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {};
 } } return ext || {}; }
@@ -58,11 +56,12 @@ async function getConfig() {
 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 // =======================================================================
 
-// --- 【改造】getCards ---
+// --- 【修正】getCards ---
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
-    // ★ 直接请求后端 /getCards 接口
+    
+    // **注意：由于您后端对 id 做了处理，这里不需要再检查 id 是否为 undefined，直接传递即可。**
     const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
     log(`请求后端获取卡片列表: ${url}`);
 
@@ -70,10 +69,16 @@ async function getCards(ext) {
         const { data } = await $fetch.get(url);
         const result = JSON.parse(data);
         if (result.status !== "success") {
-            throw new Error(result.message || '后端返回错误');
+            // 如果后端返回错误消息，使用它
+            throw new Error(result.message || '后端返回错误'); 
         }
-        log(`✅ 成功从后端获取到 ${result.list.length} 个项目。`);
-        return jsonify({ list: result.list });
+        
+        // **修正点 1：后端返回字段是 result.cards**
+        const list = result.cards || []; 
+        log(`✅ 成功从后端获取到 ${list.length} 个项目。`);
+        
+        // 仅返回 list 即可
+        return jsonify({ list });
     } catch (e) {
         log(`❌ 请求后端卡片列表异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
@@ -81,23 +86,33 @@ async function getCards(ext) {
     }
 }
 
-// --- 【改造】getTracks ---
+// --- 【修正】getTracks ---
 async function getTracks(ext) {
     ext = argsify(ext);
-    const detailUrl = ext.url; 
-    // ★ 直接请求后端 /getTracks 接口
-    const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
+    const id = ext.url.match(/id\/(\d+)\.html/)?.[1] || ext.url;
+    
+    // **修正点 2：后端 /getTracks 接口现在是根据 id 而不是 url 工作的。**
+    // 假设您后端希望收到的是 ID (如 3687)，而不是完整的 URL。
+    // 如果后端仍需要完整 URL，则使用 const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(ext.url)}`;
+    const url = `${BACKEND_URL}/getTracks?id=${id}`;
     log(`请求后端获取详情数据: ${url}`);
+    
     try {
         const { data } = await $fetch.get(url);
         const result = JSON.parse(data);
         if (result.status !== "success") {
             throw new Error(result.message || '后端返回错误');
         }
+        
         if (result.message) {
             $utils.toastError(result.message, 4000);
         }
-        return jsonify({ list: result.list });
+        
+        // **修正点 3：后端返回的音轨列表是 result.tracks.tracks**
+        const list = result.tracks?.tracks || [];
+        const title = result.title || '未知标题';
+
+        return jsonify({ list, title });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
         $utils.toastError(`加载失败: ${e.message}`, 4000);
@@ -105,7 +120,7 @@ async function getTracks(ext) {
     }
 }
 
-// --- 【替换】search (新增搜索缓存逻辑) ---
+// --- 【修正】search (处理分页字段映射) ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || ''; // 确保 text 可用
@@ -140,7 +155,8 @@ async function search(ext) {
     }
 
     // 4. 缓存未命中，请求后端
-    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
+    // **注意：后端 /search 接口的关键词参数是 keyword，不是 text**
+    const url = `${BACKEND_URL}/search?keyword=${encodeURIComponent(text)}&page=${page}`;
     log(`请求后端执行搜索: ${url}`);
     
     try {
@@ -151,10 +167,12 @@ async function search(ext) {
             throw new Error(result.message || '后端返回错误');
         }
         
-        const list = result.list || [];
-        // 必须从后端获取 pagecount 和 total
-        const pagecount = result.pagecount || 0;
-        const total = result.total || 0;
+        // **修正点 4：后端返回的是 result.cards 和 result.pagination**
+        const list = result.cards || []; 
+        
+        // **修正点 5：分页字段映射**
+        const pagecount = result.pagination?.lastPage || 0; 
+        const total = 0; // 后端未提供总条目数，设为0或根据需要估算
 
         // 5. 写入缓存
         if (!searchCache.data) searchCache.data = [];
@@ -174,9 +192,10 @@ async function search(ext) {
     }
 }
 
-// --- 【原封不动】getPlayinfo ---
+// --- getPlayinfo (保持不变) ---
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const panLink = ext.pan;
     return jsonify({ urls: [panLink] });
 }
+
