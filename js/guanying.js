@@ -1,28 +1,24 @@
 /**
- * 观影网脚本 - v18.3 (双重修复版)
+ * 观影网脚本 - v18.4 (标准API兼容版)
  *
  * --- 核心思想 ---
  * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
  * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
  *
+ * --- v18.4 更新日志 ---
+ * - 【兼容性】移除了所有对特定APP环境函数 ($fetch, $utils) 的依赖，改用标准的 fetch 和 console API。
+ * - 【兼容性】这解决了脚本在某些环境下因函数未定义而完全不执行（“与后端没联系”）的问题。
+ *
  * --- v18.3 更新日志 ---
- * - 【修复】重构 search 函数，完全修复前端缓存逻辑，正确处理分页和关键词切换，解决搜索结果始终相同的问题。
- * - 【修复】增强 category 兼容入口函数的健壮性，彻底解决因调用环境差异导致分类 id 为 undefined 的问题。
- *
- * --- v18.2 更新日志 ---
- * - 【修复】修正了 appConfig.tabs 中的 id 格式。
- *
- * --- v18.1 更新日志 ---
- * - 【新增】前端搜索缓存机制 (gySearchCache)。
- * - 【优化】实现纯前端分页。
+ * - 【修复】重构 search 函数，修复前端缓存逻辑。
+ * - 【修复】增强 category 兼容入口函数的健壮性。
  */
 
 // ================== 配置区 ==================
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const BACKEND_URL = 'http://192.168.10.105:5000'; 
 
 const appConfig = {
-    ver: 18.3, // 版本号更新
+    ver: 18.4, // 版本号更新
     title: '观影网 (后端版 )',
     site: 'https://www.gying.org/',
     tabs: [
@@ -32,20 +28,33 @@ const appConfig = {
     ],
 };
 
-// ▼▼▼ 搜索缓存对象 (结构参考海绵小站 ) ▼▼▼
 const gySearchCache = {
     keyword: '',
-    data: [],       // 存储从后端获取的完整结果
+    data: [],
     pagecount: 0,
     total: 0,
-    pageSize: 20,   // 每页显示数量
+    pageSize: 20,
 };
 
 // ================== 核心函数 ==================
 
-function log(msg ) { try { $log(`[观影网 V18.3] ${msg}`); } catch (_) { console.log(`[观影网 V18.3] ${msg}`); } }
+// 使用标准 console.log 替代 $log
+function log(msg ) { console.log(`[观影网 V18.4] ${msg}`); }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
+
+// 使用标准 console.error 替代 $utils.toastError
+function toastError(message) { console.error(`[观影网 V18.4 TOAST] ${message}`); }
+
+// 封装一个标准的 fetch 函数
+async function fetchAPI(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json(); // 直接解析为 JSON
+}
+
 
 async function init(ext) { return jsonify({}); }
 async function getConfig() { return jsonify(appConfig); }
@@ -58,7 +67,6 @@ async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
 
-    // 在发请求前增加一道保险，防止 "id=undefined" 的请求被发出
     if (!id || id === 'undefined') {
         log('❌ getCards 检测到无效id，已阻止请求。');
         return jsonify({ list: [] });
@@ -68,8 +76,7 @@ async function getCards(ext) {
     log(`请求后端获取卡片列表: ${url}`);
 
     try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
+        const result = await fetchAPI(url); // 使用标准 fetch
         if (result.status !== "success") {
             throw new Error(result.message || '后端返回错误');
         }
@@ -77,7 +84,7 @@ async function getCards(ext) {
         return jsonify({ list: result.list });
     } catch (e) {
         log(`❌ 请求后端卡片列表异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        toastError(`加载失败: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
@@ -88,23 +95,21 @@ async function getTracks(ext) {
     const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
     log(`请求后端获取详情数据: ${url}`);
     try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
+        const result = await fetchAPI(url); // 使用标准 fetch
         if (result.status !== "success") {
             throw new Error(result.message || '后端返回错误');
         }
         if (result.message) {
-            $utils.toastError(result.message, 4000);
+            toastError(result.message);
         }
         return jsonify({ list: result.list });
     } catch (e) {
         log(`❌ 获取详情数据异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        toastError(`加载失败: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- 【v18.3 重构】search (完全修复缓存和分页逻辑) ---
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text;
@@ -112,7 +117,6 @@ async function search(ext) {
 
     if (!text) return jsonify({ list: [] });
 
-    // 1. 关键词变化，重置缓存
     if (gySearchCache.keyword !== text) {
         log(`新关键词搜索: "${text}"，清空缓存。`);
         gySearchCache.keyword = text;
@@ -121,7 +125,6 @@ async function search(ext) {
         gySearchCache.total = 0;
     }
 
-    // 2. 如果缓存中已有数据，直接执行前端分页
     if (gySearchCache.data.length > 0) {
         log(`✅ 命中前端缓存，执行纯前端分页 (第 ${page} 页)。`);
         const start = (page - 1) * gySearchCache.pageSize;
@@ -130,27 +133,23 @@ async function search(ext) {
         return jsonify({ list: pageResults, pagecount: gySearchCache.pagecount, total: gySearchCache.total });
     }
 
-    // 3. 缓存未命中，执行后端请求
     log("缓存未命中，开始向后端请求数据...");
     const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}`;
     log(`请求后端执行搜索: ${url}`);
 
     try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
+        const result = await fetchAPI(url); // 使用标准 fetch
 
         if (result.status !== "success") {
             throw new Error(result.message || '后端返回错误');
         }
 
-        // 4. 填充缓存
         const allResults = result.list || [];
         gySearchCache.data = allResults;
         gySearchCache.total = allResults.length;
         gySearchCache.pagecount = Math.ceil(allResults.length / gySearchCache.pageSize);
         log(`✅ 成功获取 ${gySearchCache.total} 条结果并缓存。总页数: ${gySearchCache.pagecount}`);
 
-        // 5. 返回第一页数据
         const start = (page - 1) * gySearchCache.pageSize;
         const end = start + gySearchCache.pageSize;
         const pageResults = gySearchCache.data.slice(start, end);
@@ -159,8 +158,8 @@ async function search(ext) {
 
     } catch (e) {
         log(`❌ 搜索异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
-        gySearchCache.keyword = ''; // 清空关键词以便重试
+        toastError(`加载失败: ${e.message}`);
+        gySearchCache.keyword = '';
         return jsonify({ list: [], pagecount: 0, total: 0 });
     }
 }
@@ -171,14 +170,11 @@ async function getPlayinfo(ext) {
     return jsonify({ urls: [panLink] });
 }
 
-// ======= 兼容入口 (v18.3 修复) =======
+// ======= 兼容入口 =======
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 
-// --- 【v18.3 修复】增强 category 函数健壮性 ---
 async function category(tid, pg) {
-    // 无论 tid 是对象 {id:'mv'} 还是字符串 'mv'，都能正确提取 id
-    // 如果 tid 无效，id 会是 undefined，后续 getCards 会阻止请求
     const id = tid && tid.id ? tid.id : tid;
     log(`[兼容入口] category 调用, 解析出 id: ${id}, page: ${pg}`);
     return getCards({ id: id, page: pg });
