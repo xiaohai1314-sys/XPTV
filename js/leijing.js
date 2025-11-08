@@ -26,7 +26,7 @@ const appConfig = {
   title: '雷鲸',
   site: 'https://www.leijing.xyz/',
   tabs: [
-    { name: '剧集', ext: { id: 'index?tagId=42204684250355' } },
+    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
     { name: '动漫', ext: { id: '?tagId=42204792950357' } },
     { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
