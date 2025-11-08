@@ -1,21 +1,20 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35 (修复人机验证循环问题 - 参照玩偶哥哥机制)
+ * 脚本名称: 雷鲸资源站脚本 - v35.2 (最终优化版)
  *
  * 更新说明:
- * - 修复: 解决人机验证成功后仍循环弹出的问题。
- * - 机制: 移除依赖于非标准 API ($utils.getCookie) 的手动 Cookie 携带逻辑，
- * 转而依赖运行环境自动持久化和携带验证成功的 Cookie。
- * - 版本号: 升级至 v35。
+ * - 修复: 解决引入 $cache 导致的“验证不弹出”和“列表不显示”问题。
+ * - 机制: 移除缓存逻辑，回归“玩偶哥哥”机制：每次遇到验证都触发跳转，
+ * 依赖系统自动同步 Cookie，流程不中断。
  * =================================================================
  */
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)";
 const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 35, // 版本号+1
+  ver: 35.2, // 版本号升级
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -32,59 +31,38 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-function getHtmlFromResponse(response) {
-  if (typeof response === 'string') return response;
-  if (response && typeof response.data === 'string') return response.data;
-  console.error("收到了非预期的响应格式:", response);
-  return ''; 
-}
-
-// 封装人机验证检查函数
+// ========== ✅ 验证检测逻辑（移除缓存） ========== //
 function checkForHumanVerification(html, siteUrl, userAgent) {
   const $ = cheerio.load(html);
-  const pageTitle = $('title').text();
-  if (pageTitle.includes('Just a moment...')) {
-    console.log("检测到人机验证，正在尝试跳转...");
-    $utils.openSafari(siteUrl, userAgent);
-    // 返回 true 表示需要中断当前操作
-    return true;
+  const title = $('title').text().trim();
+  if (
+    title.includes('Just a moment') ||
+    html.includes('cf-challenge') ||
+    html.includes('Checking your browser') ||
+    html.includes('Attention Required')
+  ) {
+      // ⚠️ 关键修复：移除 $cache 逻辑，让其每次都尝试跳转。
+      //    如果 Cookie 已同步，下次请求就不会再进入这个 if 块。
+      console.log("检测到人机验证，已自动打开 Safari，请在浏览器中完成验证。");
+      $utils.openSafari(siteUrl, userAgent);
   }
-  return false;
 }
+// ======================================================= //
 
-// **【修改】** 辅助函数：获取并构建请求头 (移除手动 Cookie 逻辑)
-async function getRequestHeaders() {
-    const headers = { 'User-Agent': UA };
-    // 移除依赖于 $utils.getCookie 的逻辑，信任运行环境自动管理 Cloudflare Cookie。
-    /* try {
-        const cookie = await $utils.getCookie(appConfig.site);
-        if (cookie) {
-            headers['Cookie'] = cookie;
-        }
-    } catch (e) {
-        console.log("无法获取持久化 Cookie，可能您的运行环境不支持 $utils.getCookie API。");
-    }
-    */
-    return headers;
-}
-
-// getCards 函数
+// getCards
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  // 使用精简后的请求头
-  const headers = await getRequestHeaders();
-  const response = await $fetch.get(requestUrl, { headers });
-  const htmlData = getHtmlFromResponse(response);
+  const response = await $fetch.get(requestUrl, {
+    headers: { 'User-Agent': UA }
+  });
+  const htmlData = typeof response === 'string' ? response : response.data;
 
-  // 检查人机验证
-  if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
-    // 如果需要验证，则返回空列表，避免后续代码出错
-    return jsonify({ list: [] });
-  }
+  // ✅ 检测验证页（不 return，不中断）
+  checkForHumanVerification(htmlData, appConfig.site, UA);
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, each) => {
@@ -113,6 +91,7 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
+// 提取天翼云盘链接逻辑保持不变
 function getProtocolAgnosticUrl(rawUrl) {
   if (!rawUrl) return null;
   const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
@@ -120,7 +99,7 @@ function getProtocolAgnosticUrl(rawUrl) {
   return match ? match[0] : null;
 }
 
-// getTracks 函数
+// getTracks
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -128,24 +107,17 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    // 使用精简后的请求头
-    const headers = await getRequestHeaders();
-    const response = await $fetch.get(requestUrl, { headers });
-    const htmlData = getHtmlFromResponse(response);
+    const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+    const htmlData = typeof response === 'string' ? response : response.data;
 
-    // 检查人机验证
-    if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
-      // 如果需要验证，则返回空列表
-      return jsonify({ list: [] });
-    }
+    // ✅ 检测验证页
+    checkForHumanVerification(htmlData, appConfig.site, UA);
 
     const $ = cheerio.load(htmlData);
-
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    // ... (后续的链接提取逻辑保持不变)
-    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://');
@@ -197,19 +169,21 @@ async function getTracks(ext) {
   }
 }
 
-// search 函数 (保持不变)
+// search 保持不变
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 注意：search 函数使用的是 BACKEND_URL，如果这个后端没有 Cloudflare 验证，则不需要headers
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
   const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response);
-  const $ = cheerio.load(htmlData);
+  const htmlData = typeof response === 'string' ? response : response.data;
 
+  // ✅ 检测验证页
+  checkForHumanVerification(htmlData, appConfig.site, UA);
+
+  const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
