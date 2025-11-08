@@ -14,7 +14,7 @@ const appConfig = {
 		{
 			name: '首页',
 			ext: {
-				id: '/',
+				id: '/map.html',
 			},
 		},
 		{
