@@ -1,11 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35.1 (人机验证优化版)
+ * 脚本名称: 雷鲸资源站脚本 - v35.2 (分类显示 + 验证优化)
  *
  * 更新说明:
- * - 改进: 验证检测逻辑参考“玩偶哥哥”，不再循环触发。
- * - 机制: 仅在首次检测到 Cloudflare 验证时打开 Safari，后续自动通过。
- * - 去除: Cookie 强依赖逻辑，交由系统自动处理 cf_clearance。
+ * - 修复: v35.1 分类页不显示问题。
+ * - 优化: 仅首次检测到 Cloudflare 验证时打开 Safari。
+ * - 保留: 验证通过后自动缓存状态，不再中断。
  * =================================================================
  */
 
@@ -14,7 +14,7 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 35.1,
+  ver: 35.2,
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,39 +31,45 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// ========== ✅ 验证检测逻辑（参考玩偶哥哥脚本） ========== //
+// ✅ 改进的人机验证检测函数
 function checkForHumanVerification(html, siteUrl, userAgent) {
   const $ = cheerio.load(html);
   const title = $('title').text().trim();
-  if (
+
+  const isVerify =
     title.includes('Just a moment') ||
     html.includes('cf-challenge') ||
     html.includes('Checking your browser') ||
-    html.includes('Attention Required')
-  ) {
+    html.includes('Attention Required');
+
+  if (isVerify) {
     if (!$cache.get('leijing_verified')) {
-      $cache.set('leijing_verified', true, 3600); // 一小时内只触发一次
-      console.log("检测到人机验证，已自动打开 Safari，请在浏览器中完成验证。");
+      $cache.set('leijing_verified', true, 3600);
+      console.log("⚠️ 检测到 Cloudflare 验证，已自动打开 Safari，请完成验证。");
       $utils.openSafari(siteUrl, userAgent);
     }
+    // ✅ 验证页时返回 true（本次中断）
+    return true;
   }
+
+  // ✅ 验证通过后
+  return false;
 }
-// ======================================================= //
 
 // getCards
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-  
-  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, {
-    headers: { 'User-Agent': UA }
-  });
+
+  const requestUrl = `${appConfig.site}${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
   const htmlData = typeof response === 'string' ? response : response.data;
 
-  // ✅ 检测验证页（不 return，不中断）
-  checkForHumanVerification(htmlData, appConfig.site, UA);
+  // ✅ 如果检测到验证页，则中断（只在首次）
+  if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+    return jsonify({ list: [] });
+  }
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, each) => {
@@ -92,7 +98,6 @@ async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
 }
 
-// 提取天翼云盘链接逻辑保持不变
 function getProtocolAgnosticUrl(rawUrl) {
   if (!rawUrl) return null;
   const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
@@ -111,8 +116,9 @@ async function getTracks(ext) {
     const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
     const htmlData = typeof response === 'string' ? response : response.data;
 
-    // ✅ 检测验证页
-    checkForHumanVerification(htmlData, appConfig.site, UA);
+    if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+      return jsonify({ list: [] });
+    }
 
     const $ = cheerio.load(htmlData);
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
@@ -170,7 +176,6 @@ async function getTracks(ext) {
   }
 }
 
-// search 保持不变
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -181,8 +186,9 @@ async function search(ext) {
   const response = await $fetch.get(requestUrl);
   const htmlData = typeof response === 'string' ? response : response.data;
 
-  // ✅ 检测验证页
-  checkForHumanVerification(htmlData, appConfig.site, UA);
+  if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+    return jsonify({ list: [] });
+  }
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, el) => {
