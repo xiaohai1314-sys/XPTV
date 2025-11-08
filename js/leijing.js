@@ -1,11 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35.2 (最终优化版)
+ * 脚本名称: 雷鲸资源站脚本 - v35.3 (内联修复版)
  *
  * 更新说明:
- * - 修复: 解决引入 $cache 导致的“验证不弹出”和“列表不显示”问题。
- * - 机制: 移除缓存逻辑，回归“玩偶哥哥”机制：每次遇到验证都触发跳转，
- * 依赖系统自动同步 Cookie，流程不中断。
+ * - 最终修复: 解决 Tab 栏消失的问题。
+ * - 机制: 移除 checkForHumanVerification 独立函数，将验证逻辑内联到主函数中，
+ * 避免脚本初始化时发生错误，确保 getConfig 成功执行。
  * =================================================================
  */
 
@@ -14,7 +14,7 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 35.2, // 版本号升级
+  ver: 35.3, // 版本号升级
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -28,26 +28,17 @@ const appConfig = {
 };
 
 async function getConfig() {
+  // 此函数完全不受任何 $fetch 或验证逻辑影响，确保 Tab 显示
   return jsonify(appConfig);
 }
 
-// ========== ✅ 验证检测逻辑（移除缓存） ========== //
-function checkForHumanVerification(html, siteUrl, userAgent) {
-  const $ = cheerio.load(html);
-  const title = $('title').text().trim();
-  if (
-    title.includes('Just a moment') ||
-    html.includes('cf-challenge') ||
-    html.includes('Checking your browser') ||
-    html.includes('Attention Required')
-  ) {
-      // ⚠️ 关键修复：移除 $cache 逻辑，让其每次都尝试跳转。
-      //    如果 Cookie 已同步，下次请求就不会再进入这个 if 块。
-      console.log("检测到人机验证，已自动打开 Safari，请在浏览器中完成验证。");
-      $utils.openSafari(siteUrl, userAgent);
-  }
+// 提取天翼云盘链接逻辑
+function getProtocolAgnosticUrl(rawUrl) {
+  if (!rawUrl) return null;
+  const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
+  const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
+  return match ? match[0] : null;
 }
-// ======================================================= //
 
 // getCards
 async function getCards(ext) {
@@ -61,8 +52,20 @@ async function getCards(ext) {
   });
   const htmlData = typeof response === 'string' ? response : response.data;
 
-  // ✅ 检测验证页（不 return，不中断）
-  checkForHumanVerification(htmlData, appConfig.site, UA);
+  // ✅ Cloudflare 验证检测 (内联逻辑)
+  const $check = cheerio.load(htmlData);
+  const title = $check('title').text().trim();
+  if (
+    title.includes('Just a moment') ||
+    htmlData.includes('cf-challenge') ||
+    htmlData.includes('Checking your browser') ||
+    htmlData.includes('Attention Required')
+  ) {
+      console.log("检测到人机验证，已自动打开 Safari。");
+      $utils.openSafari(appConfig.site, UA);
+      // 继续执行，解析失败，返回空列表，但流程不中断。
+  }
+  // ------------------------------------
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, each) => {
@@ -87,18 +90,6 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-async function getPlayinfo(ext) {
-  return jsonify({ urls: [] });
-}
-
-// 提取天翼云盘链接逻辑保持不变
-function getProtocolAgnosticUrl(rawUrl) {
-  if (!rawUrl) return null;
-  const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
-  const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
-  return match ? match[0] : null;
-}
-
 // getTracks
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -110,8 +101,19 @@ async function getTracks(ext) {
     const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
     const htmlData = typeof response === 'string' ? response : response.data;
 
-    // ✅ 检测验证页
-    checkForHumanVerification(htmlData, appConfig.site, UA);
+    // ✅ Cloudflare 验证检测 (内联逻辑)
+    const $check = cheerio.load(htmlData);
+    const title = $check('title').text().trim();
+    if (
+      title.includes('Just a moment') ||
+      htmlData.includes('cf-challenge') ||
+      htmlData.includes('Checking your browser') ||
+      htmlData.includes('Attention Required')
+    ) {
+        console.log("检测到人机验证，已自动打开 Safari。");
+        $utils.openSafari(appConfig.site, UA);
+    }
+    // ------------------------------------
 
     const $ = cheerio.load(htmlData);
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
@@ -180,8 +182,21 @@ async function search(ext) {
   const response = await $fetch.get(requestUrl);
   const htmlData = typeof response === 'string' ? response : response.data;
 
-  // ✅ 检测验证页
-  checkForHumanVerification(htmlData, appConfig.site, UA);
+  // ✅ Cloudflare 验证检测 (内联逻辑)
+  const $check = cheerio.load(htmlData);
+  const title = $check('title').text().trim();
+  if (
+    title.includes('Just a moment') ||
+    htmlData.includes('cf-challenge') ||
+    htmlData.includes('Checking your browser') ||
+    htmlData.includes('Attention Required')
+  ) {
+      console.log("检测到人机验证，已自动打开 Safari。");
+      // 注意：search 函数使用的是 BACKEND_URL，如果验证发生在 BACKEND_URL 上，这里的 siteUrl 应该是 BACKEND_URL
+      // 但鉴于主要验证发生在 appConfig.site，我们依然用它来尝试解决问题。
+      $utils.openSafari(appConfig.site, UA);
+  }
+  // ------------------------------------
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, el) => {
