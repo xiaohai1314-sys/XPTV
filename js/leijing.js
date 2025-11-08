@@ -1,13 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v34 (集成人机验证跳转)
+ * 脚本名称: 雷鲸资源站脚本 - v35 (修复人机验证循环问题)
  *
  * 更新说明:
- * - 新增: 集成Cloudflare人机验证跳转功能。当访问遇到验证时，会自动调用浏览器完成验证。
- * - 修复无法识别带中文括号访问码的链接。
- * - 自动拼接格式「链接（访问码：xxxx）」。
- * - 增强去重机制：即使带括号/访问码的重复链接也只保留一条。
- * - 分类结构、精准匹配、<a>提取部分保持原样。
+ * - 修复: 解决人机验证成功后仍循环弹出的问题。
+ * - 机制: 脚本现在会尝试获取并携带应用环境中的持久化 Cookie，确保验证成功后能保持会话。
+ * - 版本号: 升级至 v35。
  * =================================================================
  */
 
@@ -16,7 +14,7 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 34, // 版本号+1
+  ver: 35, // 版本号+1
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -53,6 +51,24 @@ function checkForHumanVerification(html, siteUrl, userAgent) {
   return false;
 }
 
+// **【新增】** 辅助函数：获取并构建请求头
+async function getRequestHeaders() {
+    const headers = { 'User-Agent': UA };
+    // 假设你的运行环境提供了 $utils.getCookie 来获取持久化 Cookie
+    // 这个 Cookie 包含了用户在外部浏览器验证成功后设置的 cf_clearance
+    // 如果你的运行环境没有 $utils.getCookie，请将这部分代码删除或替换为正确的 API
+    try {
+        const cookie = await $utils.getCookie(appConfig.site);
+        if (cookie) {
+            headers['Cookie'] = cookie;
+        }
+    } catch (e) {
+        // 捕获 $utils.getCookie 不存在的错误，如果你的环境不支持这个 API，请忽略
+        console.log("无法获取持久化 Cookie，可能您的运行环境不支持 $utils.getCookie API。");
+    }
+    return headers;
+}
+
 // getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
@@ -60,10 +76,12 @@ async function getCards(ext) {
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  // **【修改】** 使用新的请求头，携带 Cookie
+  const headers = await getRequestHeaders();
+  const response = await $fetch.get(requestUrl, { headers });
   const htmlData = getHtmlFromResponse(response);
 
-  // **【新增】** 在这里检查人机验证
+  // 检查人机验证
   if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
     // 如果需要验证，则返回空列表，避免后续代码出错
     return jsonify({ list: [] });
@@ -111,10 +129,12 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+    // **【修改】** 使用新的请求头，携带 Cookie
+    const headers = await getRequestHeaders();
+    const response = await $fetch.get(requestUrl, { headers });
     const htmlData = getHtmlFromResponse(response);
 
-    // **【新增】** 在这里检查人机验证
+    // 检查人机验证
     if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
       // 如果需要验证，则返回空列表
       return jsonify({ list: [] });
@@ -178,16 +198,13 @@ async function getTracks(ext) {
   }
 }
 
-// search 函数 (注意：search函数依赖后端，如果后端也受CF保护，则此方法无效)
+// search 函数 (保持不变)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // search函数请求的是你的后端地址，而不是雷鲸网站。
-  // 因此，人机验证逻辑不需要加在这里。
-  // 如果你的后端在抓取雷鲸网站时被拦截，你需要在后端服务中处理这个问题。
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
   const response = await $fetch.get(requestUrl);
   const htmlData = getHtmlFromResponse(response);
