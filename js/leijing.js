@@ -50,15 +50,6 @@ async function getCards(ext) {
   const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
-  
-  // 新增：人机验证检查
-  const pageTitle = $('title').text().trim();
-  if (pageTitle === 'Just a moment...') {
-    $utils.openSafari(appConfig.site, UA);
-    // 可以返回空列表或错误，等待用户验证后重试
-    return jsonify({ list: [] });
-  }
-
   $('.topicItem').each((_, each) => {
     if ($(each).find('.cms-lock-solid').length > 0) return;
     const href = $(each).find('h2 a').attr('href');
@@ -104,14 +95,6 @@ async function getTracks(ext) {
     const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
     const htmlData = getHtmlFromResponse(response);
     const $ = cheerio.load(htmlData);
-
-    // 新增：人机验证检查
-    const pageTitleCheck = $('title').text().trim();
-    if (pageTitleCheck === 'Just a moment...') {
-      $utils.openSafari(appConfig.site, UA);
-      // 可以返回空列表或错误，等待用户验证后重试
-      return jsonify({ list: [] });
-    }
 
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
@@ -191,14 +174,6 @@ async function search(ext) {
   const response = await $fetch.get(requestUrl);
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
-
-  // 新增：人机验证检查
-  const pageTitle = $('title').text().trim();
-  if (pageTitle === 'Just a moment...') {
-    $utils.openSafari(appConfig.site, UA);
-    // 可以返回空列表或错误，等待用户验证后重试
-    return jsonify({ list: [] });
-  }
 
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
