@@ -1,8 +1,9 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v33 修正版（支持访问码拼接 + 去重增强）
+ * 脚本名称: 雷鲸资源站脚本 - v34 (集成人机验证跳转)
  *
  * 更新说明:
+ * - 新增: 集成Cloudflare人机验证跳转功能。当访问遇到验证时，会自动调用浏览器完成验证。
  * - 修复无法识别带中文括号访问码的链接。
  * - 自动拼接格式「链接（访问码：xxxx）」。
  * - 增强去重机制：即使带括号/访问码的重复链接也只保留一条。
@@ -15,7 +16,7 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 33,
+  ver: 34, // 版本号+1
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -39,6 +40,19 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
+// 封装人机验证检查函数
+function checkForHumanVerification(html, siteUrl, userAgent) {
+  const $ = cheerio.load(html);
+  const pageTitle = $('title').text();
+  if (pageTitle.includes('Just a moment...')) {
+    console.log("检测到人机验证，正在尝试跳转...");
+    $utils.openSafari(siteUrl, userAgent);
+    // 返回 true 表示需要中断当前操作
+    return true;
+  }
+  return false;
+}
+
 // getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
@@ -48,6 +62,12 @@ async function getCards(ext) {
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
   const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
   const htmlData = getHtmlFromResponse(response);
+
+  // **【新增】** 在这里检查人机验证
+  if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+    // 如果需要验证，则返回空列表，避免后续代码出错
+    return jsonify({ list: [] });
+  }
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, each) => {
@@ -78,7 +98,6 @@ async function getPlayinfo(ext) {
 
 function getProtocolAgnosticUrl(rawUrl) {
   if (!rawUrl) return null;
-  // 🔹 去除访问码部分后提取核心 cloud.189.cn 链接
   const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
   const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
   return match ? match[0] : null;
@@ -94,12 +113,19 @@ async function getTracks(ext) {
     const requestUrl = ext.url;
     const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
     const htmlData = getHtmlFromResponse(response);
+
+    // **【新增】** 在这里检查人机验证
+    if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+      // 如果需要验证，则返回空列表
+      return jsonify({ list: [] });
+    }
+
     const $ = cheerio.load(htmlData);
 
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    // 第一部分：精准匹配（保持原样）
+    // ... (后续的链接提取逻辑保持不变)
     const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
@@ -110,7 +136,6 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
-    // 第二部分：<a> 标签提取（保持原样）
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const $el = $(el);
       let href = $el.attr('href');
@@ -123,27 +148,17 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
-    // 第三部分：裸文本提取（修正版 + 去重增强）
     const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://');
-
-      // ✅ 提取访问码
       let accessCode = '';
       const codeMatch = bodyText.slice(match.index, match.index + 100)
         .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
       if (codeMatch) accessCode = codeMatch[1];
-
-      // ✅ 去除尾部多余符号
       panUrl = panUrl.trim().replace(/[）\)]+$/, '');
-
-      // ✅ 拼接访问码
       if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
-
-      // ✅ 去重前清理访问码部分
       const agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
-
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
@@ -163,13 +178,16 @@ async function getTracks(ext) {
   }
 }
 
-// search 函数
+// search 函数 (注意：search函数依赖后端，如果后端也受CF保护，则此方法无效)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
+  // search函数请求的是你的后端地址，而不是雷鲸网站。
+  // 因此，人机验证逻辑不需要加在这里。
+  // 如果你的后端在抓取雷鲸网站时被拦截，你需要在后端服务中处理这个问题。
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
   const response = await $fetch.get(requestUrl);
   const htmlData = getHtmlFromResponse(response);
