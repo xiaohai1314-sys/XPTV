@@ -1,11 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35.2 (分类显示 + 验证优化)
+ * 脚本名称: 雷鲸资源站脚本 - v35.2 (修复版)
  *
  * 更新说明:
- * - 修复: v35.1 分类页不显示问题。
- * - 优化: 仅首次检测到 Cloudflare 验证时打开 Safari。
- * - 保留: 验证通过后自动缓存状态，不再中断。
+ * - 修复: 解决了 v35.1 中因人机验证逻辑修改导致分类列表无法显示的问题。
+ * - 改进: 验证检测逻辑参考“玩偶哥哥”，不再循环触发，仅在首次检测到 Cloudflare 验证时打开 Safari。
+ * - 机制: 当检测到验证页面时，会中断当前的解析流程，避免对无效 HTML 进行操作，同时交由系统自动处理 cf_clearance。
+ * - 版本号: 升级至 v35.2。
  * =================================================================
  */
 
@@ -14,7 +15,7 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001';
 
 const appConfig = {
-  ver: 35.2,
+  ver: 35.2, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -31,43 +32,45 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// ✅ 改进的人机验证检测函数
+// ========== ✅ 验证检测逻辑 (已修复) ========== //
 function checkForHumanVerification(html, siteUrl, userAgent) {
   const $ = cheerio.load(html);
   const title = $('title').text().trim();
-
-  const isVerify =
-    title.includes('Just a moment') ||
-    html.includes('cf-challenge') ||
-    html.includes('Checking your browser') ||
-    html.includes('Attention Required');
-
-  if (isVerify) {
+  const needsVerification = title.includes('Just a moment') ||
+                            html.includes('cf-challenge') ||
+                            html.includes('Checking your browser') ||
+                            html.includes('Attention Required');
+  
+  if (needsVerification) {
+    // 使用缓存机制，确保一小时内只打开一次浏览器
     if (!$cache.get('leijing_verified')) {
-      $cache.set('leijing_verified', true, 3600);
-      console.log("⚠️ 检测到 Cloudflare 验证，已自动打开 Safari，请完成验证。");
+      $cache.set('leijing_verified', true, 3600); // 设置1小时的标记
+      console.log("检测到人机验证，已自动打开 Safari，请在浏览器中完成验证。");
       $utils.openSafari(siteUrl, userAgent);
     }
-    // ✅ 验证页时返回 true（本次中断）
+    // 返回 true，通知调用者需要中断操作
     return true;
   }
-
-  // ✅ 验证通过后
+  // 如果不需要验证，返回 false
   return false;
 }
+// ======================================================= //
 
-// getCards
+// getCards (已修复)
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
-
-  const requestUrl = `${appConfig.site}${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  
+  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, {
+    headers: { 'User-Agent': UA }
+  });
   const htmlData = typeof response === 'string' ? response : response.data;
 
-  // ✅ 如果检测到验证页，则中断（只在首次）
+  // ✅ 检测验证页，如果需要验证则中断执行
   if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+    console.log("getCards 中断：等待人机验证完成。");
     return jsonify({ list: [] });
   }
 
@@ -105,7 +108,7 @@ function getProtocolAgnosticUrl(rawUrl) {
   return match ? match[0] : null;
 }
 
-// getTracks
+// getTracks (已修复)
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -116,7 +119,9 @@ async function getTracks(ext) {
     const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
     const htmlData = typeof response === 'string' ? response : response.data;
 
+    // ✅ 检测验证页，如果需要验证则中断执行
     if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+      console.log("getTracks 中断：等待人机验证完成。");
       return jsonify({ list: [] });
     }
 
@@ -154,9 +159,9 @@ async function getTracks(ext) {
         .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
       if (codeMatch) accessCode = codeMatch[1];
       panUrl = panUrl.trim().replace(/[）\)]+$/, '');
-      if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
       const agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+      if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
@@ -176,6 +181,7 @@ async function getTracks(ext) {
   }
 }
 
+// search (已修复)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -186,7 +192,9 @@ async function search(ext) {
   const response = await $fetch.get(requestUrl);
   const htmlData = typeof response === 'string' ? response : response.data;
 
+  // ✅ 检测验证页，如果需要验证则中断执行
   if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+    console.log("search 中断：等待人机验证完成。");
     return jsonify({ list: [] });
   }
 
