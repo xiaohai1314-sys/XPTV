@@ -1,21 +1,28 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v33 修正版（支持访问码拼接 + 去重增强）
+ * 脚本名称: 雷鲸资源站脚本 - v35 修正版（支持直接使用 Cookie）
  *
- * 更新说明:
- * - 修复无法识别带中文括号访问码的链接。
- * - 自动拼接格式「链接（访问码：xxxx）」。
- * - 增强去重机制：即使带括号/访问码的重复链接也只保留一条。
- * - 分类结构、精准匹配、<a>提取部分保持原样。
+ * 更新说明 (v35):
+ * - 移除账号密码登录逻辑，改为直接使用用户提供的 Cookie 字符串。
+ * - 在脚本顶部定义 `USER_COOKIE` 常量，请在此处填入你的 Cookie。
+ * - 所有网络请求将自动携带此 Cookie，以保持登录会话。
+ * - 简化了代码，移除了不再需要的 axios 和 tough-cookie 依赖。
+ * - 保持 v33 的所有功能（访问码拼接、去重增强等）。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-const BACKEND_URL = 'http://192.168.1.3:3001';
+// ⚠️ 注意：这个 IP 地址是本地地址，如果您的运行环境无法访问，请修改为正确的后端服务地址。
+const BACKEND_URL = 'http://192.168.1.3:3001'; 
+
+// ============================ 关键配置 ============================
+// ⚠️ 请将下面的字符串替换为您自己的完整 Cookie
+const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-AfjYdK1a9Hn9QyIpTjcD9Dy1w; cf_clearance=1KSgiw7quPKkMiFpRseR8YlHhPJjE_fl0v.L6LbMzlo-1762633022-1.2.1.1-WPvSiDK.w5XsUlu3sIwM4r5pg8AbCqXfGCsZYrFulDsMxo0Z0oKHy4YZNU1C.70_VsKU.D5AgZOZPChSUtnGk8iYVjvnTdrsprQVVyupyTPYq9xRR1KlQoeJ1JqAtjGSqYQu0y_UHuMqdpX.7UDjjQIpRK_gyc2kt5DiEcH2u.Vug6xqZtMX96KOmgB2tsb_I9aWRs5Hl7_UneGjZeeVXPUxtaPY4Fl.0n2z3btGdbYs3hYuja0aWXP0oJSUIs1i; __gads=ID=ebf773339e181721:T=1760889219:RT=1760889219:S=ALNI_MZfqUGthmjWHR1DiGAkynLdHaoVZw; __gpi=UID=000012b7ed6f2a8b:T=1760889219:RT=1760889219:S=ALNI_MaypqVukBihQplCbqa_MrCVPwJkTQ; _ga=GA1.1.1766815720.1762630882; _ga_FM8S5GPFE1=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; _ga_WPP9075S5T=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; cms_token=67de22ffa3184ee89c74e1d1eb5bb4aa; JSESSIONID=15D09C7857B0243558DC7B2ECF5802F4';
+// =================================================================
 
 const appConfig = {
-  ver: 33,
+  ver: 35, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing.xyz',
   tabs: [
@@ -26,6 +33,12 @@ const appConfig = {
     { name: '综艺', ext: { id: '?tagId=42210356650363' } },
     { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
   ],
+};
+
+// 统一的请求头，包含 User-Agent 和 Cookie
+const requestHeaders = {
+  'User-Agent': UA,
+  'Cookie': USER_COOKIE,
 };
 
 async function getConfig() {
@@ -39,18 +52,19 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
-// getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  // 在请求中带上包含 Cookie 的请求头
+  const response = await $fetch.get(requestUrl, { headers: requestHeaders });
   const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
   $('.topicItem').each((_, each) => {
+    // 逻辑保持不变
     if ($(each).find('.cms-lock-solid').length > 0) return;
     const href = $(each).find('h2 a').attr('href');
     const title = $(each).find('h2 a').text();
@@ -78,13 +92,11 @@ async function getPlayinfo(ext) {
 
 function getProtocolAgnosticUrl(rawUrl) {
   if (!rawUrl) return null;
-  // 🔹 去除访问码部分后提取核心 cloud.189.cn 链接
   const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
   const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
   return match ? match[0] : null;
 }
 
-// getTracks 函数
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -92,14 +104,15 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+    // 在请求中带上包含 Cookie 的请求头
+    const response = await $fetch.get(requestUrl, { headers: requestHeaders });
     const htmlData = getHtmlFromResponse(response);
     const $ = cheerio.load(htmlData);
 
+    // 后续逻辑保持不变
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    // 第一部分：精准匹配（保持原样）
     const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
@@ -110,7 +123,6 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
-    // 第二部分：<a> 标签提取（保持原样）
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const $el = $(el);
       let href = $el.attr('href');
@@ -123,27 +135,17 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
-    // 第三部分：裸文本提取（修正版 + 去重增强）
     const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://');
-
-      // ✅ 提取访问码
       let accessCode = '';
       const codeMatch = bodyText.slice(match.index, match.index + 100)
         .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
       if (codeMatch) accessCode = codeMatch[1];
-
-      // ✅ 去除尾部多余符号
       panUrl = panUrl.trim().replace(/[）\)]+$/, '');
-
-      // ✅ 拼接访问码
       if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
-
-      // ✅ 去重前清理访问码部分
       const agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
-
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
@@ -163,17 +165,17 @@ async function getTracks(ext) {
   }
 }
 
-// search 函数
 async function search(ext) {
   ext = argsify(ext);
-  let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
+let cards = [];
+let text = encodeURIComponent(ext.text);
+let page = ext.page || 1;
 
-  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-  const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response);
-  const $ = cheerio.load(htmlData);
+const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+// 搜索功能也需要带上 Cookie
+const response = await $fetch.get(requestUrl, { headers: requestHeaders });
+const htmlData = getHtmlFromResponse(response);
+const $ = cheerio.load(htmlData);
 
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
