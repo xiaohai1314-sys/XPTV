@@ -24,9 +24,9 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 const appConfig = {
   ver: 35, // 版本号更新
   title: '雷鲸',
-  site: 'https://www.leijing.xyz/index',
+  site: 'https://www.leijing.xyz/',
   tabs: [
-    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
+    { name: '剧集', ext: { id: 'index?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
     { name: '动漫', ext: { id: '?tagId=42204792950357' } },
     { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
