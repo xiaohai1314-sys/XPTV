@@ -11,12 +11,7 @@ const appConfig = {
 	title: '极狐4K', // title 已更新
 	site: 'https://4kfox.com', // site 已更新
 	tabs: [
-		{
-			name: '首页',
-			ext: {
-				id: '/map.html',
-			},
-		},
+
 		{
 			name: '电影',
 			ext: {
