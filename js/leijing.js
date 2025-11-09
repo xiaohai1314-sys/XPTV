@@ -1,6 +1,6 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35 修正版（支持直接使用 Cookie）
+ * 脚本名称: 雷鲸资源站脚本 - v36 修正版（支持直接使用 Cookie）
  *
  * 更新说明 (v35):
  * - 移除账号密码登录逻辑，改为直接使用用户提供的 Cookie 字符串。
@@ -24,7 +24,7 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 const appConfig = {
   ver: 35, // 版本号更新
   title: '雷鲸',
-  site: 'https://www.leijing.xyz/',
+  site: 'https://www.leijing1.xyz/',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
