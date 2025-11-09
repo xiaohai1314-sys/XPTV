@@ -1,5 +1,5 @@
 /**
- * 网盘资源社 App 插件前端代码 (V24 - 最终健壮版)
+ * 网盘资源社 App 插件前端代码 (V23 - 最终健壮版)
  * 
  * 更新日志:
  * - V23: 旨在解决所有已知复杂情况，包括链接与提取码不在同一行的问题，同时确保链接组合的正确性。
@@ -10,7 +10,7 @@
  *   - 【全面健壮】: 兼容所有之前版本能处理的场景，并解决了提取码换行、多链接单密码等复杂情况。
  */
 
-const SITE_URL = 'https://www.wpzysq.vip';
+const SITE_URL = 'https://www.wpzysq.com';
 const SITE_COOKIE = 'bbs_sid=1cvn39gt7ugf3no79ogg4sk23l; __mxau__c1-WWwEoLo0=346c6d46-f399-45ec-9baa-f5fb49993628; __mxaf__c1-WWwEoLo0=1755651025; bbs_token=_2Bx_2FkB37QoYyoNPq1UaPKrmTEvSAzXebM69i3tStWSJFy_2BTHJcOB1f_2BuEnWKCCaqMcKRpiNIrNJzSRIZgwjK5Hy66L6KdwISn; __gads=ID=b626aa5c3829b3c8:T=1755651026:RT=1755666709:S=ALNI_MZ2XWqkyxPJ8_cLmbBB6-ExZiEQIw; __gpi=UID=00001183137b1fbe:T=1755651026:RT=1755666709:S=ALNI_MYxZPV4xrqfcorWe9NP-1acSgdVnQ; __eoi=ID=f327d82c8f60f483:T=1755651026:RT=1755666709:S=AA-AfjaDRYmOnqGusZr0W-dwTyNg; __mxas__c1-WWwEoLo0=%7B%22sid%22%3A%221b885068-7d37-4cf0-b47c-3159ebe91e47%22%2C%22vd%22%3A26%2C%22stt%22%3A3182%22%2C%22dr%22%3A14%2C%22expires%22%3A1755668524%2C%22ct%22%3A1755666724%7D; __mxav__c1-WWwEoLo0=137';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
@@ -257,7 +257,7 @@ async function getTracks(ext) {
           }
       }
       tracks.push({
-        name: 网盘,
+        name: record.fileName,
         pan: finalPan,
         ext: { pwd: record.accessCode || '' }, // 确保ext.pwd始终存在
       });
