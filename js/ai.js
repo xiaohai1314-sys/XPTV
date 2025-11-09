@@ -1,5 +1,5 @@
 /**
- * 网盘资源社 App 插件前端代码 (V23 - 最终健壮版)
+ * 网盘资源社 App 插件前端代码 (V24 - 最终健壮版)
  * 
  * 更新日志:
  * - V23: 旨在解决所有已知复杂情况，包括链接与提取码不在同一行的问题，同时确保链接组合的正确性。
@@ -257,7 +257,7 @@ async function getTracks(ext) {
           }
       }
       tracks.push({
-        name: fileName,
+        name: 网盘,
         pan: finalPan,
         ext: { pwd: record.accessCode || '' }, // 确保ext.pwd始终存在
       });
