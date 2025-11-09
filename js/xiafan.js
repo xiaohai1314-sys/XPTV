@@ -1,10 +1,11 @@
 /**
- * 夸父资源前端插件 - V5.5 (去重优化版)
+ * 夸父资源前端插件 - V5.6 (去重优化版)
  *
  * 版本说明:
  * - 【V5.5 核心优化】基于 V5.4 版本，针对 `getTracks` 函数进行关键性修正。
  * - 【链接去重】在提取网盘链接时，增加了一个 Set 来存储已添加的链接，彻底解决了因页面结构问题（如一个链接包含文本和图片）导致相同链接被重复添加的 Bug。现在，即使网站上只有一个链接，App 端也只会显示一个条目。
  * - 【保留所有胜利果实】V5.4 中已实现的 Cookie 更新、多网盘支持（阿里/天翼/夸克）以及之前版本的所有优秀功能（完美回帖、强大搜索等）均完整保留。
+ * - 【新增优化】在 getTracks 中增加对 'alipan.com' 格式阿里云盘链接的支持。
  */
 
 // --- 配置区 ---
@@ -73,7 +74,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.5 去重优化版)");
+    log("插件初始化 (V5.5 去重优化版 - 增强阿里盘)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-7.htm' } },
         { name: '剧集区', ext: { id: 'forum-10.htm' } },
@@ -123,7 +124,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V5.5 核心优化：增加链接去重逻辑】★★★★★
+// ★★★★★【V5.5 核心优化：增加链接去重逻辑 & 增强阿里盘支持】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -147,7 +148,8 @@ async function getTracks(ext) {
         const tracks = [];
         const addedLinks = new Set(); // 用于存储已添加的链接，防止重复
 
-        mainMessage.find('a[href*="pan.quark.cn"], a[href*="cloud.189.cn"], a[href*="aliyundrive.com"]').each((_, element) => {
+        // 核心修改：在选择器中增加了 a[href*="alipan.com"]
+        mainMessage.find('a[href*="pan.quark.cn"], a[href*="cloud.189.cn"], a[href*="aliyundrive.com"], a[href*="alipan.com"]').each((_, element) => {
             const link = $(element).attr('href');
 
             // 如果链接已经添加过，则跳过
@@ -161,7 +163,7 @@ async function getTracks(ext) {
                 panName = '夸克网盘';
             } else if (link.includes('cloud.189.cn')) {
                 panName = '天翼云盘';
-            } else if (link.includes('aliyundrive.com')) {
+            } else if (link.includes('aliyundrive.com') || link.includes('alipan.com')) { // 核心修改：在判断逻辑中增加了 alipan.com
                 panName = '阿里云盘';
             }
             
@@ -300,4 +302,4 @@ async function category(tid, pg) {
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('夸父资源插件加载完成 (V5.5 去重优化版)');
+log('夸父资源插件加载完成 (V5.5 去重优化版 - 增强阿里盘)');
