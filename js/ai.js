@@ -257,7 +257,7 @@ async function getTracks(ext) {
           }
       }
       tracks.push({
-        name: record.fileName,
+        name: fileName,
         pan: finalPan,
         ext: { pwd: record.accessCode || '' }, // 确保ext.pwd始终存在
       });
