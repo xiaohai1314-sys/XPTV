@@ -1,15 +1,15 @@
 const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const headers = {
-  'Referer': 'https://ddys.pro/',
-  'Origin': 'https://ddys.pro',
+  'Referer': 'https://ddys.la/',
+  'Origin': 'https://ddys.la',
   'User-Agent': UA,
 }
 
 const appConfig = {
   ver: 1,
   title: "低端影视",
-  site: "https://ddys.pro/",
+  site: "https://ddys.la/",
   tabs: [{
     name: '首页',
     ext: {
