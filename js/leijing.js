@@ -1,10 +1,11 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v35 (修复人机验证循环问题)
+ * 脚本名称: 雷鲸资源站脚本 - v35 (修复人机验证循环问题 & Emoji Argument Error)
  *
  * 更新说明:
  * - 修复: 解决人机验证成功后仍循环弹出的问题。
  * - 机制: 脚本现在会尝试获取并携带应用环境中的持久化 Cookie，确保验证成功后能保持会话。
+ * - 【新增修复】: 解决详情页点击带 Emoji 链接时出现的 "Emoji Argument Error"。
  * - 版本号: 升级至 v35。
  * =================================================================
  */
@@ -51,19 +52,24 @@ function checkForHumanVerification(html, siteUrl, userAgent) {
   return false;
 }
 
-// **【新增】** 辅助函数：获取并构建请求头
+// **【新增修复】** 辅助函数：移除常见的Emoji
+function sanitizeText(text) {
+  if (typeof text !== 'string') return text;
+  // 匹配大部分 Unicode Emoji 范围，确保文本不含Emoji
+  // 这会移除点击详情页链接时导致错误的 Emoji 字符
+  return text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\uFE0F|\u20E3|\u2600-\u26FF|\u2700-\u27BF|\u2B05-\u2B07|\u2B1B|\u2B1C|\u2B50|\u2B55|\u3030|\u303D|\u3297|\u3299]/g, '').trim();
+}
+
+// 辅助函数：获取并构建请求头
 async function getRequestHeaders() {
     const headers = { 'User-Agent': UA };
-    // 假设你的运行环境提供了 $utils.getCookie 来获取持久化 Cookie
-    // 这个 Cookie 包含了用户在外部浏览器验证成功后设置的 cf_clearance
-    // 如果你的运行环境没有 $utils.getCookie，请将这部分代码删除或替换为正确的 API
     try {
+        // 假设您的运行环境提供了 $utils.getCookie
         const cookie = await $utils.getCookie(appConfig.site);
         if (cookie) {
             headers['Cookie'] = cookie;
         }
     } catch (e) {
-        // 捕获 $utils.getCookie 不存在的错误，如果你的环境不支持这个 API，请忽略
         console.log("无法获取持久化 Cookie，可能您的运行环境不支持 $utils.getCookie API。");
     }
     return headers;
@@ -76,14 +82,13 @@ async function getCards(ext) {
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  // **【修改】** 使用新的请求头，携带 Cookie
+  // 使用新的请求头，携带 Cookie
   const headers = await getRequestHeaders();
   const response = await $fetch.get(requestUrl, { headers });
   const htmlData = getHtmlFromResponse(response);
 
   // 检查人机验证
   if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
-    // 如果需要验证，则返回空列表，避免后续代码出错
     return jsonify({ list: [] });
   }
 
@@ -95,13 +100,17 @@ async function getCards(ext) {
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
+    
+    // **【修改点 1/3】** 对标题进行 Emoji 净化
+    const sanitizedDramaName = sanitizeText(dramaName);
+    
     const r = $(each).find('.summary').text();
     const tag = $(each).find('.tag').text();
     if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
-      vod_name: dramaName,
+      vod_name: sanitizedDramaName, // 使用净化后的名称
       vod_pic: '',
       vod_remarks: '',
       ext: { url: `${appConfig.site}/${href}` },
@@ -121,7 +130,7 @@ function getProtocolAgnosticUrl(rawUrl) {
   return match ? match[0] : null;
 }
 
-// getTracks 函数
+// getTracks 函数 - 【核心修改部分】
 async function getTracks(ext) {
   ext = argsify(ext);
   const tracks = [];
@@ -129,33 +138,33 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    // **【修改】** 使用新的请求头，携带 Cookie
     const headers = await getRequestHeaders();
     const response = await $fetch.get(requestUrl, { headers });
     const htmlData = getHtmlFromResponse(response);
 
-    // 检查人机验证
     if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
-      // 如果需要验证，则返回空列表
       return jsonify({ list: [] });
     }
 
     const $ = cheerio.load(htmlData);
 
-    const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+    // **【修改点 2/3 - A】** 对页面标题进行 Emoji 净化
+    const pageTitle = sanitizeText($('.topicBox .title').text().trim() || "网盘资源");
     const bodyText = $('body').text();
 
-    // ... (后续的链接提取逻辑保持不变)
+    // 1. Precise Pattern 匹配
     const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://' );
       let agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+      // 使用净化后的 pageTitle
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
+    // 2. <a> 标签匹配
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const $el = $(el);
       let href = $el.attr('href');
@@ -164,10 +173,15 @@ async function getTracks(ext) {
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
       href = href.replace('http://', 'https://' );
       let trackName = $el.text().trim() || pageTitle;
-      tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
+      
+      // **【修改点 2/3 - B】** 对从 <a> 标签文本中提取的 trackName 进行 Emoji 净化
+      const sanitizedTrackName = sanitizeText(trackName); 
+      
+      tracks.push({ name: sanitizedTrackName, pan: href, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
+    // 3. 纯 URL Pattern 匹配
     const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<> ）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://' );
@@ -179,6 +193,7 @@ async function getTracks(ext) {
       if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
       const agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+      // 使用净化后的 pageTitle
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
@@ -198,10 +213,6 @@ async function getTracks(ext) {
   }
 }
 
-// ==========================================================================================
-// ================================ 这里是修改过的部分 ========================================
-// ==========================================================================================
-
 // search 函数 (已修改，直接请求官方网站，不再依赖私有后端)
 async function search(ext) {
   ext = argsify(ext);
@@ -210,20 +221,18 @@ async function search(ext) {
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 【核心修改】构建请求URL，直接指向雷鲸小站的官方搜索路径
+  // 构建请求URL，直接指向雷鲸小站的官方搜索路径
   const requestUrl = `${appConfig.site}/search?keyword=${text}&page=${page}`;
   
-  // 【新增】获取包含Cookie的请求头，以应对可能的人机验证
+  // 获取包含Cookie的请求头，以应对可能的人机验证
   const headers = await getRequestHeaders();
 
   try {
-    // 使用 $fetch.get 发起请求，并附带请求头
     const response = await $fetch.get(requestUrl, { headers });
     const htmlData = getHtmlFromResponse(response);
 
-    // 【新增】检查返回的HTML是否为人机验证页面
+    // 检查返回的HTML是否为人机验证页面
     if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
-      // 如果是人机验证，提示用户并在APP中打开网页进行验证，然后返回空列表
       console.log("需要人机验证，请在弹出的页面中完成操作。");
       return jsonify({ list: [] }); 
     }
@@ -231,7 +240,7 @@ async function search(ext) {
     // 使用cheerio加载返回的HTML内容
     const $ = cheerio.load(htmlData);
 
-    // 解析逻辑保持不变，从返回的HTML中提取搜索结果
+    // 解析逻辑
     $('.topicItem').each((_, el) => {
       const a = $(el).find('h2 a');
       const href = a.attr('href');
@@ -241,9 +250,12 @@ async function search(ext) {
       // 过滤掉无效或不需要的结果
       if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
       
+      // **【修改点 3/3】** 对搜索结果标题进行 Emoji 净化
+      const sanitizedTitle = sanitizeText(title);
+
       cards.push({
         vod_id: href,
-        vod_name: title,
+        vod_name: sanitizedTitle, // 使用净化后的名称
         vod_pic: '', // 列表页通常没有图片，详情页才有
         vod_remarks: tag,
         ext: { url: `${appConfig.site}/${href}` }, // 构建详情页的完整URL
@@ -255,7 +267,9 @@ async function search(ext) {
 
   } catch (e) {
     console.error(`直接搜索失败: ${e}`);
-    // 在发生错误时返回一个空列表，避免应用崩溃
     return jsonify({ list: [] });
   }
 }
+
+// 保持不变的外部结构，以防 App 环境依赖于函数的顺序
+// ...
