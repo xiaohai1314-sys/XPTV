@@ -1,17 +1,18 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v38 完整修正版
+ * 脚本名称: 雷鲸资源站脚本 - v36 调试专用版
  *
- * 更新说明 (v37):
- * - 修正选择器为实际 HTML 结构：.topicList .item
- * - 修复 URL 拼接问题
- * - 增加详细的调试日志
- * - 兼容 Vue router-link 结构
+ * 更新说明 (v36-debug):
+ * - 这是一个用于调试的特殊版本。
+ * - 它会拦截分类页的请求，并将服务器返回的原始 HTML 内容作为“影片标题”显示在APP界面上。
+ * - 目的是为了查看脚本在APP环境下到底获取了什么样的网页内容，以诊断“分类点开无内容”的问题。
+ * - 调试完成后，需要将 getCards 函数恢复正常。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
+// ⚠️ 注意：这个 IP 地址是本地地址，如果您的运行环境无法访问，请修改为正确的后端服务地址。
 const BACKEND_URL = 'http://192.168.1.3:3001'; 
 
 // ============================ 关键配置 ============================
@@ -20,8 +21,8 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 // =================================================================
 
 const appConfig = {
-  ver: 37,
-  title: '雷鲸',
+  ver: 36, // 版本号更新为调试版
+  title: '雷鲸 (调试中 )',
   site: 'https://www.leijing1.com/',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
@@ -33,7 +34,7 @@ const appConfig = {
   ],
 };
 
-// 统一的请求头
+// 统一的请求头 ，包含 User-Agent 和 Cookie
 const requestHeaders = {
   'User-Agent': UA,
   'Cookie': USER_COOKIE,
@@ -50,142 +51,46 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
+// ==================== 调试专用 getCards 函数 ====================
+// 目的：将脚本实际获取到的HTML内容，通过影片标题显示在APP界面上。
 async function getCards(ext) {
   ext = argsify(ext);
-  let cards = [];
   let { page = 1, id } = ext;
   
-  // 修正 URL 拼接（site 末尾没有 /，id 开头有 ?）
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  console.log('========== getCards 调试信息 ==========');
-  console.log('请求 URL:', requestUrl);
-  console.log('页码:', page);
   
   try {
+    // 发起网络请求
     const response = await $fetch.get(requestUrl, { headers: requestHeaders });
     const htmlData = getHtmlFromResponse(response);
-    
-    console.log('HTML 长度:', htmlData.length);
-    console.log('HTML 前 200 字符:', htmlData.substring(0, 200));
-    
-    const $ = cheerio.load(htmlData);
-    
-    // 测试各种选择器
-    console.log('测试选择器:');
-    console.log('  .topicList 数量:', $('.topicList').length);
-    console.log('  .item 数量:', $('.item').length);
-    console.log('  .topicList .item 数量:', $('.topicList .item').length);
-    console.log('  .topicItem 数量:', $('.topicItem').length);
-    console.log('  .post-item 数量:', $('.post-item').length);
 
-    // 使用正确的选择器
-    $('.topicList .item').each((index, each) => {
-      const $item = $(each);
-      
-      console.log(`\n处理第 ${index + 1} 个条目:`);
-      
-      // 检查是否有锁定图标
-      if ($item.find('.cms-lock-solid').length > 0) {
-        console.log('  → 跳过（有锁定图标）');
-        return;
-      }
+    // 创建一个只包含一个“影片”的列表
+    const debugCard = {
+      vod_id: 'debug_info_1',
+      // 核心：将获取到的 HTML 内容作为影片的标题
+      vod_name: '【调试信息】脚本获取的HTML内容如下：' + htmlData, 
+      vod_pic: 'https://img.zcool.cn/community/01a8545da68075a8012187f4458842.png@1280w_1l_2o_100sh.png', // 放一个调试图标
+      vod_remarks: '请将完整的标题内容复制给我',
+      ext: {}
+    };
 
-      // 获取标题
-      const title = $item.find('.titleBox .title').text().trim();
-      console.log('  标题:', title);
-      
-      if (!title) {
-        console.log('  → 跳过（无标题）');
-        return;
-      }
+    // 将这个特殊的“影片”卡片返回给APP
+    return jsonify({ list: [debugCard] } );
 
-      // 尝试多种方式获取链接
-      let href = null;
-      
-      // 方法1: 查找 router-link 的 to 属性（Vue）
-      const routerLink = $item.find('[to]');
-      if (routerLink.length > 0) {
-        href = routerLink.attr('to');
-        console.log('  链接(router-link):', href);
-      }
-      
-      // 方法2: 查找普通链接
-      if (!href) {
-        const link = $item.find('a[href]');
-        if (link.length > 0) {
-          href = link.attr('href');
-          console.log('  链接(a标签):', href);
-        }
-      }
-      
-      // 方法3: 从父元素或数据属性中查找
-      if (!href) {
-        href = $item.attr('data-href') || $item.attr('data-id');
-        console.log('  链接(data属性):', href);
-      }
-
-      // 如果实在找不到链接，尝试从整个 HTML 中提取 topicId
-      if (!href && title) {
-        // 查看完整的 item HTML 结构
-        const itemHtml = $item.html();
-        const topicIdMatch = itemHtml.match(/topicId[=:]?\s*['"]?(\d+)/);
-        if (topicIdMatch) {
-          href = `/thread?topicId=${topicIdMatch[1]}`;
-          console.log('  链接(提取topicId):', href);
-        }
-      }
-
-      if (!href) {
-        console.log('  → 跳过（无链接）');
-        // 输出第一个 item 的完整 HTML 用于调试
-        if (index === 0) {
-          console.log('  完整HTML示例:', $item.html().substring(0, 500));
-        }
-        return;
-      }
-
-      // 获取标签
-      const tag = $item.find('.detailInfo .tagName').text().trim();
-      console.log('  标签:', tag);
-
-      // 过滤不需要的标签
-      if (tag && /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) {
-        console.log('  → 跳过（过滤标签）');
-        return;
-      }
-
-      // 提取剧名（去除多余的标记）
-      const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-      const match = title.match(regex);
-      const dramaName = match ? match[1] : title;
-
-      // 确保 href 是完整路径
-      if (href && !href.startsWith('http') && !href.startsWith('/')) {
-        href = '/' + href;
-      }
-
-      const fullUrl = href.startsWith('http') ? href : `${appConfig.site}${href}`;
-
-      cards.push({
-        vod_id: href,
-        vod_name: dramaName,
-        vod_pic: '',
-        vod_remarks: tag || '',
-        ext: { url: fullUrl },
-      });
-      
-      console.log('  ✓ 已添加');
-    });
-
-    console.log('\n最终返回卡片数:', cards.length);
-    console.log('======================================\n');
-    
-  } catch (error) {
-    console.error('getCards 错误:', error);
+  } catch (e) {
+    // 如果请求过程中发生错误（比如网络问题），也将错误信息返回
+    const errorCard = {
+      vod_id: 'debug_error_1',
+      vod_name: '【调试错误】请求失败，错误信息：' + e.toString(),
+      vod_pic: 'https://img.zcool.cn/community/01a8545da68075a8012187f4458842.png@1280w_1l_2o_100sh.png',
+      vod_remarks: '请将这个错误信息截图或复制给我',
+      ext: {}
+    };
+    return jsonify({ list: [errorCard] } );
   }
-
-  return jsonify({ list: cards });
 }
+// ==================== 调试函数结束 ====================
+
 
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
@@ -212,34 +117,31 @@ async function getTracks(ext) {
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    // 精确匹配：URL + 访问码
-    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
+      let panUrl = match[0].replace('http://', 'https://' );
       let agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
-    // 从链接中提取
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const $el = $(el);
       let href = $el.attr('href');
       if (!href) return;
       let agnosticUrl = getProtocolAgnosticUrl(href);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
-      href = href.replace('http://', 'https://');
+      href = href.replace('http://', 'https://' );
       let trackName = $el.text().trim() || pageTitle;
       tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
-    // 从文本中提取 URL
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<> ）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
+      let panUrl = match[0].replace('http://', 'https://' );
       let accessCode = '';
       const codeMatch = bodyText.slice(match.index, match.index + 100)
         .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
@@ -278,27 +180,19 @@ async function search(ext) {
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
 
-  // 搜索结果可能使用不同的结构，先测试
-  const items = $('.topicList .item').length > 0 ? $('.topicList .item') : $('.topicItem');
-  
-  items.each((_, el) => {
-    const $el = $(el);
-    
-    // 尝试多种方式获取标题和链接
-    let title = $el.find('.titleBox .title').text().trim() || $el.find('h2 a').text().trim();
-    let href = $el.find('a').attr('href');
-    const tag = $el.find('.detailInfo .tagName').text().trim() || $el.find('.tag').text().trim();
-    
-    if (!href || !title || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    
+  $('.topicItem').each((_, el) => {
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text();
+    const tag = $(el).find('.tag').text();
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
     cards.push({
       vod_id: href,
       vod_name: title,
       vod_pic: '',
       vod_remarks: tag,
-      ext: { url: `${appConfig.site}${href.startsWith('/') ? href : '/' + href}` },
+      ext: { url: `${appConfig.site}/${href}` },
     });
   });
-  
   return jsonify({ list: cards });
 }
