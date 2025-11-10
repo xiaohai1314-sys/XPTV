@@ -6,9 +6,9 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 1. 使用完整的、正确的 appConfig
+// 1. 使用完整的、正确的 appConfig - 此部分未作任何改动
 const appConfig = {
-  ver: 10, // 最终无误版本
+  ver: 11, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -33,7 +33,7 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// 2. 恢复 V7 版本中正确的 getCards 分页逻辑
+// 2. 恢复 V7 版本中正确的 getCards 分页逻辑 - 此部分未作任何改动
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -72,17 +72,16 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 使用 V8 版本中最终确定的正确 search 函数 (已修复 URL 构造)
+// 3. 使用 V8 版本中最终确定的正确 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // ****** 关键修复处 ******
-  // 将错误的单引号和 LaTex 标签，修改为正确的反引号模板字符串 (Template Literal)
+  // ****** 唯一修复处：正确使用反引号和 ${} 构造 URL ******
   const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
-  // **********************
+  // ***************************************************
   
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
@@ -103,7 +102,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. getTracks 和 getPlayinfo 保持不变
+// 4. getTracks 和 getPlayinfo 保持不变 - 此部分未作任何改动
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
