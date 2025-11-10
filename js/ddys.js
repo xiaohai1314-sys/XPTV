@@ -6,134 +6,156 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 1. 使用完整的、正确的 appConfig
+// ==========================
+// 1. 基础配置
+// ==========================
 const appConfig = {
-  ver: 11, // 最终无误版本
+  ver: 11,
   title: "低端影视",
   site: "https://ddys.la",
-  tabs: [{
-    name: '首页',
-    ext: { url: '/' },
-  }, {
-    name: '电影',
-    ext: { url: '/category/dianying.html' },
-  }, {
-    name: '剧集',
-    ext: { url: '/category/juji.html' },
-  }, {
-    name: '动漫',
-    ext: { url: '/category/dongman.html' },
-  }, {
-    name: '发现', 
-    ext: { url: '/search/-------------.html' },
-  }]
+  tabs: [
+    { name: '首页', ext: { url: '/' } },
+    { name: '电影', ext: { url: '/category/dianying.html' } },
+    { name: '剧集', ext: { url: '/category/juji.html' } },
+    { name: '动漫', ext: { url: '/category/dongman.html' } },
+    { name: '发现', ext: { url: '/search/-------------.html' } }
+  ]
 }
 
 async function getConfig() {
-    return jsonify(appConfig)
+  return jsonify(appConfig)
 }
 
-// 2. 恢复 V7 版本中正确的 getCards 分页逻辑
+// ==========================
+// 2. 分类与分页
+// ==========================
 async function getCards(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  let urlPath = ext.url;
-  let page = ext.page || 1;
+  ext = argsify(ext)
+  let cards = []
+  let urlPath = ext.url
+  let page = ext.page || 1
 
   if (page > 1) {
-    urlPath = urlPath.replace('.html', `-${page}.html`);
+    if (urlPath === '/') return jsonify({ list: [] })
+    if (urlPath.includes('/search/')) {
+      urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`)
+    } else {
+      urlPath = urlPath.replace('.html', `-${page}.html`)
+    }
   }
 
-  const url = appConfig.site + urlPath;
-  const { data } = await $fetch.get(url, { headers });
-  const $ = cheerio.load(data);
-  $('.stui-vodlist__thumb').each((index, thumb) => {
-    thumb = $(thumb);
+  const fullUrl = appConfig.site + urlPath
+  const { data } = await $fetch.get(fullUrl, { headers })
+  const $ = cheerio.load(data)
+
+  $('ul.stui-vodlist > li').each((_, each) => {
+    const thumb = $(each).find('a.stui-vodlist__thumb')
+    const titleLink = $(each).find('h4.title > a')
+
     cards.push({
-      title: thumb.attr('title').trim(),
-      vod_pic: thumb.attr('data-original').trim(),
+      vod_id: thumb.attr('href'),
+      vod_name: titleLink.attr('title'),
+      vod_pic: thumb.attr('data-original'),
       vod_remarks: thumb.find('span.pic-text').text().trim(),
       ext: { url: thumb.attr('href') },
     })
   })
 
-  return jsonify({ list: cards });
+  return jsonify({ list: cards })
 }
 
-// 3. getTracks 函数：优化分类逻辑，只依赖固定位置（.stui-pannel-box）内的 h3 标签内容
+// ==========================
+// 3. 搜索功能（已修复）
+// ==========================
+async function search(ext) {
+  ext = argsify(ext)
+  let cards = []
+  let text = encodeURIComponent(ext.text)
+  let page = ext.page || 1
+
+  const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`
+  const { data } = await $fetch.get(searchUrl, { headers })
+  const $ = cheerio.load(data)
+
+  $('ul.stui-vodlist > li').each((_, each) => {
+    const thumb = $(each).find('a.stui-vodlist__thumb')
+    const titleLink = $(each).find('h4.title > a')
+
+    cards.push({
+      vod_id: thumb.attr('href'),
+      vod_name: titleLink.attr('title'),
+      vod_pic: thumb.attr('data-original'),
+      vod_remarks: thumb.find('span.pic-text').text().trim(),
+      ext: { url: thumb.attr('href') },
+    })
+  })
+
+  return jsonify({ list: cards })
+}
+
+// ==========================
+// 4. 播放源提取（自动识别多路线 + 独立集数样式）
+// ==========================
 async function getTracks(ext) {
-    ext = argsify(ext);
-    const url = appConfig.site + ext.url;
-    const { data } = await $fetch.get(url, { headers });
-    const $ = cheerio.load(data);
-    let groups = [];
-    
-    // 遍历所有可能的播放列表容器 (.stui-pannel-box)
-    $('.stui-pannel-box').each((index, panel) => {
-        const $panel = $(panel);
-        
-        // 1. 确认这是一个包含播放列表的区块，排除无关内容
-        if ($panel.find('ul.stui-content__playlist').length === 0) {
-            return; 
-        }
+  ext = argsify(ext)
+  const url = appConfig.site + ext.url
+  const { data } = await $fetch.get(url, { headers })
+  const $ = cheerio.load(data)
+  let groups = []
 
-        let routeTag = '';
-        
-        // 2. 在当前区块内，遍历所有 h3 标签，寻找最合适的路线名称（只看 h3 标签）
-        // 解决了“路线名不固定，但位置一样”的问题
-        $panel.find('h3').each((_, h3_el) => {
-            const h3_text = $(h3_el).text().trim().toLowerCase();
-            
-            // 优先级 #1: 检查是否为自定义分类标签 (banyun/gongyou)
-            if (h3_text === 'banyun') {
-                routeTag = 'banyun'; // 直接使用标签名作为路线名
-                return false; 
-            } else if (h3_text === 'gongyou') {
-                routeTag = 'gongyou'; // 直接使用标签名作为路线名
-                return false;
-            }
-            
-            // 优先级 #2: 检查是否为网站标准名称 (例如 播放路线一, 在线播放)
-            if (h3_text.includes('播放路线')) {
-                // 如果是“播放路线一”，去除“播放”二字，得到“路线一”
-                routeTag = h3_text.replace('播放', '').trim();
-                return false;
-            } else if (h3_text.includes('在线播放')) {
-                routeTag = '在线播放';
-                return false;
-            }
-        });
-        
-        // 3. 提取剧集链接
-        if (routeTag) {
-            let group = { title: routeTag, tracks: [] };
-            
-            $panel.find('ul.stui-content__playlist li').each((_, track) => {
-                const trackLink = $(track).find('a');
-                group.tracks.push({
-                    name: trackLink.text().trim(),
-                    pan: '',
-                    ext: { play_url: trackLink.attr('href') }
-                });
-            });
+  $('.stui-pannel-box').each((_, panel) => {
+    const sourceTitle = $(panel).find('.stui-vodlist__head h3').text().trim()
+    const playlistItems = $(panel).find('ul.stui-content__playlist li')
+    if (!sourceTitle || playlistItems.length === 0) return
 
-            if (group.tracks.length > 0) {
-                groups.push(group);
-            }
-        }
-    });
-    return jsonify({ list: groups });
+    // 检测当前播放源的集数样式
+    let firstText = $(playlistItems[0]).find('a').text().trim()
+    let isTwoDigit = /^\d{2}$/.test(firstText)
+
+    const group = {
+      title: sourceTitle,  // 保留真实源名，如 baoyun / gongyou
+      tracks: []
+    }
+
+    playlistItems.each((__, item) => {
+      const a = $(item).find('a')
+      const rawText = a.text().trim()
+      const titleAttr = a.attr('title') || ''
+      const href = a.attr('href')
+      if (!href) return
+
+      let name = rawText
+      const numMatch = rawText.match(/^\d+$/) || titleAttr.match(/第(\d+)集/)
+      if (numMatch) {
+        const num = parseInt(numMatch[1] || numMatch[0], 10)
+        name = isTwoDigit ? String(num).padStart(2, '0') : String(num)
+      }
+
+      group.tracks.push({
+        name,
+        pan: '',
+        ext: { play_url: href }
+      })
+    })
+
+    if (group.tracks.length > 0) {
+      groups.push(group)
+    }
+  })
+
+  return jsonify({ list: groups })
 }
 
-// 4. getPlayinfo 函数保持不变
+// ==========================
+// 5. 播放解析
+// ==========================
 async function getPlayinfo(ext) {
-    ext = argsify(ext);
-    const url = appConfig.site + ext.play_url;
-    const { data } = await $fetch.get(url, { headers });
-    const $ = cheerio.load(data);
-    
-    // 页面里找播放器的iframe
-    const player_iframe = $('#player-container iframe').attr('src');
-
-    return jsonify({ play_url: player_iframe });
+  ext = argsify(ext)
+  const url = appConfig.site + ext.play_url
+  const { data } = await $fetch.get(url, { headers })
+  const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/)
+  if (match && match[1]) {
+    return jsonify({ urls: [match[1]], ui: 1 })
+  }
+  return jsonify({ urls: [] })
 }
