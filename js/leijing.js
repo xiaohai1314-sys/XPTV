@@ -11,10 +11,10 @@
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-const BACKEND_URL = 'http://192.168.1.3:3001';
+// const BACKEND_URL = 'http://192.168.1.3:3001'; // 此行已不再需要 ，但为保持结构完整性可保留或注释掉
 
 const appConfig = {
-  ver: 35, // 版本号+1
+  ver: 35, // 版本号保持不变
   title: '雷鲸',
   site: 'https://www.leijing1.com',
   tabs: [
@@ -27,7 +27,7 @@ const appConfig = {
   ],
 };
 
-async function getConfig() {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
@@ -146,10 +146,10 @@ async function getTracks(ext) {
     const bodyText = $('body').text();
 
     // ... (后续的链接提取逻辑保持不变)
-    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+   ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
+      let panUrl = match[0].replace('http://', 'https://' );
       let agnosticUrl = getProtocolAgnosticUrl(panUrl);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
       tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
@@ -162,15 +162,15 @@ async function getTracks(ext) {
       if (!href) return;
       let agnosticUrl = getProtocolAgnosticUrl(href);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
-      href = href.replace('http://', 'https://');
+      href = href.replace('http://', 'https://' );
       let trackName = $el.text().trim() || pageTitle;
       tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
-    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<> ）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
-      let panUrl = match[0].replace('http://', 'https://');
+      let panUrl = match[0].replace('http://', 'https://' );
       let accessCode = '';
       const codeMatch = bodyText.slice(match.index, match.index + 100)
         .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
@@ -198,31 +198,64 @@ async function getTracks(ext) {
   }
 }
 
-// search 函数 (保持不变)
+// ==========================================================================================
+// ================================ 这里是修改过的部分 ========================================
+// ==========================================================================================
+
+// search 函数 (已修改，直接请求官方网站，不再依赖私有后端)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
+  // 对搜索文本进行URL编码，这是标准的Web实践
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-  const response = await $fetch.get(requestUrl);
-  const htmlData = getHtmlFromResponse(response);
-  const $ = cheerio.load(htmlData);
+  // 【核心修改】构建请求URL，直接指向雷鲸小站的官方搜索路径
+  const requestUrl = `${appConfig.site}/search?keyword=${text}&page=${page}`;
+  
+  // 【新增】获取包含Cookie的请求头，以应对可能的人机验证
+  const headers = await getRequestHeaders();
 
-  $('.topicItem').each((_, el) => {
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text();
-    const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    cards.push({
-      vod_id: href,
-      vod_name: title,
-      vod_pic: '',
-      vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
+  try {
+    // 使用 $fetch.get 发起请求，并附带请求头
+    const response = await $fetch.get(requestUrl, { headers });
+    const htmlData = getHtmlFromResponse(response);
+
+    // 【新增】检查返回的HTML是否为人机验证页面
+    if (checkForHumanVerification(htmlData, appConfig.site, UA)) {
+      // 如果是人机验证，提示用户并在APP中打开网页进行验证，然后返回空列表
+      console.log("需要人机验证，请在弹出的页面中完成操作。");
+      return jsonify({ list: [] }); 
+    }
+
+    // 使用cheerio加载返回的HTML内容
+    const $ = cheerio.load(htmlData);
+
+    // 解析逻辑保持不变，从返回的HTML中提取搜索结果
+    $('.topicItem').each((_, el) => {
+      const a = $(el).find('h2 a');
+      const href = a.attr('href');
+      const title = a.text();
+      const tag = $(el).find('.tag').text();
+      
+      // 过滤掉无效或不需要的结果
+      if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+      
+      cards.push({
+        vod_id: href,
+        vod_name: title,
+        vod_pic: '', // 列表页通常没有图片，详情页才有
+        vod_remarks: tag,
+        ext: { url: `${appConfig.site}/${href}` }, // 构建详情页的完整URL
+      });
     });
-  });
-  return jsonify({ list: cards });
+
+    // 返回JSON格式的卡片列表
+    return jsonify({ list: cards });
+
+  } catch (e) {
+    console.error(`直接搜索失败: ${e}`);
+    // 在发生错误时返回一个空列表，避免应用崩溃
+    return jsonify({ list: [] });
+  }
 }
