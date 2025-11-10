@@ -1,5 +1,4 @@
-// ======== 适配 TVBox / 猫影视 的完整版本 ========
-// 直接粘贴到 .js 规则文件即可运行
+// ============== NetflixGC 完整可运行版（TVBox/猫影视/聚影通用）==============
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const headers = {
@@ -13,35 +12,34 @@ const appConfig = {
     title: 'NetflixGC',
     site: 'https://www.netflixgc.com',
     tabs: [
-        { name: '电影', ext: { dmtype: '1' } },
-        { name: '电视剧', ext: { dmtype: '2' } },
-        { name: '漫剧', ext: { dmtype: '3' } },
-        { name: '综艺', ext: { dmtype: '23' } },
-        { name: '纪录片', ext: { dmtype: '24' } },
-        { name: '伦理', ext: { dmtype: '30' } }
+        { name: '电影',   type: '1',  ext: { dmtype: '1' } },
+        { name: '电视剧', type: '2',  ext: { dmtype: '2' } },
+        { name: '漫剧',   type: '3',  ext: { dmtype: '3' } },
+        { name: '综艺',   type: '23', ext: { dmtype: '23' } },
+        { name: '纪录片', type: '24', ext: { dmtype: '24' } },
+        { name: '伦理',   type: '30', ext: { dmtype: '30' } }
     ]
 };
 
-// ---------- 必备工具函数（TVBox 已内置） ----------
+// ---------- 工具 ----------
 function jsonify(obj) { return JSON.stringify(obj); }
 function argsify(obj) { return obj; }
-function base64decode(str) { return CryptoJS.enc.Base64.parse(str).toString(CryptoJS.enc.Utf8); }
 
-// ---------- 1. 获取配置 ----------
+// ---------- 1. getConfig（必须返回 type！）----------
 function getConfig() {
     return jsonify(appConfig);
 }
 
-// ---------- 2. 首页列表 ----------
+// ---------- 2. getCards ----------
 async function getCards(param) {
     param = argsify(param);
     let list = [];
     let page = param.page || 1;
-    let dmtype = param.dmtype || '1';
+    let type = param.type || '1';  // ← 必须用 type，不是 dmtype
     let timestamp = Math.floor(Date.now() / 1000);
     let sign = CryptoJS.MD5(`DS${timestamp}DCC147D11943AF75`).toString();
 
-    let url = `https://www.netflixgc.com/api.php?v1.vod_list?type=${dmtype}&page=${page}&time=${timestamp}&sign=${sign}`;
+    let url = `https://www.netflixgc.com/api.php?v1.vod_list?type=${type}&page=${page}&time=${timestamp}&sign=${sign}`;
     let res = await $fetch.get(url, { headers });
 
     for (let item of res.list) {
@@ -56,7 +54,7 @@ async function getCards(param) {
     return jsonify({ list });
 }
 
-// ---------- 3. 选集 ----------
+// ---------- 3. getTracks ----------
 async function getTracks(param) {
     param = argsify(param);
     let url = param.url;
@@ -72,10 +70,11 @@ async function getTracks(param) {
         let eps = [];
         $(box).find('li a').each((i, a) => {
             let href = $(a).attr('href');
+            if (!href.startsWith('http')) href = 'https://www.netflixgc.com' + href;
             eps.push({
                 name: $(a).text().trim(),
                 pan: '',
-                ext: { url: 'https://www.netflixgc.com' + href }
+                ext: { url: href }
             });
         });
         tracks.push({ title, tracks: eps });
@@ -83,7 +82,7 @@ async function getTracks(param) {
     return jsonify({ list: tracks });
 }
 
-// ---------- 4. 播放地址 ----------
+// ---------- 4. getPlayinfo ----------
 async function getPlayinfo(param) {
     param = argsify(param);
     let url = param.url;
@@ -123,10 +122,10 @@ async function getPlayinfo(param) {
     return jsonify({ urls: [playUrl] });
 }
 
-// ---------- 5. 搜索 ----------
+// ---------- 5. search ----------
 async function search(param) {
     param = argsify(param);
-    let wd = encodeURIComponent(param.text);
+    let wd = encodeURIComponent(param.text || '');
     let page = param.page || 1;
     let url = `${appConfig.site}/vodsearch/${wd}----------${page}---.html`;
 
@@ -144,8 +143,8 @@ async function search(param) {
 
         list.push({
             vod_id: id[1],
-            vod_name: a.attr('title'),
-            vod_pic: img.attr('data-original') || img.attr('src'),
+            vod_name: a.attr('title') || '',
+            vod_pic: img.attr('data-original') || img.attr('src') || '',
             vod_remarks: remark.text().trim(),
             ext: { url: appConfig.site + href }
         });
@@ -153,7 +152,7 @@ async function search(param) {
     return jsonify({ list });
 }
 
-// ======== 导出函数（TVBox 必须）========
+// ============== 导出（必须）==============
 var export_funcs = {
     getConfig,
     getCards,
