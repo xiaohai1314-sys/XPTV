@@ -1,25 +1,17 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v36.2 最终修正版（兼容新版页面结构）
+ * 脚本名称: 雷鲸资源站脚本 - v37 完整修正版
  *
- * 更新说明 (v36.1 最终修正):
- * - 修复了 getCards 函数中选择器错误的问题。
- * - 经仔细比对用户提供的 HTML，确认列表项的选择器应为 `.post-item`。
- * - 修复了内部元素的选择器，确保能正确抓取标题、链接和标签。
- * - 解决了用户反馈的“分类 Tab 不显示”的问题，确保 `appConfig` 和 `getConfig` 函数结构正确。
- *
- * 更新说明 (v35):
- * - 移除账号密码登录逻辑，改为直接使用用户提供的 Cookie 字符串。
- * - 在脚本顶部定义 `USER_COOKIE` 常量，请在此处填入你的 Cookie。
- * - 所有网络请求将自动携带此 Cookie，以保持登录会话。
- * - 简化了代码，移除了不再需要的 axios 和 tough-cookie 依赖。
- * - 保持 v33 的所有功能（访问码拼接、去重增强等）。
+ * 更新说明 (v37):
+ * - 修正选择器为实际 HTML 结构：.topicList .item
+ * - 修复 URL 拼接问题
+ * - 增加详细的调试日志
+ * - 兼容 Vue router-link 结构
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-// ⚠️ 注意：这个 IP 地址是本地地址，如果您的运行环境无法访问，请修改为正确的后端服务地址。
 const BACKEND_URL = 'http://192.168.1.3:3001'; 
 
 // ============================ 关键配置 ============================
@@ -28,9 +20,9 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 // =================================================================
 
 const appConfig = {
-  ver: 36.1, // 版本号更新
+  ver: 37,
   title: '雷鲸',
-  site: 'https://www.leijing1.com/',
+  site: 'https://www.leijing1.com',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
@@ -41,7 +33,7 @@ const appConfig = {
   ],
 };
 
-// 统一的请求头，包含 User-Agent 和 Cookie
+// 统一的请求头
 const requestHeaders = {
   'User-Agent': UA,
   'Cookie': USER_COOKIE,
@@ -58,54 +50,142 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
-// =========== 最终修正：列表项选择器从 '.topicItem' 修正为 '.post-item' ===========
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   
+  // 修正 URL 拼接（site 末尾没有 /，id 开头有 ?）
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  const response = await $fetch.get(requestUrl, { headers: requestHeaders });
-  const htmlData = getHtmlFromResponse(response);
-
-  const $ = cheerio.load(htmlData);
-
-  // 核心修正：使用正确的列表项选择器 '.post-item'
-  $('.post-item').each((_, each) => {
-    // 检查是否有锁定图标，新版网站可能使用不同的 class，例如 .cms-lock-solid
-    // 锁定图标通常在 post-item-minor 区域
-    if ($(each).find('.post-item-minor .cms-lock-solid').length > 0) return;
-
-    // 更新内部元素的选择器以匹配新结构
-    const a = $(each).find('.post-item-title a');
-    const href = a.attr('href');
-    const title = a.text();
-    
-    // 标题提取逻辑保持不变
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-    const match = title.match(regex);
-    const dramaName = match ? match[1] : title;
-    
-    // 更新摘要和标签的选择器
-    const r = $(each).find('.post-item-summary').text(); // 假设摘要在 .post-item-summary
-    const tag = $(each).find('.post-item-tag').text(); // 假设标签在 .post-item-tag
-    
-    // 过滤逻辑保持不变
-    if (/content/.test(r) && !/cloud/.test(r)) return;
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
-    
-    cards.push({
-      vod_id: href,
-      vod_name: dramaName,
-      vod_pic: '', // 如果有图片，可以从 .post-item-cover img 中获取
-      vod_remarks: tag, // 将标签放入备注
-      ext: { url: `${appConfig.site}/${href}` },
-    });
-  });
+  console.log('========== getCards 调试信息 ==========');
+  console.log('请求 URL:', requestUrl);
+  console.log('页码:', page);
   
+  try {
+    const response = await $fetch.get(requestUrl, { headers: requestHeaders });
+    const htmlData = getHtmlFromResponse(response);
+    
+    console.log('HTML 长度:', htmlData.length);
+    console.log('HTML 前 200 字符:', htmlData.substring(0, 200));
+    
+    const $ = cheerio.load(htmlData);
+    
+    // 测试各种选择器
+    console.log('测试选择器:');
+    console.log('  .topicList 数量:', $('.topicList').length);
+    console.log('  .item 数量:', $('.item').length);
+    console.log('  .topicList .item 数量:', $('.topicList .item').length);
+    console.log('  .topicItem 数量:', $('.topicItem').length);
+    console.log('  .post-item 数量:', $('.post-item').length);
+
+    // 使用正确的选择器
+    $('.topicList .item').each((index, each) => {
+      const $item = $(each);
+      
+      console.log(`\n处理第 ${index + 1} 个条目:`);
+      
+      // 检查是否有锁定图标
+      if ($item.find('.cms-lock-solid').length > 0) {
+        console.log('  → 跳过（有锁定图标）');
+        return;
+      }
+
+      // 获取标题
+      const title = $item.find('.titleBox .title').text().trim();
+      console.log('  标题:', title);
+      
+      if (!title) {
+        console.log('  → 跳过（无标题）');
+        return;
+      }
+
+      // 尝试多种方式获取链接
+      let href = null;
+      
+      // 方法1: 查找 router-link 的 to 属性（Vue）
+      const routerLink = $item.find('[to]');
+      if (routerLink.length > 0) {
+        href = routerLink.attr('to');
+        console.log('  链接(router-link):', href);
+      }
+      
+      // 方法2: 查找普通链接
+      if (!href) {
+        const link = $item.find('a[href]');
+        if (link.length > 0) {
+          href = link.attr('href');
+          console.log('  链接(a标签):', href);
+        }
+      }
+      
+      // 方法3: 从父元素或数据属性中查找
+      if (!href) {
+        href = $item.attr('data-href') || $item.attr('data-id');
+        console.log('  链接(data属性):', href);
+      }
+
+      // 如果实在找不到链接，尝试从整个 HTML 中提取 topicId
+      if (!href && title) {
+        // 查看完整的 item HTML 结构
+        const itemHtml = $item.html();
+        const topicIdMatch = itemHtml.match(/topicId[=:]?\s*['"]?(\d+)/);
+        if (topicIdMatch) {
+          href = `/thread?topicId=${topicIdMatch[1]}`;
+          console.log('  链接(提取topicId):', href);
+        }
+      }
+
+      if (!href) {
+        console.log('  → 跳过（无链接）');
+        // 输出第一个 item 的完整 HTML 用于调试
+        if (index === 0) {
+          console.log('  完整HTML示例:', $item.html().substring(0, 500));
+        }
+        return;
+      }
+
+      // 获取标签
+      const tag = $item.find('.detailInfo .tagName').text().trim();
+      console.log('  标签:', tag);
+
+      // 过滤不需要的标签
+      if (tag && /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) {
+        console.log('  → 跳过（过滤标签）');
+        return;
+      }
+
+      // 提取剧名（去除多余的标记）
+      const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+      const match = title.match(regex);
+      const dramaName = match ? match[1] : title;
+
+      // 确保 href 是完整路径
+      if (href && !href.startsWith('http') && !href.startsWith('/')) {
+        href = '/' + href;
+      }
+
+      const fullUrl = href.startsWith('http') ? href : `${appConfig.site}${href}`;
+
+      cards.push({
+        vod_id: href,
+        vod_name: dramaName,
+        vod_pic: '',
+        vod_remarks: tag || '',
+        ext: { url: fullUrl },
+      });
+      
+      console.log('  ✓ 已添加');
+    });
+
+    console.log('\n最终返回卡片数:', cards.length);
+    console.log('======================================\n');
+    
+  } catch (error) {
+    console.error('getCards 错误:', error);
+  }
+
   return jsonify({ list: cards });
 }
-// =====================================================
 
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
@@ -125,16 +205,15 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    // 在请求中带上包含 Cookie 的请求头
     const response = await $fetch.get(requestUrl, { headers: requestHeaders });
     const htmlData = getHtmlFromResponse(response);
     const $ = cheerio.load(htmlData);
 
-    // 后续逻辑保持不变
     const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
     const bodyText = $('body').text();
 
-    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    // 精确匹配：URL + 访问码
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
     let match;
     while ((match = precisePattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://');
@@ -144,6 +223,7 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
+    // 从链接中提取
     $('a[href*="cloud.189.cn"]').each((_, el) => {
       const $el = $(el);
       let href = $el.attr('href');
@@ -156,6 +236,7 @@ async function getTracks(ext) {
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
+    // 从文本中提取 URL
     const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
     while ((match = urlPattern.exec(bodyText)) !== null) {
       let panUrl = match[0].replace('http://', 'https://');
@@ -193,25 +274,31 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-  // 搜索功能也需要带上 Cookie
   const response = await $fetch.get(requestUrl, { headers: requestHeaders });
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
 
-  // 搜索结果页面的结构也可能已更改，这里保留原有的 '.topicItem'，如果搜索失败需要再次修正
-  $('.topicItem').each((_, el) => {
-    const a = $(el).find('h2 a');
-    const href = a.attr('href');
-    const title = a.text();
-    const tag = $(el).find('.tag').text();
-    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+  // 搜索结果可能使用不同的结构，先测试
+  const items = $('.topicList .item').length > 0 ? $('.topicList .item') : $('.topicItem');
+  
+  items.each((_, el) => {
+    const $el = $(el);
+    
+    // 尝试多种方式获取标题和链接
+    let title = $el.find('.titleBox .title').text().trim() || $el.find('h2 a').text().trim();
+    let href = $el.find('a').attr('href');
+    const tag = $el.find('.detailInfo .tagName').text().trim() || $el.find('.tag').text().trim();
+    
+    if (!href || !title || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    
     cards.push({
       vod_id: href,
       vod_name: title,
       vod_pic: '',
       vod_remarks: tag,
-      ext: { url: `${appConfig.site}/${href}` },
+      ext: { url: `${appConfig.site}${href.startsWith('/') ? href : '/' + href}` },
     });
   });
+  
   return jsonify({ list: cards });
 }
