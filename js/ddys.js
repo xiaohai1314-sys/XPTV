@@ -1,4 +1,4 @@
-Const cheerio = createCheerio()
+const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const headers = {
   'Referer': 'https://ddys.la/',
@@ -8,7 +8,7 @@ const headers = {
 
 // 1. 使用完整的、正确的 appConfig
 const appConfig = {
-  ver: 10, // 最终无误版本
+  ver: 11, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -72,16 +72,14 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 使用 V8 版本中最终确定的正确 search 函数 (仅修复 URL 构造)
+// 3. 使用 V8 版本中最终确定的正确 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // ****** 仅修改此行：使用正确的反引号模板字符串来构造 URL ******
-  const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
-  // ************************************************************
+  const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
   
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
