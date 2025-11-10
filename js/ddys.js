@@ -1,4 +1,4 @@
-const cheerio = createCheerio()
+Const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const headers = {
   'Referer': 'https://ddys.la/',
@@ -72,14 +72,17 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 使用 V8 版本中最终确定的正确 search 函数
+// 3. 使用 V8 版本中最终确定的正确 search 函数 (已修复 URL 构造)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
+  // ****** 关键修复处 ******
+  // 将错误的单引号和 LaTex 标签，修改为正确的反引号模板字符串 (Template Literal)
+  const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
+  // **********************
   
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
