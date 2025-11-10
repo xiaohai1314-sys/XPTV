@@ -6,8 +6,9 @@ const headers = {
   'User-Agent': UA,
 }
 
+// 1. 使用完整的、正确的 appConfig
 const appConfig = {
-  ver: 8, // 最终版本
+  ver: 10, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -23,7 +24,6 @@ const appConfig = {
     name: '动漫',
     ext: { url: '/category/dongman.html' },
   }, {
-    // “发现”页的URL，它的分页逻辑由 getCards 处理
     name: '发现', 
     ext: { url: '/search/-------------.html' },
   }]
@@ -33,7 +33,7 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// getCards 函数处理分类页和“发现”页，其逻辑是正确的，保持不变
+// 2. 恢复 V7 版本中正确的 getCards 分页逻辑
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,12 +44,10 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
-      // 针对不同的页面类型，使用不同的分页URL格式
+      // 正确的逻辑：区分处理分类页和发现页的分页URL
       if (urlPath.includes('/search/')) {
-          // 发现页分页: /search/-------------.html -> /search/-------------2---.html
           urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
       } else {
-          // 分类页分页: /category/dianying.html -> /category/dianying-2.html
           urlPath = urlPath.replace('.html', `-${page}.html`);
       }
   }
@@ -74,20 +72,18 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 关键修正：search 函数使用唯一正确的URL格式
+// 3. 使用 V8 版本中最终确定的正确 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 最终确定的、适用于所有页码的搜索URL格式
   const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
   
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
-  // 解析逻辑与 getCards 完全相同
   $('ul.stui-vodlist > li').each((_, each) => {
     const thumb = $(each).find('a.stui-vodlist__thumb');
     const titleLink = $(each).find('h4.title > a');
@@ -97,18 +93,14 @@ async function search(ext) {
       vod_name: titleLink.attr('title'),
       vod_pic: thumb.attr('data-original'),
       vod_remarks: thumb.find('span.pic-text').text().trim(),
-      ext: {
-        url: thumb.attr('href'),
-      },
+      ext: { url: thumb.attr('href') },
     })
   })
 
-  return jsonify({
-      list: cards,
-  })
+  return jsonify({ list: cards });
 }
 
-// getTracks 和 getPlayinfo 函数保持不变
+// 4. getTracks 和 getPlayinfo 保持不变
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
@@ -144,3 +136,4 @@ async function getPlayinfo(ext) {
         return jsonify({ urls: [match[1]], ui: 1 });
     }
     return jsonify({ urls: [] });
+}
