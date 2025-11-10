@@ -8,7 +8,7 @@ const headers = {
 
 // 1. 完整的、正确的 appConfig
 const appConfig = {
-  ver: 11, // 最终无误版本
+  ver: 12, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
