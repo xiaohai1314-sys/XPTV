@@ -8,7 +8,7 @@ const headers = {
 
 // appConfig 保持不变
 const appConfig = {
-  ver: 6, // 版本号更新
+  ver: 7, // 版本号更新
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -33,7 +33,7 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// getCards 函数保持不变
+// getCards 函数保持不变，它处理分类和发现页的分页
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -71,21 +71,16 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 1. 精确修正 search 函数的URL构造逻辑
+// 1. 使用完全正确的URL格式重写 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  let searchUrl;
-  if (page === 1) {
-      // 搜索第一页：使用不带页码的简单URL
-      searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}.html`;
-  } else {
-      // 搜索第二页及以后：使用带页码的复杂URL
-      searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
-  }
+  // 关键修正：无论第几页，都使用统一的复杂URL格式
+  // 关键词被插入到第一个'-'和第二个'-'之间
+  const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
   
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
