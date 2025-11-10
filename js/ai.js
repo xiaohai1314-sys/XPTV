@@ -11,7 +11,9 @@ const headers = {
 ‘User-Agent’: UA
 };
 
-const appConfig = {
+// 获取配置 - 返回分类标签
+async function getConfig() {
+const config = {
 ver: 1,
 title: ‘Netflix影视’,
 site: ‘https://www.netflixgc.com’,
@@ -25,9 +27,7 @@ tabs: [
 ]
 };
 
-// 获取配置
-async function getConfig() {
-return jsonify(appConfig);
+return jsonify(config);
 }
 
 // 获取视频列表
@@ -79,30 +79,36 @@ const $ = cheerio.load(data);
 // 获取播放源标题
 let sourceTitles = [];
 $(‘a.swiper-slide’).each((i, elem) => {
-sourceTitles.push(
-$(elem).children().children().children().end().text().trim()
-);
+const title = $(elem).children().children().children().end().text().trim();
+sourceTitles.push(title);
 });
 
 // 获取每个播放源的剧集列表
 $(‘div.anthology-list-box’).each((i, elem) => {
 let trackGroup = {
-title: sourceTitles[i],
+title: sourceTitles[i] || ‘播放列表’ + (i + 1),
 tracks: []
 };
 
 ```
 $(elem).find('a').each((j, episode) => {
-  trackGroup.tracks.push({
-    name: $(episode).text(),
-    pan: '',
-    ext: {
-      url: appConfig.site + $(episode).children(':first').attr('href')
-    }
-  });
+  const episodeName = $(episode).text().trim();
+  const episodeUrl = $(episode).children(':first').attr('href');
+  
+  if (episodeName && episodeUrl) {
+    trackGroup.tracks.push({
+      name: episodeName,
+      pan: '',
+      ext: {
+        url: 'https://www.netflixgc.com' + episodeUrl
+      }
+    });
+  }
 });
 
-trackList.push(trackGroup);
+if (trackGroup.tracks.length > 0) {
+  trackList.push(trackGroup);
+}
 ```
 
 });
@@ -120,10 +126,12 @@ let playUrl = args.url;
 const { data } = await $fetch.get(playUrl, { headers });
 
 // 提取播放器配置
-const playerConfig = JSON.parse(
-data.match(/player_aaaa=(.+?)</script>/)[1]
-);
+const match = data.match(/player_aaaa=(.+?)</script>/);
+if (!match) {
+return jsonify({ urls: [] });
+}
 
+const playerConfig = JSON.parse(match[1]);
 let finalUrl;
 
 // 根据加密类型解密
@@ -140,9 +148,15 @@ playUrl = ‘https://www.netflixgc.com’ + finalUrl;
 const response = await $fetch.get(playUrl, { headers });
 
 // 提取加密的URL和UID
-let encryptedUrl = response.data.match(/"url"\s*:\s*"([^"]+)"/)[1]
-  .replace(/\\/g, '');
-const uid = response.data.match(/"uid"\s*:\s*"([^"]+)"/)[1];
+const urlMatch = response.data.match(/"url"\s*:\s*"([^"]+)"/);
+const uidMatch = response.data.match(/"uid"\s*:\s*"([^"]+)"/);
+
+if (!urlMatch || !uidMatch) {
+  return jsonify({ urls: [] });
+}
+
+let encryptedUrl = urlMatch[1].replace(/\\/g, '');
+const uid = uidMatch[1];
 
 // AES解密
 const key = CryptoJS.enc.Utf8.parse('DS' + uid + 'DCC147D11943AF75');
@@ -174,23 +188,32 @@ let results = [];
 const keyword = encodeURIComponent(args.text);
 const page = args.page || 1;
 
-const searchUrl = appConfig.site + ‘/vodsearch/’ + keyword + ‘–––––’ + page + ‘—.html’;
+const searchUrl = ‘https://www.netflixgc.com/vodsearch/’ + keyword + ‘–––––’ + page + ‘—.html’;
 
 const { data } = await $fetch.get(searchUrl, { headers });
 const $ = cheerio.load(data);
 
 $(‘li.search-list’).each((i, elem) => {
-results.push({
-vod_id: $(elem).find(‘a.public-list-exp’).children(’:first’).attr(‘href’),
-vod_name: $(elem).find(‘a.thumb-txt’).text(),
-vod_pic: $(elem).find(‘a.public-list-exp’).children(’:first’)
-.find(‘img’).children(’:first’).attr(‘data-src’),
-vod_remarks: $(elem).find(‘span.public-list-prb’).text(),
-ext: {
-url: appConfig.site + $(elem).find(‘a.public-list-exp’)
-.children(’:first’).attr(‘href’)
+const link = $(elem).find(‘a.public-list-exp’).children(’:first’).attr(‘href’);
+const name = $(elem).find(‘a.thumb-txt’).text().trim();
+const pic = $(elem).find(‘a.public-list-exp’).children(’:first’)
+.find(‘img’).children(’:first’).attr(‘data-src’);
+const remarks = $(elem).find(‘span.public-list-prb’).text().trim();
+
+```
+if (link && name) {
+  results.push({
+    vod_id: link,
+    vod_name: name,
+    vod_pic: pic || '',
+    vod_remarks: remarks || '',
+    ext: {
+      url: 'https://www.netflixgc.com' + link
+    }
+  });
 }
-});
+```
+
 });
 
 return jsonify({ list: results });
@@ -198,34 +221,39 @@ return jsonify({ list: results });
 
 // Base64解码辅助函数
 function base64decode(input) {
-const base64Chars = ‘ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/’;
-const lookup = new Array(128).fill(-1);
+const base64Chars = ‘ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=’;
+const lookup = {};
 
-// 构建查找表
-for (let i = 0; i < base64Chars.length; i++) {
-lookup[base64Chars.charCodeAt(i)] = i;
+for (let i = 0; i < 64; i++) {
+lookup[base64Chars.charAt(i)] = i;
 }
-lookup[’-’.charCodeAt(0)] = 62;
-lookup[’_’.charCodeAt(0)] = 63;
 
 let output = ‘’;
-let buffer = 0;
-let bits = 0;
+let chr1, chr2, chr3;
+let enc1, enc2, enc3, enc4;
+let i = 0;
 
-for (let i = 0; i < input.length; i++) {
-const c = input.charCodeAt(i);
-const value = lookup[c];
+// 移除非base64字符
+input = input.replace(/[^A-Za-z0-9+/=]/g, ‘’);
+
+while (i < input.length) {
+enc1 = lookup[input.charAt(i++)];
+enc2 = lookup[input.charAt(i++)];
+enc3 = lookup[input.charAt(i++)];
+enc4 = lookup[input.charAt(i++)];
 
 ```
-if (value === -1) continue;
+chr1 = (enc1 << 2) | (enc2 >> 4);
+chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+chr3 = ((enc3 & 3) << 6) | enc4;
 
-buffer = (buffer << 6) | value;
-bits += 6;
+output += String.fromCharCode(chr1);
 
-if (bits >= 8) {
-  bits -= 8;
-  output += String.fromCharCode((buffer >> bits) & 0xFF);
-  buffer &= (1 << bits) - 1;
+if (enc3 !== 64) {
+  output += String.fromCharCode(chr2);
+}
+if (enc4 !== 64) {
+  output += String.fromCharCode(chr3);
 }
 ```
 
@@ -233,6 +261,3 @@ if (bits >= 8) {
 
 return output;
 }
-
-// 导出函数
-export { getConfig, getCards, getTracks, getPlayinfo, search };
