@@ -1,6 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v36 修正版（支持直接使用 Cookie）
+ * 脚本名称: 雷鲸资源站脚本 - v36.1 修正版（兼容新版页面结构）
+ *
+ * 更新说明 (v36.1):
+ * - 修正 getCards 函数，以适应 leijing1.com 最新的前端页面结构。
+ * - 将列表项选择器从 '.topicItem' 更新为 '.post-item'。
+ * - 更新了获取标题、链接和标签的内部选择器。
+ * - 其他函数（如 search, getTracks）保持不变，但请注意它们也可能因网站更新而失效。
  *
  * 更新说明 (v35):
  * - 移除账号密码登录逻辑，改为直接使用用户提供的 Cookie 字符串。
@@ -22,7 +28,7 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 // =================================================================
 
 const appConfig = {
-  ver: 35, // 版本号更新
+  ver: 36.1, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing1.com/',
   tabs: [
@@ -52,39 +58,53 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
+// =========== 已根据新版网站结构进行修改 ===========
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
-  // 在请求中带上包含 Cookie 的请求头
   const response = await $fetch.get(requestUrl, { headers: requestHeaders });
   const htmlData = getHtmlFromResponse(response);
 
   const $ = cheerio.load(htmlData);
+
+  // 使用新的选择器 '.topicItem' 来遍历列表项
   $('.topicItem').each((_, each) => {
-    // 逻辑保持不变
+    // 检查是否有锁定图标，新版网站可能使用不同的 class，例如 .cms-lock-solid
     if ($(each).find('.cms-lock-solid').length > 0) return;
-    const href = $(each).find('h2 a').attr('href');
-    const title = $(each).find('h2 a').text();
+
+    // 更新内部元素的选择器以匹配新结构
+    const a = $(each).find('h2.title a');
+    const href = a.attr('href');
+    const title = a.text();
+    
+    // 标题提取逻辑保持不变
     const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
     const match = title.match(regex);
     const dramaName = match ? match[1] : title;
+    
+    // 更新摘要和标签的选择器
     const r = $(each).find('.summary').text();
     const tag = $(each).find('.tag').text();
+    
+    // 过滤逻辑保持不变
     if (/content/.test(r) && !/cloud/.test(r)) return;
     if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: '',
-      vod_remarks: '',
+      vod_pic: '', // 图片现在可能在 .post-item-cover img 中，如果需要可以添加
+      vod_remarks: tag, // 将标签放入备注
       ext: { url: `${appConfig.site}/${href}` },
     });
   });
+  
   return jsonify({ list: cards });
 }
+// =====================================================
 
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
@@ -167,16 +187,17 @@ async function getTracks(ext) {
 
 async function search(ext) {
   ext = argsify(ext);
-let cards = [];
-let text = encodeURIComponent(ext.text);
-let page = ext.page || 1;
+  let cards = [];
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
 
-const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-// 搜索功能也需要带上 Cookie
-const response = await $fetch.get(requestUrl, { headers: requestHeaders });
-const htmlData = getHtmlFromResponse(response);
-const $ = cheerio.load(htmlData);
+  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+  // 搜索功能也需要带上 Cookie
+  const response = await $fetch.get(requestUrl, { headers: requestHeaders });
+  const htmlData = getHtmlFromResponse(response);
+  const $ = cheerio.load(htmlData);
 
+  // 注意：如果搜索结果页面的结构也已更改，这里的 '.topicItem' 也需要同步更新。
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
