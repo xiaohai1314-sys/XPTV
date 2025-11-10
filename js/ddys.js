@@ -6,9 +6,8 @@ const headers = {
   'User-Agent': UA,
 }
 
-// appConfig 保持不变
 const appConfig = {
-  ver: 7, // 版本号更新
+  ver: 8, // 最终版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -24,6 +23,7 @@ const appConfig = {
     name: '动漫',
     ext: { url: '/category/dongman.html' },
   }, {
+    // “发现”页的URL，它的分页逻辑由 getCards 处理
     name: '发现', 
     ext: { url: '/search/-------------.html' },
   }]
@@ -33,7 +33,7 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// getCards 函数保持不变，它处理分类和发现页的分页
+// getCards 函数处理分类页和“发现”页，其逻辑是正确的，保持不变
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,9 +44,12 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
+      // 针对不同的页面类型，使用不同的分页URL格式
       if (urlPath.includes('/search/')) {
+          // 发现页分页: /search/-------------.html -> /search/-------------2---.html
           urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
       } else {
+          // 分类页分页: /category/dianying.html -> /category/dianying-2.html
           urlPath = urlPath.replace('.html', `-${page}.html`);
       }
   }
@@ -71,15 +74,14 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 1. 使用完全正确的URL格式重写 search 函数
+// 关键修正：search 函数使用唯一正确的URL格式
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 关键修正：无论第几页，都使用统一的复杂URL格式
-  // 关键词被插入到第一个'-'和第二个'-'之间
+  // 最终确定的、适用于所有页码的搜索URL格式
   const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
   
   const { data } = await $fetch.get(searchUrl, { headers });
@@ -142,4 +144,3 @@ async function getPlayinfo(ext) {
         return jsonify({ urls: [match[1]], ui: 1 });
     }
     return jsonify({ urls: [] });
-}
