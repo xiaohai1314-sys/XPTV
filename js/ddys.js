@@ -6,10 +6,9 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 1. 完整的、正确的 appConfig
 const appConfig = {
-  ver: 11, // 最终无误版本
-  title: "低端影视",
+  ver: 13, // 测试版本 - URL显示版
+  title: "低端影视[测试]",
   site: "https://ddys.la",
   tabs: [{
     name: '首页',
@@ -33,7 +32,6 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// 2. V7 版本中正确的 getCards 分页逻辑
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,9 +42,8 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
-      // 正确的逻辑：区分处理分类页和发现页的分页URL
       if (urlPath.includes('/search/')) {
-          urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
+          urlPath = urlPath.replace(/(-+\d*-*)\.html/, `----------${page}---.html`);
       } else {
           urlPath = urlPath.replace('.html', `-${page}.html`);
       }
@@ -72,7 +69,6 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 修复后的 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -80,6 +76,7 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
+
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
@@ -99,7 +96,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. 优化后的 getTracks 函数
+// 🔍 修改 getTracks - 在选集名称中显示实际的视频URL（仅用于调试）
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
@@ -107,22 +104,48 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     let groups = [];
 
-    // 遍历所有 class 为 'stui-vodlist__head' 的标题元素
+    // 先尝试提取一个播放页的视频URL作为示例
+    let sampleVideoUrl = '';
+    const firstPlayLink = $('.stui-content__playlist li a').first().attr('href');
+    if (firstPlayLink) {
+        try {
+            const playPageUrl = appConfig.site + firstPlayLink;
+            const { data: playData } = await $fetch.get(playPageUrl, { headers });
+            const match = playData.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
+            if (match && match[1]) {
+                sampleVideoUrl = match[1];
+            }
+        } catch (e) {
+            // 忽略错误
+        }
+    }
+
     $('.stui-vodlist__head').each((index, head) => {
         const sourceTitle = $(head).find('h3').text().trim();
-        
-        // 查找紧随其后的 class 为 'stui-content__playlist' 的列表
         const playlist = $(head).next('ul.stui-content__playlist');
 
-        // 确保找到了对应的播放列表，并且标题不是“猜你喜欢”
         if (playlist.length > 0 && !sourceTitle.includes('猜你喜欢')) {
-            let group = { title: sourceTitle, tracks: [] };
+            // 🔍 在线路标题中显示视频URL格式
+            let debugTitle = sourceTitle;
+            if (sampleVideoUrl) {
+                const urlType = sampleVideoUrl.includes('.m3u8') ? '[M3U8]' : 
+                               sampleVideoUrl.includes('.mp4') ? '[MP4]' : '[未知]';
+                const protocol = sampleVideoUrl.startsWith('https://') ? '[HTTPS]' : 
+                                sampleVideoUrl.startsWith('http://') ? '[HTTP]' : '[相对路径]';
+                debugTitle = `${sourceTitle} ${urlType}${protocol}`;
+            }
+            
+            let group = { title: debugTitle, tracks: [] };
             
             playlist.find('li a').each((_, trackLink) => {
                 group.tracks.push({
                     name: $(trackLink).text().trim(),
                     pan: '',
-                    ext: { play_url: $(trackLink).attr('href') }
+                    ext: { 
+                        play_url: $(trackLink).attr('href'),
+                        // 携带示例URL用于显示
+                        debug_url: sampleVideoUrl 
+                    }
                 });
             });
 
@@ -135,40 +158,58 @@ async function getTracks(ext) {
     return jsonify({ list: groups });
 }
 
-// 5. ✅ 增强版 getPlayinfo（自动识别真实播放地址）
+// 🔍 多方案测试版 getPlayinfo
 async function getPlayinfo(ext) {
-  ext = argsify(ext);
-  const url = appConfig.site + ext.play_url;
-  const { data } = await $fetch.get(url, { headers });
-
-  // 尝试匹配 var player_aaaa 的 JSON 对象
-  const jsonMatch = data.match(/var player_aaaa\s*=\s*(\{[^;]+})/);
-  if (!jsonMatch) return jsonify({ urls: [] });
-
-  let playerData = {};
-  try {
-    playerData = JSON.parse(jsonMatch[1].replace(/,\s*]/g, "]"));
-  } catch (e) {}
-
-  let playUrl = playerData.url || '';
-
-  // 若不是 m3u8，尝试进一步解析跳转页
-  if (playUrl && !playUrl.endsWith('.m3u8')) {
-    if (!/^https?:/.test(playUrl)) {
-      playUrl = appConfig.site + playUrl;
-    }
-
+    ext = argsify(ext);
+    const url = appConfig.site + ext.play_url;
+    
     try {
-      const inner = await $fetch.get(playUrl, { headers });
-      const m3u8Match = inner.data.match(/(https?:\/\/[^\s'"]+\.m3u8)/);
-      if (m3u8Match) playUrl = m3u8Match[1];
-    } catch (err) {
-      // 如果内部请求失败，仍返回原始地址
+        const { data } = await $fetch.get(url, { headers });
+        const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
+        
+        if (match && match[1]) {
+            let videoUrl = match[1];
+            
+            // 处理相对路径
+            if (videoUrl.startsWith('/')) {
+                videoUrl = appConfig.site + videoUrl;
+            }
+            
+            // 🎯 方案1：最简洁的返回（推荐先试这个）
+            // return jsonify({ urls: [videoUrl] });
+            
+            // 🎯 方案2：带 headers 的返回（如果方案1不行，取消这个的注释）
+            // return jsonify({ 
+            //     urls: [videoUrl],
+            //     headers: {
+            //         'Referer': 'https://ddys.la/',
+            //         'User-Agent': UA
+            //     }
+            // });
+            
+            // 🎯 方案3：指定解析模式（如果方案2不行，取消这个的注释）
+            // return jsonify({ 
+            //     urls: [videoUrl],
+            //     parse: 0,
+            //     jx: 0
+            // });
+            
+            // 🎯 方案4：完整配置（当前使用的方案）
+            return jsonify({ 
+                urls: [videoUrl],
+                headers: {
+                    'Referer': 'https://ddys.la/',
+                    'Origin': 'https://ddys.la',
+                    'User-Agent': UA
+                },
+                ui: 1
+            });
+            
+        }
+        
+        return jsonify({ urls: [] });
+        
+    } catch (error) {
+        return jsonify({ urls: [] });
     }
-  }
-
-  if (playUrl) {
-    return jsonify({ urls: [playUrl], ui: 1 });
-  }
-  return jsonify({ urls: [] });
 }
