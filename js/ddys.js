@@ -8,7 +8,7 @@ const headers = {
 
 // 1. 完整的、正确的 appConfig
 const appConfig = {
-  ver: 12, // 最终无误版本
+  ver: 11, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -72,16 +72,14 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. ✅ 修复后的 search 函数
+// 3. 修复后的 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // ✅ 正确拼接搜索地址
   const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
-
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
@@ -123,7 +121,7 @@ async function getTracks(ext) {
             playlist.find('li a').each((_, trackLink) => {
                 group.tracks.push({
                     name: $(trackLink).text().trim(),
-                    pan: '', // 保持原逻辑
+                    pan: '',
                     ext: { play_url: $(trackLink).attr('href') }
                 });
             });
@@ -137,14 +135,40 @@ async function getTracks(ext) {
     return jsonify({ list: groups });
 }
 
-// 5. getPlayinfo 函数保持不变
+// 5. ✅ 增强版 getPlayinfo（自动识别真实播放地址）
 async function getPlayinfo(ext) {
-    ext = argsify(ext);
-    const url = appConfig.site + ext.play_url;
-    const { data } = await $fetch.get(url, { headers });
-    const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
-    if (match && match[1]) {
-        return jsonify({ urls: [match[1]], ui: 1 });
+  ext = argsify(ext);
+  const url = appConfig.site + ext.play_url;
+  const { data } = await $fetch.get(url, { headers });
+
+  // 尝试匹配 var player_aaaa 的 JSON 对象
+  const jsonMatch = data.match(/var player_aaaa\s*=\s*(\{[^;]+})/);
+  if (!jsonMatch) return jsonify({ urls: [] });
+
+  let playerData = {};
+  try {
+    playerData = JSON.parse(jsonMatch[1].replace(/,\s*]/g, "]"));
+  } catch (e) {}
+
+  let playUrl = playerData.url || '';
+
+  // 若不是 m3u8，尝试进一步解析跳转页
+  if (playUrl && !playUrl.endsWith('.m3u8')) {
+    if (!/^https?:/.test(playUrl)) {
+      playUrl = appConfig.site + playUrl;
     }
-    return jsonify({ urls: [] });
+
+    try {
+      const inner = await $fetch.get(playUrl, { headers });
+      const m3u8Match = inner.data.match(/(https?:\/\/[^\s'"]+\.m3u8)/);
+      if (m3u8Match) playUrl = m3u8Match[1];
+    } catch (err) {
+      // 如果内部请求失败，仍返回原始地址
+    }
+  }
+
+  if (playUrl) {
+    return jsonify({ urls: [playUrl], ui: 1 });
+  }
+  return jsonify({ urls: [] });
 }
