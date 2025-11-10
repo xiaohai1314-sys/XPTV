@@ -1,12 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v36 调试专用版
+ * 脚本名称: 雷鲸资源站脚本 - v37 最终修正版
  *
- * 更新说明 (v36-debug):
- * - 这是一个用于调试的特殊版本。
- * - 它会拦截分类页的请求，并将服务器返回的原始 HTML 内容作为“影片标题”显示在APP界面上。
- * - 目的是为了查看脚本在APP环境下到底获取了什么样的网页内容，以诊断“分类点开无内容”的问题。
- * - 调试完成后，需要将 getCards 函数恢复正常。
+ * 更新说明 (v37):
+ * - 修正了“分类点开无内容”的问题。
+ * - 诊断发现服务器返回 500 错误，很可能是由于携带了无效 Cookie 导致。
+ * - 在 getCards 函数的请求中移除了 Cookie，以游客身份进行访问，从而避免触发服务器错误。
+ * - 保留了其他所有功能（详情页、搜索等）。
  * =================================================================
  */
 
@@ -16,13 +16,13 @@ const cheerio = createCheerio();
 const BACKEND_URL = 'http://192.168.1.3:3001'; 
 
 // ============================ 关键配置 ============================
-// ⚠️ 请将下面的字符串替换为您自己的完整 Cookie
+// ⚠️ 下面的 Cookie 仅用于详情页和搜索 ，分类页不再使用它。
 const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-AfjYdK1a9Hn9QyIpTjcD9Dy1w; cf_clearance=1KSgiw7quPKkMiFpRseR8YlHhPJjE_fl0v.L6LbMzlo-1762633022-1.2.1.1-WPvSiDK.w5XsUlu3sIwM4r5pg8AbCqXfGCsZYrFulDsMxo0Z0oKHy4YZNU1C.70_VsKU.D5AgZOZPChSUtnGk8iYVjvnTdrsprQVVyupyTPYq9xRR1KlQoeJ1JqAtjGSqYQu0y_UHuMqdpX.7UDjjQIpRK_gyc2kt5DiEcH2u.Vug6xqZtMX96KOmgB2tsb_I9aWRs5Hl7_UneGjZeeVXPUxtaPY4Fl.0n2z3btGdbYs3hYuja0aWXP0oJSUIs1i; __gads=ID=ebf773339e181721:T=1760889219:RT=1760889219:S=ALNI_MZfqUGthmjWHR1DiGAkynLdHaoVZw; __gpi=UID=000012b7ed6f2a8b:T=1760889219:RT=1760889219:S=ALNI_MaypqVukBihQplCbqa_MrCVPwJkTQ; _ga=GA1.1.1766815720.1762630882; _ga_FM8S5GPFE1=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; _ga_WPP9075S5T=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; cms_token=67de22ffa3184ee89c74e1d1eb5bb4aa; JSESSIONID=15D09C7857B0243558DC7B2ECF5802F4';
 // =================================================================
 
 const appConfig = {
-  ver: 36, // 版本号更新为调试版
-  title: '雷鲸 (调试中 )',
+  ver: 37, // 版本号更新
+  title: '雷鲸',
   site: 'https://www.leijing1.com/',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
@@ -51,46 +51,52 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
-// ==================== 调试专用 getCards 函数 ====================
-// 目的：将脚本实际获取到的HTML内容，通过影片标题显示在APP界面上。
+// ==================== 最终修正版 getCards 函数 ====================
 async function getCards(ext) {
   ext = argsify(ext);
+  let cards = [];
   let { page = 1, id } = ext;
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
   
-  try {
-    // 发起网络请求
-    const response = await $fetch.get(requestUrl, { headers: requestHeaders });
-    const htmlData = getHtmlFromResponse(response);
+  // ===================== 核心修改 =====================
+  // 发起请求时，不再携带完整的 requestHeaders，只带 User-Agent。
+  // 这样可以避免因无效 Cookie 导致服务器返回 500 错误。
+  const response = await $fetch.get(requestUrl, { 
+    headers: { 'User-Agent': UA } 
+  });
+  // ================================================
 
-    // 创建一个只包含一个“影片”的列表
-    const debugCard = {
-      vod_id: 'debug_info_1',
-      // 核心：将获取到的 HTML 内容作为影片的标题
-      vod_name: '【调试信息】脚本获取的HTML内容如下：' + htmlData, 
-      vod_pic: 'https://img.zcool.cn/community/01a8545da68075a8012187f4458842.png@1280w_1l_2o_100sh.png', // 放一个调试图标
-      vod_remarks: '请将完整的标题内容复制给我',
-      ext: {}
-    };
+  const htmlData = getHtmlFromResponse(response);
+  const $ = cheerio.load(htmlData);
 
-    // 将这个特殊的“影片”卡片返回给APP
-    return jsonify({ list: [debugCard] } );
+  $('.topicItem').each((_, each) => {
+    const href = $(each).find('h2 a').attr('href');
+    if (!href) return;
 
-  } catch (e) {
-    // 如果请求过程中发生错误（比如网络问题），也将错误信息返回
-    const errorCard = {
-      vod_id: 'debug_error_1',
-      vod_name: '【调试错误】请求失败，错误信息：' + e.toString(),
-      vod_pic: 'https://img.zcool.cn/community/01a8545da68075a8012187f4458842.png@1280w_1l_2o_100sh.png',
-      vod_remarks: '请将这个错误信息截图或复制给我',
-      ext: {}
-    };
-    return jsonify({ list: [errorCard] } );
-  }
+    const title = $(each).find('h2 a').text();
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
+    
+    if (/content/.test(r) && !/cloud/.test(r)) return;
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+
+    const isLocked = $(each).find('.cms-lock-solid').length > 0;
+    
+    cards.push({
+      vod_id: href,
+      vod_name: (isLocked ? '🔒 ' : '') + dramaName,
+      vod_pic: '',
+      vod_remarks: '',
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
 }
-// ==================== 调试函数结束 ====================
-
+// ==================== 函数结束 ====================
 
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
@@ -110,6 +116,7 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
+    // 详情页请求依然携带 Cookie，因为访问带锁帖子可能需要
     const response = await $fetch.get(requestUrl, { headers: requestHeaders });
     const htmlData = getHtmlFromResponse(response);
     const $ = cheerio.load(htmlData);
@@ -176,6 +183,7 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+  // 搜索功能也需要带上 Cookie
   const response = await $fetch.get(requestUrl, { headers: requestHeaders });
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
