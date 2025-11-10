@@ -6,77 +6,26 @@ const headers = {
   'User-Agent': UA,
 }
 
+// 配置信息保持不变
 const appConfig = {
-  ver: 1,
+  ver: 2,
   title: "低端影视",
-  site: "https://ddys.la/",
+  site: "https://ddys.la",
   tabs: [{
     name: '首页',
-    ext: {
-      url: '/'
-    },
+    ext: { url: '/' },
   }, {
-    name: '所有电影',
-    ext: {
-      url: '/category/movie/'
-    },
+    name: '电影',
+    ext: { url: '/category/dianying' },
   }, {
-    name: '连载剧集',
-    ext: {
-      url: '/category/airing/',
-      hasMore: false
-    },
+    name: '剧集',
+    ext: { url: '/category/juji' },
   }, {
-    name: '本季新番',
-    ext: {
-      url: '/category/anime/new-bangumi/',
-      hasMore: false
-    },
+    name: '动漫',
+    ext: { url: '/category/dongman' },
   }, {
-    name: '动画',
-    ext: {
-      url: '/category/anime/'
-    },
-  }, {
-    name: '华语电影',
-    ext: {
-      url: '/category/movie/chinese-movie/'
-    },
-  }, {
-    name: '欧美电影',
-    ext: {
-      url: '/category/movie/western-movie/'
-    },
-  }, {
-    name: '日韩电影',
-    ext: {
-      url: '/category/movie/asian-movie/'
-    },
-  }, {
-    name: '豆瓣电影Top250',
-    ext: {
-      url: '/tag/douban-top250/'
-    },
-  }, {
-    name: '欧美剧',
-    ext: {
-      url: '/category/drama/western-drama/'
-    },
-  }, {
-    name: '日剧',
-    ext: {
-      url: '/category/drama/jp-drama/'
-    },
-  }, {
-    name: '韩剧',
-    ext: {
-      url: '/category/drama/kr-drama/'
-    },
-  }, {
-    name: '华语剧',
-    ext: {
-      url: '/category/drama/cn-drama/'
-    },
+    name: '专题',
+    ext: { url: '/topic.html' },
   }]
 }
 
@@ -84,34 +33,33 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
+// 列表页解析函数保持不变
 async function getCards(ext) {
   ext = argsify(ext)
   let cards = []
   let url = ext.url
   let page = ext.page || 1
-  let hasMore = ext.hasMore || true
 
-  if (!hasMore && page > 1) {
-    return jsonify({
-      list: cards,
-    })
+  if (page === 1) {
+    url = appConfig.site + (url === '/' ? '/' : `${url}.html`);
+  } else {
+    url = appConfig.site + `<LaTex>${url}-$</LaTex>{page}.html`;
   }
 
-  url = appConfig.site + url + `/page/${page}/`
+  const { data } = await $fetch.get(url, { headers });
+  const $ = cheerio.load(data);
 
-  const { data } = await $fetch.get(url, {
-    headers
-  })
-
-  const $ = cheerio.load(data)
-  $('article.post').each((_, each) => {
+  $('ul.stui-vodlist > li').each((_, each) => {
+    const thumb = $(each).find('a.stui-vodlist__thumb');
+    const titleLink = $(each).find('h4.title > a');
+    
     cards.push({
-      vod_id: $(each).find('h2 > a').attr('href'),
-      vod_name: $(each).find('h2.post-box-title').text(),
-      vod_pic: $(each).find('.post-box-image').attr('style').replace('background-image: url(', '').replace('");"', ''),
-      vod_remarks: $(each).find('div.post-box-text > p').text(),
+      vod_id: thumb.attr('href'),
+      vod_name: titleLink.attr('title'),
+      vod_pic: thumb.attr('data-original'),
+      vod_remarks: thumb.find('span.pic-text').text().trim(),
       ext: {
-        url: $(each).find('h2 > a').attr('href'),
+        url: thumb.attr('href'),
       },
     })
   })
@@ -121,143 +69,29 @@ async function getCards(ext) {
   })
 }
 
-async function getTracks(ext) {
-    ext = argsify(ext);
-    let groups = [];
-    let url = ext.url;
-
-    const { data } = await $fetch.get(url, {
-        headers
-    });
-
-    const $ = cheerio.load(data);
-
-    const seasonNumbers = [];
-    $('.page-links .post-page-numbers').each((_, each) => {
-        const seasonNumber = $(each).text();
-        if (!isNaN(seasonNumber)) {
-            seasonNumbers.push(seasonNumber);
-        }
-    });
-
-    if (seasonNumbers.length === 0) {
-        let onlineGroup = {
-            title: '在线',
-            tracks: []
-        };
-
-        const trackText = $('script.wp-playlist-script').text();
-        const tracks = JSON.parse(trackText).tracks;
-
-        tracks.forEach(each => {
-            onlineGroup.tracks.push({
-                name: each.caption,
-                pan: '',
-                ext: each
-            });
-        });
-
-        groups.push(onlineGroup);
-    } else {
-        for (const season of seasonNumbers) {
-            let seasonGroup = {
-                title: `第${season}季`,
-                tracks: []
-            };
-
-            const seasonUrl = `${url}${season}/`;
-            const seasonData = await $fetch.get(seasonUrl, {
-                headers
-            });
-            const season$ = cheerio.load(seasonData.data);
-
-            const trackText = season$('script.wp-playlist-script').text();
-            const tracks = JSON.parse(trackText).tracks;
-
-            tracks.forEach(each => {
-                seasonGroup.tracks.push({
-                    name: each.caption,
-                    pan: '',
-                    ext: each
-                });
-            });
-
-            groups.push(seasonGroup);
-        }
-    }
-
-    let group2 = {
-        title: '',
-        tracks: []
-    };
-    $('a').each((_, each) => {
-        const v = $(each).attr('href');
-        if (v.startsWith('https://drive.uc.cn/s')) {
-            group2.tracks.push({
-                name: 'uc网盘',
-                pan: v,
-            });
-        } else if (v.startsWith('https://pan.quark.cn/s/')) {
-            group2.tracks.push({
-                name: '夸克网盘',
-                pan: v,
-            });
-        }
-    });
-    if (group2.tracks.length > 0) {
-        groups.push(group2);
-    }
-
-    return jsonify({ list: groups });
-}
-
-async function getPlayinfo(ext) {
-    ext = argsify(ext)
-    const { srctype, src0, } = ext
-    let url = ''
-    if (srctype) {
-      url = 'https://v.ddys.pro' + src0
-    }
-
-    $print('***url: ' + url)
-    return jsonify({
-      urls: [url],
-      headers: [{
-        'Referer': 'https://ddys.mov/',
-        'Origin': 'https://ddys.mov',
-        'User-Agent': UA,
-      }],
-      ui: 1,
-    })
-    // return jsonify({urls: []})
-}
-
+// 搜索函数保持不变
 async function search(ext) {
   ext = argsify(ext)
   let cards = [];
-
   let text = encodeURIComponent(ext.text)
   let page = ext.page || 1
-  if (page > 1) {
-    return jsonify({
-      list: cards,
-    })
-  }
 
-  const url = appConfig.site + `/?s=${text}&post_type=post`
-  const { data } = await $fetch.get(url, {
-    headers
-  })
+  const url = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
   
-  const $ = cheerio.load(data)
-  $('article.post').each((_, each) => {
+  const { data } = await $fetch.get(url, { headers });
+  const $ = cheerio.load(data);
+
+  $('ul.stui-vodlist > li').each((_, each) => {
+    const thumb = $(each).find('a.stui-vodlist__thumb');
+    const titleLink = $(each).find('h4.title > a');
+
     cards.push({
-      vod_id: $(each).find('h2 > a').attr('href'),
-      vod_name: $(each).find('h2.post-title').text(),
-      vod_pic: '',
-      vod_remarks: $(each).find('div.entry-content > p').text(),
+      vod_id: thumb.attr('href'),
+      vod_name: titleLink.attr('title'),
+      vod_pic: thumb.attr('data-original'),
+      vod_remarks: thumb.find('span.pic-text').text().trim(),
       ext: {
-        url: $(each).find('h2 > a').attr('href'),
+        url: thumb.attr('href'),
       },
     })
   })
@@ -265,4 +99,69 @@ async function search(ext) {
   return jsonify({
       list: cards,
   })
+}
+
+// 4. 更新 getTracks 函数以解析详情页的播放列表
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const url = appConfig.site + ext.url;
+    const { data } = await $fetch.get(url, { headers });
+    const $ = cheerio.load(data);
+
+    let groups = [];
+
+    // 遍历每个播放源 (线路)
+    $('.stui-pannel-box').each((index, panel) => {
+        const sourceTitle = $(panel).find('.stui-vodlist__head h3').text().trim();
+        
+        // 只处理包含“播放”字样的线路，过滤掉“猜你喜欢”等
+        if (sourceTitle.includes('播放')) {
+            let group = {
+                title: sourceTitle,
+                tracks: []
+            };
+
+            // 遍历该线路下的所有剧集/播放项
+            $(panel).find('ul.stui-content__playlist li').each((_, track) => {
+                const trackLink = $(track).find('a');
+                group.tracks.push({
+                    name: trackLink.text().trim(),
+                    // pan 为空表示这是在线播放，不是网盘
+                    pan: '',
+                    // ext 中保存播放页的相对路径，用于 getPlayinfo
+                    ext: {
+                        play_url: trackLink.attr('href')
+                    }
+                });
+            });
+
+            if (group.tracks.length > 0) {
+                groups.push(group);
+            }
+        }
+    });
+
+    return jsonify({ list: groups });
+}
+
+// 5. 更新 getPlayinfo 函数以从播放页获取真实播放地址
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const url = appConfig.site + ext.play_url;
+    const { data } = await $fetch.get(url, { headers });
+
+    // 使用正则表达式从页面脚本中提取 player_aaaa 对象中的 url
+    const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
+
+    if (match && match[1]) {
+        const playUrl = match[1];
+        return jsonify({
+            urls: [playUrl],
+            // 播放器UI类型，1通常代表使用内置的IJK播放器
+            ui: 1, 
+        });
+    }
+
+    // 如果没有找到匹配项，返回空结果
+    return jsonify({ urls: [] });
 }
