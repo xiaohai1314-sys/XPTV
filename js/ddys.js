@@ -1,4 +1,4 @@
-const cheerio = createCheerio() // 假设 createCheerio 和其他辅助函数已定义
+const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const headers = {
   'Referer': 'https://ddys.la/',
@@ -6,9 +6,9 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 1. 使用完整的、正确的 appConfig (保持不变)
+// 1. 完整的、正确的 appConfig
 const appConfig = {
-  ver: 11,
+  ver: 11, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -33,7 +33,7 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// 2. 恢复 V7 版本中正确的 getCards 分页逻辑 (保持不变)
+// 2. V7 版本中正确的 getCards 分页逻辑
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,6 +44,7 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
+      // 正确的逻辑：区分处理分类页和发现页的分页URL
       if (urlPath.includes('/search/')) {
           urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
       } else {
@@ -71,14 +72,15 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. ✅ 修复后的 search 函数 (保持不变)
+// 3. ✅ 修复后的 search 函数
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
+  // ✅ 正确拼接搜索地址
+  const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
@@ -99,36 +101,43 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. getTracks (微调版)
+// 4. 优化后的 getTracks 函数
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
     const { data } = await $fetch.get(url, { headers });
     const $ = cheerio.load(data);
     let groups = [];
-    $('.stui-pannel-box').each((index, panel) => {
-        const sourceTitle = $(panel).find('.stui-vodlist__head h3').text().trim();
+
+    // 遍历所有 class 为 'stui-vodlist__head' 的标题元素
+    $('.stui-vodlist__head').each((index, head) => {
+        const sourceTitle = $(head).find('h3').text().trim();
         
-        // 核心微调：放宽判断条件，使其能识别所有播放列表区块
-        if ($(panel).find('ul.stui-content__playlist').length > 0 && !sourceTitle.includes('猜你喜欢')) {
+        // 查找紧随其后的 class 为 'stui-content__playlist' 的列表
+        const playlist = $(head).next('ul.stui-content__playlist');
+
+        // 确保找到了对应的播放列表，并且标题不是“猜你喜欢”
+        if (playlist.length > 0 && !sourceTitle.includes('猜你喜欢')) {
             let group = { title: sourceTitle, tracks: [] };
-            $(panel).find('ul.stui-content__playlist li').each((_, track) => {
-                const trackLink = $(track).find('a');
+            
+            playlist.find('li a').each((_, trackLink) => {
                 group.tracks.push({
-                    name: trackLink.text().trim(),
-                    pan: '',
-                    ext: { play_url: trackLink.attr('href') }
+                    name: $(trackLink).text().trim(),
+                    pan: '', // 保持原逻辑
+                    ext: { play_url: $(trackLink).attr('href') }
                 });
             });
+
             if (group.tracks.length > 0) {
                 groups.push(group);
             }
         }
     });
+
     return jsonify({ list: groups });
 }
 
-// 5. getPlayinfo (保持不变)
+// 5. getPlayinfo 函数保持不变
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.play_url;
