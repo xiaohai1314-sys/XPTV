@@ -6,9 +6,9 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 配置信息保持不变
+// appConfig 保持不变
 const appConfig = {
-  ver: 2,
+  ver: 6, // 版本号更新
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -16,16 +16,16 @@ const appConfig = {
     ext: { url: '/' },
   }, {
     name: '电影',
-    ext: { url: '/category/dianying' },
+    ext: { url: '/category/dianying.html' },
   }, {
     name: '剧集',
-    ext: { url: '/category/juji' },
+    ext: { url: '/category/juji.html' },
   }, {
     name: '动漫',
-    ext: { url: '/category/dongman' },
+    ext: { url: '/category/dongman.html' },
   }, {
-    name: '专题',
-    ext: { url: '/topic.html' },
+    name: '发现', 
+    ext: { url: '/search/-------------.html' },
   }]
 }
 
@@ -33,20 +33,26 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// 列表页解析函数保持不变
+// getCards 函数保持不变
 async function getCards(ext) {
-  ext = argsify(ext)
-  let cards = []
-  let url = ext.url
-  let page = ext.page || 1
+  ext = argsify(ext);
+  let cards = [];
+  let urlPath = ext.url;
+  let page = ext.page || 1;
 
-  if (page === 1) {
-    url = appConfig.site + (url === '/' ? '/' : `${url}.html`);
-  } else {
-    url = appConfig.site + `<LaTex>${url}-$</LaTex>{page}.html`;
+  if (page > 1) {
+      if (urlPath === '/') {
+          return jsonify({ list: [] });
+      }
+      if (urlPath.includes('/search/')) {
+          urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
+      } else {
+          urlPath = urlPath.replace('.html', `-${page}.html`);
+      }
   }
-
-  const { data } = await $fetch.get(url, { headers });
+  
+  const fullUrl = appConfig.site + urlPath;
+  const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
   $('ul.stui-vodlist > li').each((_, each) => {
@@ -58,29 +64,33 @@ async function getCards(ext) {
       vod_name: titleLink.attr('title'),
       vod_pic: thumb.attr('data-original'),
       vod_remarks: thumb.find('span.pic-text').text().trim(),
-      ext: {
-        url: thumb.attr('href'),
-      },
+      ext: { url: thumb.attr('href') },
     })
   })
 
-  return jsonify({
-    list: cards,
-  })
+  return jsonify({ list: cards });
 }
 
-// 搜索函数保持不变
+// 1. 精确修正 search 函数的URL构造逻辑
 async function search(ext) {
-  ext = argsify(ext)
+  ext = argsify(ext);
   let cards = [];
-  let text = encodeURIComponent(ext.text)
-  let page = ext.page || 1
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
 
-  const url = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
+  let searchUrl;
+  if (page === 1) {
+      // 搜索第一页：使用不带页码的简单URL
+      searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}.html`;
+  } else {
+      // 搜索第二页及以后：使用带页码的复杂URL
+      searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
+  }
   
-  const { data } = await $fetch.get(url, { headers });
+  const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
+  // 解析逻辑与 getCards 完全相同
   $('ul.stui-vodlist > li').each((_, each) => {
     const thumb = $(each).find('a.stui-vodlist__thumb');
     const titleLink = $(each).find('h4.title > a');
@@ -101,67 +111,40 @@ async function search(ext) {
   })
 }
 
-// 4. 更新 getTracks 函数以解析详情页的播放列表
+// getTracks 和 getPlayinfo 函数保持不变
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
     const { data } = await $fetch.get(url, { headers });
     const $ = cheerio.load(data);
-
     let groups = [];
-
-    // 遍历每个播放源 (线路)
     $('.stui-pannel-box').each((index, panel) => {
         const sourceTitle = $(panel).find('.stui-vodlist__head h3').text().trim();
-        
-        // 只处理包含“播放”字样的线路，过滤掉“猜你喜欢”等
         if (sourceTitle.includes('播放')) {
-            let group = {
-                title: sourceTitle,
-                tracks: []
-            };
-
-            // 遍历该线路下的所有剧集/播放项
+            let group = { title: sourceTitle, tracks: [] };
             $(panel).find('ul.stui-content__playlist li').each((_, track) => {
                 const trackLink = $(track).find('a');
                 group.tracks.push({
                     name: trackLink.text().trim(),
-                    // pan 为空表示这是在线播放，不是网盘
                     pan: '',
-                    // ext 中保存播放页的相对路径，用于 getPlayinfo
-                    ext: {
-                        play_url: trackLink.attr('href')
-                    }
+                    ext: { play_url: trackLink.attr('href') }
                 });
             });
-
             if (group.tracks.length > 0) {
                 groups.push(group);
             }
         }
     });
-
     return jsonify({ list: groups });
 }
 
-// 5. 更新 getPlayinfo 函数以从播放页获取真实播放地址
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.play_url;
     const { data } = await $fetch.get(url, { headers });
-
-    // 使用正则表达式从页面脚本中提取 player_aaaa 对象中的 url
     const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
-
     if (match && match[1]) {
-        const playUrl = match[1];
-        return jsonify({
-            urls: [playUrl],
-            // 播放器UI类型，1通常代表使用内置的IJK播放器
-            ui: 1, 
-        });
+        return jsonify({ urls: [match[1]], ui: 1 });
     }
-
-    // 如果没有找到匹配项，返回空结果
     return jsonify({ urls: [] });
 }
