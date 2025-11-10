@@ -8,7 +8,7 @@ const headers = {
 
 // 1. 使用完整的、正确的 appConfig
 const appConfig = {
-  ver: 11, // 最终无误版本
+  ver: 10, // 最终无误版本
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -72,15 +72,16 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 使用 V8 版本中最终确定的正确 search 函数
+// 3. ✅ 修复后的 search 函数（保持原结构）
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  const searchUrl = `<LaTex>${appConfig.site}/search/$</LaTex>{text}----------${page}---.html`;
-  
+  // ✅ 正确拼接
+  const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
+
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
