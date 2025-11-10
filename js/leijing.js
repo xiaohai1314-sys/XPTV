@@ -1,27 +1,23 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v37 最终修正版
+ * 脚本名称: 雷鲸资源站脚本 - v38 终极修正版
  *
- * 更新说明 (v37):
- * - 修正了“分类点开无内容”的问题。
- * - 诊断发现服务器返回 500 错误，很可能是由于携带了无效 Cookie 导致。
- * - 在 getCards 函数的请求中移除了 Cookie，以游客身份进行访问，从而避免触发服务器错误。
- * - 保留了其他所有功能（详情页、搜索等）。
+ * 更新说明 (v38):
+ * - 尝试最终解决方案：使用更强大的 $httpClient 来模拟浏览器请求 。
+ * - 之前的方案均失败，表明网站可能存在需要执行JS的强力反爬虫机制。
+ * - $httpClient 相比 $fetch 能更好地模拟浏览器环境 ，有希望绕过检测。
+ * - 这次我们再次带上Cookie，因为 $httpClient 配合正确的Cookie 成功率更高 。
  * =================================================================
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-// ⚠️ 注意：这个 IP 地址是本地地址，如果您的运行环境无法访问，请修改为正确的后端服务地址。
 const BACKEND_URL = 'http://192.168.1.3:3001'; 
 
-// ============================ 关键配置 ============================
-// ⚠️ 下面的 Cookie 仅用于详情页和搜索 ，分类页不再使用它。
 const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-AfjYdK1a9Hn9QyIpTjcD9Dy1w; cf_clearance=1KSgiw7quPKkMiFpRseR8YlHhPJjE_fl0v.L6LbMzlo-1762633022-1.2.1.1-WPvSiDK.w5XsUlu3sIwM4r5pg8AbCqXfGCsZYrFulDsMxo0Z0oKHy4YZNU1C.70_VsKU.D5AgZOZPChSUtnGk8iYVjvnTdrsprQVVyupyTPYq9xRR1KlQoeJ1JqAtjGSqYQu0y_UHuMqdpX.7UDjjQIpRK_gyc2kt5DiEcH2u.Vug6xqZtMX96KOmgB2tsb_I9aWRs5Hl7_UneGjZeeVXPUxtaPY4Fl.0n2z3btGdbYs3hYuja0aWXP0oJSUIs1i; __gads=ID=ebf773339e181721:T=1760889219:RT=1760889219:S=ALNI_MZfqUGthmjWHR1DiGAkynLdHaoVZw; __gpi=UID=000012b7ed6f2a8b:T=1760889219:RT=1760889219:S=ALNI_MaypqVukBihQplCbqa_MrCVPwJkTQ; _ga=GA1.1.1766815720.1762630882; _ga_FM8S5GPFE1=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; _ga_WPP9075S5T=GS2.1.s1762633030$o2$g1$t1762633035$j55$l0$h0; cms_token=67de22ffa3184ee89c74e1d1eb5bb4aa; JSESSIONID=15D09C7857B0243558DC7B2ECF5802F4';
-// =================================================================
 
 const appConfig = {
-  ver: 37, // 版本号更新
+  ver: 38, // 版本号更新
   title: '雷鲸',
   site: 'https://www.leijing1.com/',
   tabs: [
@@ -34,24 +30,23 @@ const appConfig = {
   ],
 };
 
-// 统一的请求头 ，包含 User-Agent 和 Cookie
 const requestHeaders = {
   'User-Agent': UA,
   'Cookie': USER_COOKIE,
 };
 
-async function getConfig() {
+async function getConfig( ) {
   return jsonify(appConfig);
 }
 
 function getHtmlFromResponse(response) {
+  // $httpClient 返回的可能是对象 ，也可能是字符串，这里做兼容处理
   if (typeof response === 'string') return response;
-  if (response && typeof response.data === 'string') return response.data;
-  console.error("收到了非预期的响应格式:", response);
+  if (response && response.body && typeof response.body === 'string') return response.body;
+  if (response && response.data && typeof response.data === 'string') return response.data;
   return ''; 
 }
 
-// ==================== 最终修正版 getCards 函数 ====================
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -59,44 +54,74 @@ async function getCards(ext) {
   
   const requestUrl = `${appConfig.site}/${id}&page=${page}`;
   
-  // ===================== 核心修改 =====================
-  // 发起请求时，不再携带完整的 requestHeaders，只带 User-Agent。
-  // 这样可以避免因无效 Cookie 导致服务器返回 500 错误。
-  const response = await $fetch.get(requestUrl, { 
-    headers: { 'User-Agent': UA } 
-  });
-  // ================================================
+  try {
+    // ===================== 核心修改 =====================
+    // 使用 $httpClient 替代 $fetch ，它能更好地模拟浏览器
+    const response = await $httpClient.get(requestUrl, { 
+      headers: requestHeaders // 重新带上Cookie和UA
+    } );
+    // ================================================
 
-  const htmlData = getHtmlFromResponse(response);
-  const $ = cheerio.load(htmlData);
-
-  $('.topicItem').each((_, each) => {
-    const href = $(each).find('h2 a').attr('href');
-    if (!href) return;
-
-    const title = $(each).find('h2 a').text();
-    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
-    const match = title.match(regex);
-    const dramaName = match ? match[1] : title;
-    const r = $(each).find('.summary').text();
-    const tag = $(each).find('.tag').text();
+    const htmlData = getHtmlFromResponse(response);
     
-    if (/content/.test(r) && !/cloud/.test(r)) return;
-    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    // 如果返回的还是空内容，我们再次启用调试模式，看看这次拿到了什么
+    if (!htmlData || htmlData.length < 500) {
+        return jsonify({ list: [{
+            vod_id: 'debug_info_2',
+            vod_name: '【终极调试】$httpClient获取内容如下：' + htmlData,
+            vod_pic: '',
+            vod_remarks: '如果仍无内容 ，请复制此标题给我'
+        }]});
+    }
 
-    const isLocked = $(each).find('.cms-lock-solid').length > 0;
-    
-    cards.push({
-      vod_id: href,
-      vod_name: (isLocked ? '🔒 ' : '') + dramaName,
-      vod_pic: '',
-      vod_remarks: '',
-      ext: { url: `${appConfig.site}/${href}` },
+    const $ = cheerio.load(htmlData);
+
+    $('.topicItem').each((_, each) => {
+      const href = $(each).find('h2 a').attr('href');
+      if (!href) return;
+
+      const title = $(each).find('h2 a').text();
+      const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+      const match = title.match(regex);
+      const dramaName = match ? match[1] : title;
+      const r = $(each).find('.summary').text();
+      const tag = $(each).find('.tag').text();
+      
+      if (/content/.test(r) && !/cloud/.test(r)) return;
+      if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+
+      const isLocked = $(each).find('.cms-lock-solid').length > 0;
+      
+      cards.push({
+        vod_id: href,
+        vod_name: (isLocked ? '🔒 ' : '') + dramaName,
+        vod_pic: '',
+        vod_remarks: '',
+        ext: { url: `${appConfig.site}/${href}` },
+      });
     });
-  });
-  return jsonify({ list: cards });
+
+    // 如果解析后卡片列表为空，也返回一条提示信息
+    if (cards.length === 0) {
+        return jsonify({ list: [{
+            vod_id: 'debug_info_3',
+            vod_name: '【解析失败】已获取到HTML，但未能解析出任何影片。',
+            vod_pic: '',
+            vod_remarks: '这表示网站结构可能已改变'
+        }]});
+    }
+
+    return jsonify({ list: cards });
+
+  } catch (e) {
+    return jsonify({ list: [{
+        vod_id: 'debug_error_2',
+        vod_name: '【请求错误】$httpClient请求失败：' + e.toString( ),
+        vod_pic: '',
+        vod_remarks: '请复制此错误信息'
+    }]});
+  }
 }
-// ==================== 函数结束 ====================
 
 async function getPlayinfo(ext) {
   return jsonify({ urls: [] });
@@ -116,8 +141,7 @@ async function getTracks(ext) {
 
   try {
     const requestUrl = ext.url;
-    // 详情页请求依然携带 Cookie，因为访问带锁帖子可能需要
-    const response = await $fetch.get(requestUrl, { headers: requestHeaders });
+    const response = await $httpClient.get(requestUrl, { headers: requestHeaders } );
     const htmlData = getHtmlFromResponse(response);
     const $ = cheerio.load(htmlData);
 
@@ -140,7 +164,7 @@ async function getTracks(ext) {
       if (!href) return;
       let agnosticUrl = getProtocolAgnosticUrl(href);
       if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
-      href = href.replace('http://', 'https://' );
+      href = href.replace('http://', 'https' );
       let trackName = $el.text().trim() || pageTitle;
       tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
       if (agnosticUrl) uniqueLinks.add(agnosticUrl);
@@ -183,8 +207,7 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
-  // 搜索功能也需要带上 Cookie
-  const response = await $fetch.get(requestUrl, { headers: requestHeaders });
+  const response = await $httpClient.get(requestUrl, { headers: requestHeaders } );
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
 
