@@ -1,6 +1,6 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v37 完整修正版
+ * 脚本名称: 雷鲸资源站脚本 - v38 完整修正版
  *
  * 更新说明 (v37):
  * - 修正选择器为实际 HTML 结构：.topicList .item
@@ -22,7 +22,7 @@ const USER_COOKIE = 'eoi=ID=0dbb28bf1e95b293:T=1760889219:RT=1760889219:S=AA-Afj
 const appConfig = {
   ver: 37,
   title: '雷鲸',
-  site: 'https://www.leijing1.com',
+  site: 'https://www.leijing1.com/',
   tabs: [
     { name: '剧集', ext: { id: '?tagId=42204684250355' } },
     { name: '电影', ext: { id: '?tagId=42204681950354' } },
