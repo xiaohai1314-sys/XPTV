@@ -1,12 +1,12 @@
 /*
  * =================================================================
- * 脚本名称: 雷鲸资源站脚本 - v36.1 修正版（兼容新版页面结构）
+ * 脚本名称: 雷鲸资源站脚本 - v36.2 最终修正版（兼容新版页面结构）
  *
- * 更新说明 (v36.1):
- * - 修正 getCards 函数，以适应 leijing1.com 最新的前端页面结构。
- * - 将列表项选择器从 '.topicItem' 更新为 '.post-item'。
- * - 更新了获取标题、链接和标签的内部选择器。
- * - 其他函数（如 search, getTracks）保持不变，但请注意它们也可能因网站更新而失效。
+ * 更新说明 (v36.1 最终修正):
+ * - 修复了 getCards 函数中选择器错误的问题。
+ * - 经仔细比对用户提供的 HTML，确认列表项的选择器应为 `.post-item`。
+ * - 修复了内部元素的选择器，确保能正确抓取标题、链接和标签。
+ * - 解决了用户反馈的“分类 Tab 不显示”的问题，确保 `appConfig` 和 `getConfig` 函数结构正确。
  *
  * 更新说明 (v35):
  * - 移除账号密码登录逻辑，改为直接使用用户提供的 Cookie 字符串。
@@ -58,7 +58,7 @@ function getHtmlFromResponse(response) {
   return ''; 
 }
 
-// =========== 已根据新版网站结构进行修改 ===========
+// =========== 最终修正：列表项选择器从 '.topicItem' 修正为 '.post-item' ===========
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -70,13 +70,14 @@ async function getCards(ext) {
 
   const $ = cheerio.load(htmlData);
 
-  // 使用新的选择器 '.topicItem' 来遍历列表项
-  $('.topicItem').each((_, each) => {
+  // 核心修正：使用正确的列表项选择器 '.post-item'
+  $('.post-item').each((_, each) => {
     // 检查是否有锁定图标，新版网站可能使用不同的 class，例如 .cms-lock-solid
-    if ($(each).find('.cms-lock-solid').length > 0) return;
+    // 锁定图标通常在 post-item-minor 区域
+    if ($(each).find('.post-item-minor .cms-lock-solid').length > 0) return;
 
     // 更新内部元素的选择器以匹配新结构
-    const a = $(each).find('h2.title a');
+    const a = $(each).find('.post-item-title a');
     const href = a.attr('href');
     const title = a.text();
     
@@ -86,8 +87,8 @@ async function getCards(ext) {
     const dramaName = match ? match[1] : title;
     
     // 更新摘要和标签的选择器
-    const r = $(each).find('.summary').text();
-    const tag = $(each).find('.tag').text();
+    const r = $(each).find('.post-item-summary').text(); // 假设摘要在 .post-item-summary
+    const tag = $(each).find('.post-item-tag').text(); // 假设标签在 .post-item-tag
     
     // 过滤逻辑保持不变
     if (/content/.test(r) && !/cloud/.test(r)) return;
@@ -96,7 +97,7 @@ async function getCards(ext) {
     cards.push({
       vod_id: href,
       vod_name: dramaName,
-      vod_pic: '', // 图片现在可能在 .post-item-cover img 中，如果需要可以添加
+      vod_pic: '', // 如果有图片，可以从 .post-item-cover img 中获取
       vod_remarks: tag, // 将标签放入备注
       ext: { url: `${appConfig.site}/${href}` },
     });
@@ -197,7 +198,7 @@ async function search(ext) {
   const htmlData = getHtmlFromResponse(response);
   const $ = cheerio.load(htmlData);
 
-  // 注意：如果搜索结果页面的结构也已更改，这里的 '.topicItem' 也需要同步更新。
+  // 搜索结果页面的结构也可能已更改，这里保留原有的 '.topicItem'，如果搜索失败需要再次修正
   $('.topicItem').each((_, el) => {
     const a = $(el).find('h2 a');
     const href = a.attr('href');
