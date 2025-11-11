@@ -1,10 +1,9 @@
 /**
  * ==============================================================================
- * 适配 kkys01.com 的最终脚本 (版本 2)
- * 
- * 更新日志:
- * - v2: 修复 getCards 函数在解析首页数据时因HTML结构不一致导致的错误，恢复分类Tab的正常显示。
- * - v1: 初版适配 kkys01.com 网站。
+ * 适配 kkys01.com 的最终脚本 (版本 1) - 修正版
+ * * 修正内容:
+ * - 修正了 getConfig 的返回结构，以确保 tabs 能够显示。
+ * - 优化了搜索功能中动态参数 't' 的获取和使用，增强健壮性。
  * ==============================================================================
  */
 
@@ -18,9 +17,10 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 2, // 版本号更新
+  ver: 1,
   title: "可可影视",
   site: "https://www.kkys01.com",
+  search: true, // 明确支持搜索功能
   tabs: [
     { name: '首页', ext: { url: '/' } },
     { name: '电影', ext: { url: '/channel/1.html' } },
@@ -32,10 +32,13 @@ const appConfig = {
 };
 
 async function getConfig() {
-  return jsonify(appConfig);
+  // 修正: 将 appConfig 封装为 list 数组返回，以适配要求 list 结构的主程序
+  return jsonify({
+      list: [appConfig]
+  });
 }
 
-// 2. 获取卡片列表（首页、分类页）- 已修复
+// 2. 获取卡片列表（首页、分类页）
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -43,6 +46,7 @@ async function getCards(ext) {
   let page = ext.page || 1;
 
   if (page > 1 && urlPath !== '/') {
+    // 适配分类页分页URL格式：/channel/1-2.html
     urlPath = urlPath.replace('.html', `-${page}.html`);
   }
 
@@ -50,19 +54,15 @@ async function getCards(ext) {
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  // ✅ 增加判断，兼容首页和分类页的不同结构
-  const listItems = urlPath === '/' ? <LaTex>$('div.module-box div.module-item') : $</LaTex>('div.module-item');
-
-  listItems.each((_, each) => {
+  $('div.module-item').each((_, each) => {
     const thumbLink = $(each).find('a.v-item');
-    // 首页和分类页的图片加载方式略有不同，做兼容处理
-    const thumbImg = thumbLink.find('div.v-item-cover img.lazyload').last();
-    const pic = thumbImg.attr('data-original') || thumbImg.attr('src');
-
+    // 修正: 统一使用 data-original 提高兼容性
+    const thumb = thumbLink.find('div.v-item-cover img.lazyload').last();
+    
     cards.push({
       vod_id: thumbLink.attr('href'),
       vod_name: thumbLink.find('div.v-item-title').last().text().trim(),
-      vod_pic: pic,
+      vod_pic: thumb.attr('data-original') || thumb.attr('src'), 
       vod_remarks: thumbLink.find('div.v-item-bottom span').text().trim(),
       ext: { url: thumbLink.attr('href') },
     });
@@ -71,7 +71,6 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-
 // 3. 搜索功能
 async function search(ext) {
   ext = argsify(ext);
@@ -79,11 +78,16 @@ async function search(ext) {
   const text = encodeURIComponent(ext.text);
   const page = ext.page || 1;
 
-  const { data: searchPageHtml } = await <LaTex>$fetch.get(`$</LaTex>{appConfig.site}/search`, { headers });
+  // 1. 获取搜索页面以提取动态参数 't'
+  const { data: searchPageHtml } = await $fetch.get(`${appConfig.site}/search`, { headers });
   const $searchPage = cheerio.load(searchPageHtml);
-  const t_param = $searchPage('input[name="t"]').val();
-
-  const searchUrl = `<LaTex>${appConfig.site}/search?k=$</LaTex>{text}&t=<LaTex>${t_param}&page=$</LaTex>{page}`;
+  
+  // 尝试提取 t 参数
+  const t_param = $searchPage('input[name="t"]').val() || ''; 
+  
+  // 2. 构建搜索 URL
+  const t_query = t_param ? `&t=${t_param}` : '';
+  const searchUrl = `${appConfig.site}/search?k=${text}${t_query}&page=${page}`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
@@ -95,7 +99,7 @@ async function search(ext) {
     cards.push({
       vod_id: $(each).attr('href'),
       vod_name: vodInfo.find('div.title').text().trim(),
-      vod_pic: thumb.attr('src') || thumb.attr('data-original'),
+      vod_pic: thumb.attr('data-original') || thumb.attr('src'), // 统一使用 data-original 提高兼容性
       vod_remarks: $(each).find('div.search-result-item-header div').text().trim(),
       ext: { url: $(each).attr('href') },
     });
@@ -145,6 +149,8 @@ async function getPlayinfo(ext) {
   if (match && match[1]) {
     const encryptedData = match[1];
     
+    // 模拟页面中的 AES 解密逻辑
+    // 注意: 这里假设运行环境已内置或自行引入了 CryptoJS 库。
     const key = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
     const iv = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
     
@@ -155,13 +161,20 @@ async function getPlayinfo(ext) {
     });
     
     const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
-    const playInfo = JSON.parse(decryptedString);
+    
+    try {
+      const playInfo = JSON.parse(decryptedString);
 
-    if (playInfo && playInfo.url) {
-      return jsonify({ urls: [playInfo.url], ui: 1 });
+      if (playInfo && playInfo.url) {
+        return jsonify({ urls: [playInfo.url], ui: 1 });
+      }
+    } catch (e) {
+      // JSON.parse 失败，可能解密错误
+      console.error("解密后 JSON 解析失败:", e);
     }
   }
   
+  // 如果解密失败，尝试作为备用方案直接从页面正则匹配
   const directMatch = data.match(/url:\s*'([^']+)'/);
   if (directMatch && directMatch[1]) {
       return jsonify({ urls: [directMatch[1]], ui: 1 });
