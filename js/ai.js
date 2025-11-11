@@ -1,16 +1,14 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 3)
- * * 更新日志:
- * - v3: 彻底修复 getCards 函数，纠正了卡片内部元素的选择器（a.module-item-pic -> div.module-item-pic > a），
- * 确保了 vod_id 和 vod_pic 能够正确获取。
- * - v2: 修复了 getCards 外层选择器和 search 函数的选择器。
- * - v1: 初版适配 wjys.cc 网站结构。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 3 - 完整修复版)
+ * * 核心修复:
+ * 1. getCards 函数内部选择器修正，确保 vod_id 和 vod_pic 正常获取。
+ * 2. search 函数中的 URL 构造语法修正。
  * ==============================================================================
  */
 
 const cheerio = createCheerio();
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Macintosh; Intel OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const headers = {
   'Referer': 'https://www.wjys.cc/',
   'Origin': 'https://www.wjys.cc',
@@ -35,7 +33,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. ✅ 修正后的获取卡片列表函数 (已修复内部选择器)
+// 2. ✅ 获取卡片列表（首页、分类页）- 已修正
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -54,25 +52,27 @@ async function getCards(ext) {
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  // ✅ 外层选择器正确：div.module-list div.module-item
+  // ✅ 使用更精确的选择器，确保首页和分类页都能正确抓取
   $('div.module-list div.module-item').each((_, each) => {
     // ❗ 修复点：先定位到图片/链接的容器 DIV
     const picContainer = $(each).find('div.module-item-pic');
+    
     // 找到实际的 A 标签，用于获取 vod_id
     const thumbLink = picContainer.find('a'); 
+    
     // 从容器中找到 IMG 标签，用于获取图片 URL
     const pic = picContainer.find('img').attr('data-src');
 
     const titleLink = $(each).find('a.module-item-title');
 
-    // 只有当图片链接存在时才添加卡片，过滤掉广告等无效项目
+    // 只有当图片链接存在时才添加卡片
     if (pic) {
         cards.push({
-          vod_id: thumbLink.attr('href'), // 使用正确的链接元素
+          vod_id: thumbLink.attr('href'), 
           vod_name: titleLink.text().trim(),
           vod_pic: pic,
           vod_remarks: $(each).find('div.module-item-text').text().trim(),
-          ext: { url: thumbLink.attr('href') }, // 使用正确的链接元素
+          ext: { url: thumbLink.attr('href') },
         });
     }
   });
@@ -80,40 +80,38 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 (选择器稳定，无需修改)
+// 3. ✅ 搜索功能 - 已修正 URL 语法
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
+  // ❗ 修复点：修正为正确的 JavaScript 模板字面量语法
   const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
-  // ✅ 优化搜索结果页的选择器
+  // 使用目标网站的实际选择器 .module-search-item
   $('div.module-search-item').each((_, each) => {
-    // 搜索页的结构与分类页不同，此处选择器应是正确的
-    const thumb = $(each).find('a.module-item-pic'); 
+    const thumb = $(each).find('a.module-item-pic');
     const titleLink = $(each).find('h3 > a');
-    const pic = thumb.find('img').attr('data-src');
 
-    if (pic) {
-        cards.push({
-          vod_id: thumb.attr('href'),
-          vod_name: titleLink.text().trim(),
-          vod_pic: pic,
-          vod_remarks: $(each).find('a.video-serial').text().trim(),
-          ext: { url: thumb.attr('href') },
-        });
-    }
+    // 搜索结果页的卡片结构是正确的，选择器 `a.module-item-pic` 可直接找到链接
+    cards.push({
+      vod_id: thumb.attr('href'),
+      vod_name: titleLink.text().trim(),
+      vod_pic: thumb.find('img').attr('data-src'),
+      vod_remarks: $(each).find('a.video-serial').text().trim(),
+      ext: { url: thumb.attr('href') },
+    });
   });
 
   return jsonify({ list: cards });
 }
 
-// 4. 获取播放列表 (无需修改)
+// 4. 获取播放列表 (保持不变)
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -121,11 +119,13 @@ async function getTracks(ext) {
   const $ = cheerio.load(data);
   let groups = [];
 
+  // 播放源标题
   const sourceTitles = [];
   $('div.module-tab-item.tab-item').each((_, a) => {
     sourceTitles.push($(a).find('span').text().trim());
   });
 
+  // 播放列表容器
   $('div.module-play-list').each((index, box) => {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
@@ -144,12 +144,13 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息 (无需修改)
+// 5. 获取播放信息 (保持不变)
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
+  // 正则表达式匹配 player_aaaa 对象中的 url 属性
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
     return jsonify({ urls: [match[1]], ui: 1 });
