@@ -1,11 +1,11 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 最终修复版)
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 6 - 最终稳定版)
  * * 核心修复:
  * 1. getCards 函数内部选择器修正 (V3)。
  * 2. search 函数内部选择器修正 (V4)。
  * 3. getTracks 播放源标题选择器修正 (V4)。
- * 4. getTracks 剧集链接选择器修正 (V5 修复)。
+ * 4. getTracks 剧集链接选择器修正，采用最广范围的 'a' 标签选择器 (V6 修复)。
  * ==============================================================================
  */
 
@@ -19,7 +19,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 5, // 版本号更新
+  ver: 6, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -106,7 +106,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 - 修正剧集链接选择器
+// 4. ✅ 获取播放列表 - 最终修正剧集链接选择器
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -125,13 +125,16 @@ async function getTracks(ext) {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
 
-    // ❗ V5 修复点：简化轨道选择器，直接寻找带 item 类的 A 标签
-    $(box).find('a.module-play-list-item').each((_, trackLink) => {
-      group.tracks.push({
-        name: $(trackLink).text().trim(),
-        pan: '',
-        ext: { play_url: $(trackLink).attr('href') },
-      });
+    // ❗ V6 修复点：使用最可靠的 find('a') 查找所有链接
+    $(box).find('a').each((_, trackLink) => {
+      // 检查链接是否有 href 属性，过滤掉可能是广告或其他非剧集链接
+      if ($(trackLink).attr('href')) {
+        group.tracks.push({
+          name: $(trackLink).text().trim(),
+          pan: '',
+          ext: { play_url: $(trackLink).attr('href') },
+        });
+      }
     });
 
     if (group.tracks.length > 0) groups.push(group);
