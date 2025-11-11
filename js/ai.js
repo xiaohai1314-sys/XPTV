@@ -1,11 +1,11 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 4 - 完整修复版)
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 最终修复版)
  * * 核心修复:
  * 1. getCards 函数内部选择器修正 (V3)。
- * 2. search 函数内部选择器修正，以提高搜索结果的稳定性 (V4 修复)。
- * 3. search 函数中的 URL 构造语法修正 (V3 修复)。
- * 4. getTracks 播放源标题选择器修正 (V4 修复)。
+ * 2. search 函数内部选择器修正 (V4)。
+ * 3. getTracks 播放源标题选择器修正 (V4)。
+ * 4. getTracks 剧集链接选择器修正 (V5 修复)。
  * ==============================================================================
  */
 
@@ -19,7 +19,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 4, // 版本号更新
+  ver: 5, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -73,21 +73,19 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. ✅ 搜索功能 - 修正内部选择器
+// 3. 搜索功能 - V4 修复已生效
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // URL 构造语法 V3 已修复
   const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
   $('div.module-search-item').each((_, each) => {
-    // ❗ V4 修复点：定位到包含图片和链接的容器，增强稳定性
     const picContainer = $(each).find('div.module-item-pic');
     const thumb = picContainer.find('a');
     
@@ -108,7 +106,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 - 修正播放源标题
+// 4. ✅ 获取播放列表 - 修正剧集链接选择器
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -116,9 +114,8 @@ async function getTracks(ext) {
   const $ = cheerio.load(data);
   let groups = [];
 
-  // 播放源标题
+  // 播放源标题 (V4 修复已生效)
   const sourceTitles = [];
-  // ❗ V4 修复点：直接获取 A 标签的文本作为标题
   $('div.module-tab-item.tab-item a').each((_, a) => {
     sourceTitles.push($(a).text().trim());
   });
@@ -128,7 +125,8 @@ async function getTracks(ext) {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
 
-    $(box).find('div.module-play-list-content a').each((_, trackLink) => {
+    // ❗ V5 修复点：简化轨道选择器，直接寻找带 item 类的 A 标签
+    $(box).find('a.module-play-list-item').each((_, trackLink) => {
       group.tracks.push({
         name: $(trackLink).text().trim(),
         pan: '',
