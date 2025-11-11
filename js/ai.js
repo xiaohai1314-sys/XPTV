@@ -1,11 +1,11 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 7 - 源码分析修正版)
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 8 - 结构修正稳定版)
  * * 核心修正:
  * 1. getCards 函数内部选择器修正 (V3)。
  * 2. search 函数内部选择器修正 (V4)。
  * 3. getTracks 播放源标题选择器修正 (V4)。
- * 4. getTracks 剧集链接选择器修正，**直接定位到类名为 'module-play-list-link' 的 A 标签** (V7 修复)。
+ * 4. getTracks 剧集列表的**循环结构修正**，确保播放源标题和剧集内容**索引完全匹配** (V8 修复)。
  * ==============================================================================
  */
 
@@ -19,7 +19,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 7, // 版本号更新
+  ver: 8, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -106,7 +106,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 - 最终修正剧集链接选择器
+// 4. ✅ 获取播放列表 - 修正循环结构和链接选择器
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -120,13 +120,17 @@ async function getTracks(ext) {
     sourceTitles.push($(a).text().trim());
   });
 
-  // 播放列表容器
-  $('div.module-play-list').each((index, box) => {
+  // ❗ V8 修复点：循环所有 'module-tab-content' 面板，确保索引与标题匹配
+  $('div.module-tab-content').each((index, contentBox) => {
+    // 使用预先获取的标题，或使用默认值
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
-
-    // ❗ V7 修复点：使用 HTML 源码中确定的类名 'module-play-list-link'
-    $(box).find('a.module-play-list-link').each((_, trackLink) => {
+    
+    // 在每个内容面板内，找到真正的剧集列表容器
+    const playListBox = $(contentBox).find('div.module-play-list');
+    
+    // 使用 V7 源码分析得到的准确链接选择器
+    playListBox.find('a.module-play-list-link').each((_, trackLink) => {
       if ($(trackLink).attr('href')) {
         group.tracks.push({
           name: $(trackLink).text().trim(),
