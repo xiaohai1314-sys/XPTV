@@ -1,12 +1,15 @@
 /**
  * ==============================================================================
- * 万佳影视（wjys.cc） 适配脚本 - 最终修复版 (V6)
- * 
- * ✅ 新增与修复：
- * 1. 播放线路提取逻辑全面重写，适配 #glist-* 结构。
- * 2. 自动过滤“下载观看”、“迅雷下载”等无效线路。
- * 3. 自动补全相对链接，保证播放页有效。
- * 4. 保留 V5 的所有功能与结构，完全兼容原前端。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 逻辑重构版)
+ * * 核心修复:
+ * 1. getTracks (详情页): 完全重写选择器，以适配当前 wjys.cc 的 HTML 结构。
+ * - 修复播放源标题 (<span>)
+ * - 修复播放列表容器 (.module-player-list)
+ * - 修复剧集/线路链接 (.scroll-content a)
+ * 2. getPlayinfo (播放页):
+ * - 修正核心逻辑，使其不再错误拼接 wjys.cc 域名。
+ * - 现在直接访问 getTracks 传来的完整外部链接 (例如 158699.xyz)。
+ * - 保留原有的 player_aaaa 解析规则，该规则适用于目标跳转站。
  * ==============================================================================
  */
 
@@ -18,9 +21,9 @@ const headers = {
   'User-Agent': UA,
 };
 
-// 基本配置
+// 1. 站点配置
 const appConfig = {
-  ver: 6,
+  ver: 5, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -36,7 +39,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 首页 / 分类卡片
+// 2. 获取卡片列表（首页、分类页）- V4 逻辑保持不变
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,7 +47,9 @@ async function getCards(ext) {
   let page = ext.page || 1;
 
   if (page > 1) {
-    if (urlPath === '/') return jsonify({ list: [] });
+    if (urlPath === '/') {
+      return jsonify({ list: [] });
+    }
     urlPath = urlPath.replace('.html', `/page/${page}.html`);
   }
 
@@ -54,25 +59,25 @@ async function getCards(ext) {
 
   $('div.module-list div.module-item').each((_, each) => {
     const picContainer = $(each).find('div.module-item-pic');
-    const thumbLink = picContainer.find('a');
+    const thumbLink = picContainer.find('a'); 
     const pic = picContainer.find('img').attr('data-src');
     const titleLink = $(each).find('a.module-item-title');
 
     if (pic) {
-      cards.push({
-        vod_id: thumbLink.attr('href'),
-        vod_name: titleLink.text().trim(),
-        vod_pic: pic,
-        vod_remarks: $(each).find('div.module-item-text').text().trim(),
-        ext: { url: thumbLink.attr('href') },
-      });
+        cards.push({
+          vod_id: thumbLink.attr('href'), 
+          vod_name: titleLink.text().trim(),
+          vod_pic: pic,
+          vod_remarks: $(each).find('div.module-item-text').text().trim(),
+          ext: { url: thumbLink.attr('href') },
+        });
     }
   });
 
   return jsonify({ list: cards });
 }
 
-// 搜索功能
+// 3. 搜索功能 - V4 逻辑保持不变
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -80,103 +85,94 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
+
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
   $('div.module-search-item').each((_, each) => {
     const picContainer = $(each).find('div.module-item-pic');
     const thumb = picContainer.find('a');
+    
     const titleLink = $(each).find('h3 > a');
     const pic = picContainer.find('img').attr('data-src');
 
     if (pic) {
-      cards.push({
-        vod_id: thumb.attr('href'),
-        vod_name: titleLink.text().trim(),
-        vod_pic: pic,
-        vod_remarks: $(each).find('a.video-serial').text().trim(),
-        ext: { url: thumb.attr('href') },
-      });
+        cards.push({
+          vod_id: thumb.attr('href'),
+          vod_name: titleLink.text().trim(),
+          vod_pic: pic,
+          vod_remarks: $(each).find('a.video-serial').text().trim(),
+          ext: { url: thumb.attr('href') },
+        });
     }
   });
 
   return jsonify({ list: cards });
 }
 
-// 播放线路提取 (最终修复版)
+// 4. ✅ 获取播放列表 (详情页) - V5 修复版
 async function getTracks(ext) {
   ext = argsify(ext);
-  const base = appConfig.site.replace(/\/+$/, '');
-  const url = base + ext.url;
+  // ext.url 是 /voddetail/xxxx.html，拼接后是 wjys.cc 的详情页
+  const url = appConfig.site + ext.url;
   const { data } = await $fetch.get(url, { headers });
   const $ = cheerio.load(data);
-  const groups = [];
+  let groups = [];
 
-  const fixHref = (h) => {
-    if (!h) return h;
-    if (/^https?:\/\//i.test(h)) return h;
-    if (h.startsWith('//')) return 'https:' + h;
-    if (h.startsWith('/')) return base + h;
-    return base + '/' + h;
-  };
+  // 播放源标题
+  const sourceTitles = [];
+  // 🚀 V5 修复: 目标是 <span> 标签，不是 <a>
+  $('div.module-tab.module-player-tab div.module-tab-item.tab-item > span').each((_, span) => {
+    sourceTitles.push($(span).text().trim());
+  });
+  // sourceTitles 预期结果: ["在线观看", "下载观看", "备用地址"]
 
-  // 优先按 #glist-* 提取
-  const glistContainers = $('div[id^="glist-"]').toArray();
-  if (glistContainers.length) {
-    glistContainers.forEach((containerEl) => {
-      const $cont = $(containerEl);
-      const titles = [];
+  // 播放列表容器
+  // 🚀 V5 修复: class 是 .module-player-list (多了 "er")
+  $('div.module-player-list.tab-list').each((index, box) => {
+    const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
+    let group = { title: sourceTitle, tracks: [] };
 
-      // 线路标题
-      $cont.find('.module-tab-item.tab-item, .module-tab-title').each((_, t) => {
-        const txt = $(t).text().trim();
-        if (txt) titles.push(txt);
-      });
+    // 🚀 V5 修复: 链接在 .scroll-content > a 内部
+    $(box).find('div.scroll-content a').each((_, trackLink) => {
+      // 🚀 V5 修复: 标题在 a > span 内部
+      const trackName = $(trackLink).find('span').text().trim();
+      const trackUrl = $(trackLink).attr('href');
 
-      const playBlocks = $cont.find('div.module-play-list').toArray();
-      if (playBlocks.length) {
-        playBlocks.forEach((pb, idx) => {
-          const title = titles[idx] || titles[0] || `线路${idx + 1}`;
-          if (/下载|迅雷/i.test(title)) return; // 排除下载类线路
-          const tracks = [];
-          $(pb).find('a.module-play-list-link').each((_, a) => {
-            const name = $(a).text().trim();
-            const href = fixHref($(a).attr('href'));
-            if (href) tracks.push({ name, pan: '', ext: { play_url: href } });
-          });
-          if (tracks.length) groups.push({ title, tracks });
+      if (trackUrl && trackName) {
+        group.tracks.push({
+          name: trackName, // 例如: "线路1"
+          pan: '',
+           // 🚀 V5 核心: 这里的 play_url 现在是完整的外部链接
+           // 例如: https://www.158699.xyz/voddetail/124641.html...
+          ext: { play_url: trackUrl },
         });
       }
     });
-  }
 
-  // 若上面未取到，使用全局 fallback
-  if (groups.length === 0) {
-    $('div.module-tab-item.tab-item').each((index, el) => {
-      const title = $(el).text().trim() || `线路${index + 1}`;
-      if (/下载|迅雷/i.test(title)) return;
-      const listId = `#glist-${index + 1}`;
-      const tracks = [];
-      $(`${listId} a.module-play-list-link`).each((_, link) => {
-        const name = $(link).text().trim();
-        const href = fixHref($(link).attr('href'));
-        if (href) tracks.push({ name, pan: '', ext: { play_url: href } });
-      });
-      if (tracks.length > 0) groups.push({ title, tracks });
-    });
-  }
+    if (group.tracks.length > 0) groups.push(group);
+  });
 
   return jsonify({ list: groups });
 }
 
-// 播放信息
+// 5. ✅ 获取播放信息 - V5 修复版
 async function getPlayinfo(ext) {
   ext = argsify(ext);
-  const url = appConfig.site + ext.play_url;
+  
+  // 🚀 V5 核心修复:
+  // ext.play_url 是从 getTracks 传来的完整外部链接 (例如 https://www.158699.xyz/...)
+  // 绝对不能再拼接 appConfig.site
+  const url = ext.play_url;
+
+  // 我们仍然使用 wjys.cc 作为 Referer，这通常是必要的
   const { data } = await $fetch.get(url, { headers });
 
-  const match = data.match(/var player_aaaa\s*=\s*{[^}]*url\s*:\s*['"]([^'"]+)['"]/);
+  // V4 的正则表达式是正确的，它匹配的是目标站 (如 158599.xyz) 的 HTML (File 1)
+  const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
+  
   if (match && match[1]) {
+    // 匹配到 .m3u8 链接
     return jsonify({ urls: [match[1]], ui: 1 });
   }
   return jsonify({ urls: [] });
