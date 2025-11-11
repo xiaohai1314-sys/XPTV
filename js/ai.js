@@ -1,17 +1,13 @@
 /**
  * ==============================================================================
- * 适配 zhenlang.cc 的最终脚本 (版本 2)
- * 
+ * 适配 zhenlang.cc 的最终脚本 (版本 3)
+ *
  * 更新日志:
- * - v2: 修正了 search 函数中 URL 拼接的严重语法错误。
+ * - v3: [重大修正] 严格遵循参考脚本的设计模式。
+ *       - search 函数仅处理第一页搜索，后续分页通过 getCards 处理。
+ *       - getCards 函数增加对搜索分页URL格式的支持。
+ * - v2: 修正了 search 函数中 URL 拼接的语法错误。
  * - v1: 基于参考脚本，适配了 zhenlang.cc 的网站结构。
- * 
- * 主要适配点：
- * 1.  appConfig: 更新站点URL和分类URL。
- * 2.  getCards: 适配分类页和首页的卡片列表结构及分页URL格式。
- * 3.  search: 修正了URL拼接逻辑，并适配搜索页的URL格式和结果列表结构。
- * 4.  getTracks: 重写逻辑，以正确解析详情页中基于Tab切换的播放列表。
- * 5.  getPlayinfo: 保持不变，播放页面逻辑与参考脚本类似。
  * ==============================================================================
  */
 
@@ -24,9 +20,9 @@ const headers = {
   'User-Agent': UA,
 };
 
-// 1. [已修改] 站点配置
+// 1. 站点配置
 const appConfig = {
-  ver: 2, // 版本号
+  ver: 3,
   title: "真狼影视",
   site: "https://www.zhenlang.cc",
   tabs: [{
@@ -51,7 +47,7 @@ async function getConfig() {
     return jsonify(appConfig);
 }
 
-// 2. [已修改] 获取卡片列表（首页、分类页）
+// 2. [已修改] 获取卡片列表（现在也处理搜索分页）
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -62,18 +58,24 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
-      // 适配分类页的分页URL格式：/vodshow/dianying-----------2---.html
-      urlPath = urlPath.replace(/(-(\d+))?---.html/, `-----------${page}---.html`);
+      // ✅ 统一处理分类页和搜索页的分页URL格式
+      // 格式为：/vodshow/dianying-----------2---.html
+      // 或：   /vodsearch/关键词----------2---.html
+      urlPath = urlPath.replace(/(-(\d+))?---.html/, `----------${page}---.html`);
   }
   
   const fullUrl = appConfig.site + urlPath;
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  // 适配新的卡片列表选择器
-  $('ul.vodlist > li.vodlist_item').each((_, each) => {
+  // 根据页面类型选择不同的选择器
+  const isSearchPage = urlPath.includes('/vodsearch/');
+  const listItemSelector = isSearchPage ? 'li.searchlist_item' : 'ul.vodlist > li.vodlist_item';
+  const titleSelector = isSearchPage ? 'h4.vodlist_title > a' : 'p.vodlist_title > a';
+
+  $(listItemSelector).each((_, each) => {
     const thumb = $(each).find('a.vodlist_thumb');
-    const titleLink = $(each).find('p.vodlist_title > a');
+    const titleLink = $(each).find(titleSelector);
     
     cards.push({
       vod_id: thumb.attr('href'),
@@ -87,34 +89,26 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. [已修正] 搜索功能
+// 3. [已修正] 严格按照参考脚本逻辑的 search 函数
 async function search(ext) {
   ext = argsify(ext);
-  let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
+  const text = encodeURIComponent(ext.text);
+  
+  // ✅ search 函数只负责第一页的搜索，并为后续分页提供路由信息
+  const searchUrlPath = `/vodsearch/${text}----------1---.html`;
+  
+  // 直接调用 getCards 来获取第一页的数据
+  const result = await getCards(jsonify({ url: searchUrlPath, page: 1 }));
+  const cards = JSON.parse(result).list;
 
-  // ✅ [修正] 使用正确的模板字符串语法拼接搜索URL
-  const searchUrl = `<LaTex>${appConfig.site}/vodsearch/$</LaTex>{text}----------${page}---.html`;
-
-  const { data } = await $fetch.get(searchUrl, { headers });
-  const $ = cheerio.load(data);
-
-  // 适配新的搜索结果列表选择器
-  $('li.searchlist_item').each((_, each) => {
-    const thumb = $(each).find('a.vodlist_thumb');
-    const titleLink = $(each).find('h4.vodlist_title > a');
-
-    cards.push({
-      vod_id: thumb.attr('href'),
-      vod_name: titleLink.attr('title'),
-      vod_pic: thumb.attr('data-original'),
-      vod_remarks: thumb.find('span.pic_text').text().trim(),
-      ext: { url: thumb.attr('href') },
-    });
+  // ✅ 为后续分页提供路由到 getCards 的 ext 信息
+  return jsonify({
+    list: cards,
+    ext: {
+      route: 'getCards', // 指示后续分页调用 getCards 函数
+      url: searchUrlPath, // 提供基础URL供 getCards 进行分页处理
+    }
   });
-
-  return jsonify({ list: cards });
 }
 
 // 4. [已修改] 获取播放列表
@@ -125,22 +119,19 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     let groups = [];
 
-    // 获取所有播放源的标题
     const sourceTitles = [];
     $('div.play_source_tab > a').each((_, a) => {
         sourceTitles.push($(a).attr('alt').trim());
     });
 
-    // 遍历每个播放列表容器
     $('div.play_list_box').each((index, box) => {
         const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
         let group = { title: sourceTitle, tracks: [] };
 
-        // 在当前容器内查找所有剧集链接
         $(box).find('ul.content_playlist li a').each((_, trackLink) => {
             group.tracks.push({
                 name: $(trackLink).text().trim(),
-                pan: '', // 网站未提供网盘信息
+                pan: '',
                 ext: { play_url: $(trackLink).attr('href') }
             });
         });
@@ -159,7 +150,6 @@ async function getPlayinfo(ext) {
     const url = appConfig.site + ext.play_url;
     const { data } = await $fetch.get(url, { headers });
     
-    // 使用正则表达式匹配播放地址
     const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
     if (match && match[1]) {
         return jsonify({ urls: [match[1]], ui: 1 });
