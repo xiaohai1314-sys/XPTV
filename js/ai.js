@@ -1,29 +1,25 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 逻辑重构版)
- * * 核心修复:
- * 1. getTracks (详情页): 完全重写选择器，以适配当前 wjys.cc 的 HTML 结构。
- * - 修复播放源标题 (<span>)
- * - 修复播放列表容器 (.module-player-list)
- * - 修复剧集/线路链接 (.scroll-content a)
- * 2. getPlayinfo (播放页):
- * - 修正核心逻辑，使其不再错误拼接 wjys.cc 域名。
- * - 现在直接访问 getTracks 传来的完整外部链接 (例如 158699.xyz)。
- * - 保留原有的 player_aaaa 解析规则，该规则适用于目标跳转站。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 7 - 详情页双重代理版)
+ * * 核心逻辑: 
+ * 1. getTracks (详情页): 访问 wjys.cc 详情页，解析出跳转链接。
+ * 然后，请求跳转链接 (158699.xyz)，并解析该页面的真实播放列表。
+ * 2. getPlayinfo: 保持不变，解析目标站 (158699.xyz) 的播放数据。
  * ==============================================================================
  */
 
 const cheerio = createCheerio();
 const UA = "Mozilla/5.0 (Macintosh; Intel OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const headers = {
+  // 注意：Referer 仍然是 wjys.cc，以防跳转站校验
   'Referer': 'https://www.wjys.cc/',
   'Origin': 'https://www.wjys.cc',
   'User-Agent': UA,
 };
 
-// 1. 站点配置
+// 1. 站点配置 (保持不变)
 const appConfig = {
-  ver: 5, // 版本号更新
+  ver: 7, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -39,7 +35,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）- V4 逻辑保持不变
+// 2. 获取卡片列表（首页、分类页）- 保持不变
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -77,7 +73,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 - V4 逻辑保持不变
+// 3. 搜索功能 - 保持不变
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -110,65 +106,90 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 (详情页) - V5 修复版
+// 4. ✅ 获取播放列表 (详情页) - V7 核心重构版
 async function getTracks(ext) {
   ext = argsify(ext);
-  // ext.url 是 /voddetail/xxxx.html，拼接后是 wjys.cc 的详情页
-  const url = appConfig.site + ext.url;
-  const { data } = await $fetch.get(url, { headers });
-  const $ = cheerio.load(data);
   let groups = [];
+  
+  // ===================================
+  // 步骤 1: 访问 wjys.cc 详情页，获取跳转 URL
+  // ===================================
+  const wjysUrl = appConfig.site + ext.url; 
+  let { data: wjysData } = await $fetch.get(wjysUrl, { headers });
+  let $ = cheerio.load(wjysData);
 
-  // 播放源标题
+  // 关键代码：找到第一个播放列表容器和里面的第一个跳转链接
+  const firstPlayList = $('div.module-player-list.tab-list').first();
+  const firstTrackLink = firstPlayList.find('div.scroll-content a').first();
+  const jumpUrl = firstTrackLink.attr('href'); 
+
+  if (!jumpUrl) {
+      // 找不到跳转链接，返回空
+      return jsonify({ list: [] });
+  }
+
+  // ===================================
+  // 步骤 2: 访问目标站 (e.g. 158699.xyz) 详情页，解析真实列表
+  // ===================================
+  const targetUrl = jumpUrl;
+  const { data: targetData } = await $fetch.get(targetUrl, { headers });
+  $ = cheerio.load(targetData); // 重新加载 cheerio，现在 $ 作用于目标站
+
+  // ************ 目标站 (158699.xyz) 的解析逻辑 ************
+
+  // 1. 获取播放源标题
   const sourceTitles = [];
-  // 🚀 V5 修复: 目标是 <span> 标签，不是 <a>
   $('div.module-tab.module-player-tab div.module-tab-item.tab-item > span').each((_, span) => {
     sourceTitles.push($(span).text().trim());
   });
-  // sourceTitles 预期结果: ["在线观看", "下载观看", "备用地址"]
 
-  // 播放列表容器
-  // 🚀 V5 修复: class 是 .module-player-list (多了 "er")
+  // 2. 获取播放列表
   $('div.module-player-list.tab-list').each((index, box) => {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
 
-    // 🚀 V5 修复: 链接在 .scroll-content > a 内部
     $(box).find('div.scroll-content a').each((_, trackLink) => {
-      // 🚀 V5 修复: 标题在 a > span 内部
       const trackName = $(trackLink).find('span').text().trim();
-      const trackUrl = $(trackLink).attr('href');
+      const playUrl = $(trackLink).attr('href'); // 目标站的播放页链接
 
-      if (trackUrl && trackName) {
+      if (playUrl && trackName) {
         group.tracks.push({
-          name: trackName, // 例如: "线路1"
+          name: trackName, 
           pan: '',
-           // 🚀 V5 核心: 这里的 play_url 现在是完整的外部链接
-           // 例如: https://www.158699.xyz/voddetail/124641.html...
-          ext: { play_url: trackUrl },
+          ext: { play_url: playUrl }, // 存储目标站的播放页 URL
         });
       }
     });
 
     if (group.tracks.length > 0) groups.push(group);
   });
-
+  
+  // ===================================
+  // 步骤 3: 返回解析出的真实列表
+  // ===================================
   return jsonify({ list: groups });
 }
 
-// 5. ✅ 获取播放信息 - V5 修复版
+
+// 5. ✅ 获取播放信息 (播放页) - V7 逻辑
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   
-  // 🚀 V5 核心修复:
-  // ext.play_url 是从 getTracks 传来的完整外部链接 (例如 https://www.158699.xyz/...)
-  // 绝对不能再拼接 appConfig.site
-  const url = ext.play_url;
-
-  // 我们仍然使用 wjys.cc 作为 Referer，这通常是必要的
+  // ext.play_url 是从目标站 (e.g., 158699.xyz) 详情页解析出来的播放页链接
+  
+  // 找到目标站的域名，用于拼接相对路径
+  let domainMatch = ext.play_url.match(/^(https?:\/\/[^\/]+)/);
+  // ⚠️ 假设目标站的播放页链接是相对路径（e.g., /vodplay/123-1-1.html）
+  // 如果 ext.play_url 已经是完整链接，domainMatch 可能为空，我们从 jumpUrl 的域名获取
+  let domain = 'https://' + new URL(ext.play_url.startsWith('http') ? ext.play_url : appConfig.site).hostname;
+  
+  // 确保 play_url 是一个完整的 URL。如果它是相对路径，需要拼接。
+  const url = ext.play_url.startsWith('http') ? ext.play_url : domain + ext.play_url;
+  
+  // 使用 wjys.cc 作为 Referer
   const { data } = await $fetch.get(url, { headers });
 
-  // V4 的正则表达式是正确的，它匹配的是目标站 (如 158599.xyz) 的 HTML (File 1)
+  // 正则表达式匹配目标站 (如 158599.xyz) 的播放数据
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   
   if (match && match[1]) {
