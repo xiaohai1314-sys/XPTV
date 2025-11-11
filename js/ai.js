@@ -1,9 +1,11 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 11 - 借鉴真狼的索引匹配结构)
- * * 核心修正:
- * 1. 彻底放弃复杂的 ID 匹配，回归到标题和内容面板的 **索引匹配结构** (V11 修复)。
- * 2. 保证播放源标题和内容面板 (`div.module-tab-content`) 的索引严格同步。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 线路过滤增强版)
+ *
+ * ✅ 核心修复内容：
+ * 1. 修复播放源提取结构（基于 #glist-ID 对应关系）
+ * 2. 排除“下载观看”、“迅雷下载”等无效线路
+ * 3. 保留 V4 中所有搜索、卡片、播放修复逻辑
  * ==============================================================================
  */
 
@@ -15,9 +17,9 @@ const headers = {
   'User-Agent': UA,
 };
 
-// 1. 站点配置 (保持不变)
+// 1️⃣ 基本配置
 const appConfig = {
-  ver: 11, // 版本号更新
+  ver: 5,
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -33,7 +35,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）
+// 2️⃣ 首页 & 分类卡片
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -41,9 +43,7 @@ async function getCards(ext) {
   let page = ext.page || 1;
 
   if (page > 1) {
-    if (urlPath === '/') {
-      return jsonify({ list: [] });
-    }
+    if (urlPath === '/') return jsonify({ list: [] });
     urlPath = urlPath.replace('.html', `/page/${page}.html`);
   }
 
@@ -53,25 +53,25 @@ async function getCards(ext) {
 
   $('div.module-list div.module-item').each((_, each) => {
     const picContainer = $(each).find('div.module-item-pic');
-    const thumbLink = picContainer.find('a'); 
+    const thumbLink = picContainer.find('a');
     const pic = picContainer.find('img').attr('data-src');
     const titleLink = $(each).find('a.module-item-title');
 
     if (pic) {
-        cards.push({
-          vod_id: thumbLink.attr('href'), 
-          vod_name: titleLink.text().trim(),
-          vod_pic: pic,
-          vod_remarks: $(each).find('div.module-item-text').text().trim(),
-          ext: { url: thumbLink.attr('href') },
-        });
+      cards.push({
+        vod_id: thumbLink.attr('href'),
+        vod_name: titleLink.text().trim(),
+        vod_pic: pic,
+        vod_remarks: $(each).find('div.module-item-text').text().trim(),
+        ext: { url: thumbLink.attr('href') },
+      });
     }
   });
 
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 (保持不变)
+// 3️⃣ 搜索功能
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -79,32 +79,30 @@ async function search(ext) {
   let page = ext.page || 1;
 
   const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
-
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
   $('div.module-search-item').each((_, each) => {
     const picContainer = $(each).find('div.module-item-pic');
     const thumb = picContainer.find('a');
-    
     const titleLink = $(each).find('h3 > a');
     const pic = picContainer.find('img').attr('data-src');
 
     if (pic) {
-        cards.push({
-          vod_id: thumb.attr('href'),
-          vod_name: titleLink.text().trim(),
-          vod_pic: pic,
-          vod_remarks: $(each).find('a.video-serial').text().trim(),
-          ext: { url: thumb.attr('href') },
-        });
+      cards.push({
+        vod_id: thumb.attr('href'),
+        vod_name: titleLink.text().trim(),
+        vod_pic: pic,
+        vod_remarks: $(each).find('a.video-serial').text().trim(),
+        ext: { url: thumb.attr('href') },
+      });
     }
   });
 
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 - 修正结构，使用索引匹配
+// 4️⃣ 播放线路提取 - ✅ V5 修正版
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -112,69 +110,47 @@ async function getTracks(ext) {
   const $ = cheerio.load(data);
   let groups = [];
 
-  // 1. 获取所有播放源标题容器 (即每个播放源的头部标签)
-  const titleBoxes = $('div.module-tab-item.tab-item');
-  
-  // 2. 获取所有内容面板 (剧集列表)
-  const contentBoxes = $('div.module-tab-content'); 
+  // 提取线路标题并与 #glist 对应
+  $('div.module-tab-item.tab-item').each((index, el) => {
+    const title = $(el).text().trim() || `线路${index + 1}`;
 
-  // 3. 循环标题容器，使用索引与内容面板匹配
-  titleBoxes.each((index, titleBox) => {
-    const titleLink = $(titleBox).find('a');
-    const sourceTitle = titleLink.text().trim() || `播放源 ${index + 1}`;
-    
-    // ❗ 核心：根据索引获取对应的内容面板
-    const contentBox = $(contentBoxes[index]);
-    
-    // 如果没有找到内容面板，或者内容为空，则跳过
-    if (!contentBox.length) return;
+    // 🚫 排除“下载观看”、“迅雷下载”等线路
+    if (/下载|迅雷/i.test(title)) return;
 
-    const group = { title: sourceTitle, tracks: [] };
-    
-    // 在内容面板内找到剧集/电影链接（使用源码中最准确的类名）
-    contentBox.find('a.module-play-list-link').each((_, trackLink) => {
-      if ($(trackLink).attr('href')) {
-        group.tracks.push({
-          name: $(trackLink).text().trim(),
+    const listId = `#glist-${index + 1}`;
+    const tracks = [];
+
+    // 匹配对应播放列表
+    $(`${listId} a.module-play-list-link`).each((_, link) => {
+      const name = $(link).text().trim();
+      const href = $(link).attr('href');
+      if (href) {
+        tracks.push({
+          name,
           pan: '',
-          ext: { play_url: $(trackLink).attr('href') },
+          ext: { play_url: href },
         });
       }
     });
 
-    if (group.tracks.length > 0) {
-        groups.push(group);
+    if (tracks.length > 0) {
+      groups.push({
+        title,
+        tracks,
+      });
     }
   });
-  
-  // 兜底逻辑：适用于没有 Tab 结构的简单电影页面
-  if (groups.length === 0) {
-      const fallbackTracks = [];
-      // 仍然使用最准确的链接选择器，但不限制容器
-      $('a.module-play-list-link').each((_, trackLink) => {
-          if ($(trackLink).attr('href')) {
-              fallbackTracks.push({
-                  name: $(trackLink).text().trim(),
-                  pan: '',
-                  ext: { play_url: $(trackLink).attr('href') },
-              });
-          }
-      });
-      if (fallbackTracks.length > 0) {
-          groups.push({ title: '默认线路', tracks: fallbackTracks });
-      }
-  }
 
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息 (保持不变)
+// 5️⃣ 获取播放信息
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
-  const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
+  const match = data.match(/var player_aaaa\s*=\s*{[^}]*url\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
     return jsonify({ urls: [match[1]], ui: 1 });
   }
