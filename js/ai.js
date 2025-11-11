@@ -1,35 +1,36 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 10 - 终极稳定版)
- * * 核心逻辑: 双详情页代理 + 播放链接修复 + 采用最通用选择器
- * 1. getTracks: 
- * - (1) 抓取 wjys.cc 找到跳转 URL (目标站域名)。
- * - (2) 请求目标站详情页。
- * - (3) 采用**最泛用的选择器**解析目标站的线路和剧集，并将域名传递给 getPlayinfo。
- * 2. getPlayinfo: 使用传递的**目标站域名**来确保播放链接拼接正确。
+ * 适配 kkys01.com 的最终脚本 (版本 1)
+ * 
+ * 主要适配点:
+ * - 站点配置: 更新了 appConfig 以匹配 kkys01.com 的结构和分类。
+ * - 卡片列表: 适配了首页、分类页和搜索页的卡片列表 HTML 结构。
+ * - 搜索功能: 修正了搜索 URL 的构建方式。
+ * - 播放列表: 适配了详情页中播放源和剧集列表的解析逻辑。
+ * - 播放信息: 实现了对 `whatTMDwhatTMDPPPP` 变量的 AES 解密，以获取真实的 m3u8 播放地址。
  * ==============================================================================
  */
 
 const cheerio = createCheerio();
-const UA = "Mozilla/5.0 (Macintosh; Intel OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const headers = {
-  // 保持 Referer 为 wjys.cc，对目标站的请求可能需要这个来通过校验
-  'Referer': 'https://www.wjys.cc/',
-  'Origin': 'https://www.wjys.cc',
+  'Referer': 'https://www.kkys01.com/',
+  'Origin': 'https://www.kkys01.com',
   'User-Agent': UA,
 };
 
-// 1. 站点配置 (保持不变)
+// 1. 站点配置
 const appConfig = {
-  ver: 10, // 版本号更新
-  title: "万佳影视",
-  site: "https://www.wjys.cc",
+  ver: 1,
+  title: "可可影视",
+  site: "https://www.kkys01.com",
   tabs: [
     { name: '首页', ext: { url: '/' } },
-    { name: '电影', ext: { url: '/vodtype/dy.html' } },
-    { name: '剧集', ext: { url: '/vodtype/juji.html' } },
-    { name: '综艺', ext: { url: '/vodtype/zongyi.html' } },
-    { name: '动漫', ext: { url: '/vodtype/dongman.html' } }
+    { name: '电影', ext: { url: '/channel/1.html' } },
+    { name: '连续剧', ext: { url: '/channel/2.html' } },
+    { name: '动漫', ext: { url: '/channel/3.html' } },
+    { name: '综艺纪录', ext: { url: '/channel/4.html' } },
+    { name: '短剧', ext: { url: '/channel/6.html' } }
   ]
 };
 
@@ -37,179 +38,135 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）- 保持不变
+// 2. 获取卡片列表（首页、分类页）
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
   let urlPath = ext.url;
   let page = ext.page || 1;
 
-  if (page > 1) {
-    if (urlPath === '/') {
-      return jsonify({ list: [] });
-    }
-    urlPath = urlPath.replace('.html', `/page/${page}.html`);
+  if (page > 1 && urlPath !== '/') {
+    // 适配分类页分页URL格式：/channel/1-2.html
+    urlPath = urlPath.replace('.html', `-${page}.html`);
   }
 
   const fullUrl = appConfig.site + urlPath;
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  $('div.module-list div.module-item').each((_, each) => {
-    const picContainer = $(each).find('div.module-item-pic');
-    const thumbLink = picContainer.find('a'); 
-    const pic = picContainer.find('img').attr('data-src');
-    const titleLink = $(each).find('a.module-item-title');
-
-    if (pic) {
-        cards.push({
-          vod_id: thumbLink.attr('href'), 
-          vod_name: titleLink.text().trim(),
-          vod_pic: pic,
-          vod_remarks: $(each).find('div.module-item-text').text().trim(),
-          ext: { url: thumbLink.attr('href') },
-        });
-    }
+  $('div.module-item').each((_, each) => {
+    const thumbLink = $(each).find('a.v-item');
+    const thumb = thumbLink.find('div.v-item-cover img.lazyload').last();
+    
+    cards.push({
+      vod_id: thumbLink.attr('href'),
+      vod_name: thumbLink.find('div.v-item-title').last().text().trim(),
+      vod_pic: thumb.attr('src') || thumb.attr('data-original'),
+      vod_remarks: thumbLink.find('div.v-item-bottom span').text().trim(),
+      ext: { url: thumbLink.attr('href') },
+    });
   });
 
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 - 保持不变
+// 3. 搜索功能
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
-  let text = encodeURIComponent(ext.text);
-  let page = ext.page || 1;
+  const text = encodeURIComponent(ext.text);
+  const page = ext.page || 1;
 
-  const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
+  // 获取搜索页面以提取动态参数 't'
+  const { data: searchPageHtml } = await <LaTex>$fetch.get(`$</LaTex>{appConfig.site}/search`, { headers });
+  const $searchPage = cheerio.load(searchPageHtml);
+  const t_param = $searchPage('input[name="t"]').val();
+
+  const searchUrl = `<LaTex>${appConfig.site}/search?k=$</LaTex>{text}&t=<LaTex>${t_param}&page=$</LaTex>{page}`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
-  $('div.module-search-item').each((_, each) => {
-    const picContainer = $(each).find('div.module-item-pic');
-    const thumb = picContainer.find('a');
-    
-    const titleLink = $(each).find('h3 > a');
-    const pic = picContainer.find('img').attr('data-src');
+  $('a.search-result-item').each((_, each) => {
+    const thumb = $(each).find('div.search-result-item-pic img.lazyload').first();
+    const vodInfo = $(each).find('div.search-result-item-main');
 
-    if (pic) {
-        cards.push({
-          vod_id: thumb.attr('href'),
-          vod_name: titleLink.text().trim(),
-          vod_pic: pic,
-          vod_remarks: $(each).find('a.video-serial').text().trim(),
-          ext: { url: thumb.attr('href') },
-        });
-    }
+    cards.push({
+      vod_id: $(each).attr('href'),
+      vod_name: vodInfo.find('div.title').text().trim(),
+      vod_pic: thumb.attr('src') || thumb.attr('data-original'),
+      vod_remarks: $(each).find('div.search-result-item-header div').text().trim(),
+      ext: { url: $(each).attr('href') },
+    });
   });
 
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 (详情页) - V10 核心重构版
+// 4. 获取播放列表
 async function getTracks(ext) {
   ext = argsify(ext);
+  const url = appConfig.site + ext.url;
+  const { data } = await $fetch.get(url, { headers });
+  const $ = cheerio.load(data);
   let groups = [];
-  
-  // ===================================
-  // 步骤 1: 访问 wjys.cc 详情页，获取跳转 URL
-  // ===================================
-  const wjysUrl = appConfig.site + ext.url; 
-  let { data: wjysData } = await $fetch.get(wjysUrl, { headers });
-  let $ = cheerio.load(wjysData);
 
-  // 关键代码：找到第一个播放列表容器和里面的第一个跳转链接
-  const firstPlayList = $('div.module-player-list.tab-list').first();
-  const firstTrackLink = firstPlayList.find('div.scroll-content a').first();
-  const jumpUrl = firstTrackLink.attr('href'); 
-
-  if (!jumpUrl) {
-      return jsonify({ list: [] });
-  }
-
-  // 1.5 从跳转 URL 中提取目标站的域名
-  const targetDomainMatch = jumpUrl.match(/^(https?:\/\/[^\/]+)/);
-  const targetDomain = targetDomainMatch ? targetDomainMatch[0] : '';
-  if (!targetDomain) return jsonify({ list: [] });
-
-  // ===================================
-  // 步骤 2: 访问目标站 (e.g. 158699.xyz) 详情页，解析真实列表
-  // ===================================
-  const targetUrl = jumpUrl;
-  const { data: targetData } = await $fetch.get(targetUrl, { headers });
-  $ = cheerio.load(targetData); // 重新加载 cheerio，作用于目标站
-
-  // ************ 目标站解析逻辑 (V10 终极稳定版) ************
-
-  // 1. 获取播放源标题 (最泛用的方式：抓取所有 tab 文本)
   const sourceTitles = [];
-  // 查找所有可能的 tab 容器，使用属性包含选择器，并只看文本
-  $('div[class*="tab-item"], li[class*="tab-item"]').each((_, el) => {
-    const title = $(el).find('span').text().trim() || $(el).text().trim(); 
-    if (title) {
-      sourceTitles.push(title);
-    }
+  $('div.source-swiper-slide a.source-item').each((_, a) => {
+    sourceTitles.push($(a).find('span.source-item-label').text().trim());
   });
-  
-  // 2. 获取播放列表
-  // 查找所有可能的列表容器：根据 id 或 class 包含 "list" 且包含链接的
-  $('div[id^="playlist"], div[id^="glist"], div[class*="player-list"], div[class*="play-list"], div[class*="-list"]').each((index, box) => {
-    const sourceTitle = sourceTitles[index] || `线路 ${index + 1}`; // 确保有线路名
+
+  $('div.episode-list').each((index, box) => {
+    const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
 
-    // 抓取容器内所有直接的 a 标签，或者在容器内找到所有包含链接的 li
-    $(box).find('a[href], li a[href]').each((_, trackLink) => {
-      // 尝试获取 span 文本，如果失败就获取 a 文本 (更稳定)
-      const $link = $(trackLink);
-      const trackName = $link.find('span').text().trim() || $link.text().trim(); 
-      const playUrl = $link.attr('href'); 
-
-      if (playUrl && trackName) {
-        group.tracks.push({
-          name: trackName, 
-          pan: '',
-          // 🚀 V10 核心：将目标站域名和播放链接一起传递
-          ext: { play_url: playUrl, target_domain: targetDomain }, 
-        });
-      }
+    $(box).find('a.episode-item').each((_, trackLink) => {
+      group.tracks.push({
+        name: $(trackLink).text().trim(),
+        pan: '',
+        ext: { play_url: $(trackLink).attr('href') },
+      });
     });
 
     if (group.tracks.length > 0) groups.push(group);
   });
-  
-  // ===================================
-  // 步骤 3: 返回解析出的真实列表
-  // ===================================
+
   return jsonify({ list: groups });
 }
 
-
-// 5. ✅ 获取播放信息 (播放页) - V10 修复版
+// 5. 获取播放信息 (核心解密)
 async function getPlayinfo(ext) {
   ext = argsify(ext);
-  
-  // 🚀 V10 核心修复：使用传递过来的目标站域名
-  const domain = ext.target_domain; 
-  
-  if (!domain) {
-    // 域名丢失，无法拼接，直接返回空
-    return jsonify({ urls: [] });
-  }
-
-  // 确保 play_url 是一个完整的 URL。如果是相对路径，用目标站域名拼接。
-  const url = ext.play_url.startsWith('http') ? ext.play_url : domain + ext.play_url;
-  
-  // 使用 wjys.cc 作为 Referer
+  const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
-  // 正则表达式匹配目标站 (如 158599.xyz) 的播放数据
-  const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
-  
+  const match = data.match(/window\.whatTMDwhatTMDPPPP\s*=\s*'([^']+)';/);
   if (match && match[1]) {
-    // 匹配到 .m3u8 链接
-    return jsonify({ urls: [match[1]], ui: 1 });
+    const encryptedData = match[1];
+    
+    // 模拟页面中的 AES 解密逻辑
+    const key = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
+    const iv = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
+    
+    const decrypted = CryptoJS.AES.decrypt(encryptedData, key, {
+      iv: iv,
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7
+    });
+    
+    const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
+    const playInfo = JSON.parse(decryptedString);
+
+    if (playInfo && playInfo.url) {
+      return jsonify({ urls: [playInfo.url], ui: 1 });
+    }
   }
+  
+  // 如果解密失败，尝试作为备用方案直接从页面正则匹配
+  const directMatch = data.match(/url:\s*'([^']+)'/);
+  if (directMatch && directMatch[1]) {
+      return jsonify({ urls: [directMatch[1]], ui: 1 });
+  }
+
   return jsonify({ urls: [] });
 }
