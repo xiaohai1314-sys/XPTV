@@ -1,9 +1,10 @@
 /**
  * ==============================================================================
- * 适配 kkys01.com 的最终脚本 (版本 2) - 修复 Tabs 显示问题
- * * 修正内容:
- * - 恢复 getConfig 函数为原始的纯对象返回结构 (jsonify(appConfig))，以确保 Tabs 正常显示。
- * - 保持搜索核心解密等其他功能不变。
+ * 适配 kkys01.com 的最终脚本 (版本 3) - 全面修复
+ * * 更新日志:
+ * - 修正 v3: 恢复 getConfig 确保 Tabs 显示。
+ * - 修正 v3: 修正 getCards 海报/标题选择器，避免错误数据。
+ * - 修正 v3: 在 getPlayinfo 返回中添加 'header' 参数，解决 0KB 播放的防盗链问题。
  * ==============================================================================
  */
 
@@ -17,7 +18,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 2, // 版本号更新
+  ver: 3,
   title: "可可影视",
   site: "https://www.kkys01.com",
   tabs: [
@@ -30,12 +31,12 @@ const appConfig = {
   ]
 };
 
-// 【重要修正】恢复为原始的 getConfig，它应该可以正常显示 Tabs
+// 1. 修复 Tabs 显示问题 (使用纯对象返回)
 async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）
+// 2. 获取卡片列表（首页、分类页）- 修正海报和标题
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -43,7 +44,6 @@ async function getCards(ext) {
   let page = ext.page || 1;
 
   if (page > 1 && urlPath !== '/') {
-    // 适配分类页分页URL格式：/channel/1-2.html
     urlPath = urlPath.replace('.html', `-${page}.html`);
   }
 
@@ -55,11 +55,18 @@ async function getCards(ext) {
     const thumbLink = $(each).find('a.v-item');
     const thumb = thumbLink.find('div.v-item-cover img.lazyload').last();
     
+    // 确保从卡片中提取正确信息，而非通用页面标题
+    const vodName = thumbLink.find('div.v-item-title').text().trim(); 
+    const vodPic = thumb.attr('data-original') || thumb.attr('src'); // 优先 data-original
+    const vodRemarks = $(each).find('div.v-item-bottom span').text().trim();
+    
+    if (!vodName || !vodPic) return; // 避免无效卡片
+
     cards.push({
       vod_id: thumbLink.attr('href'),
-      vod_name: thumbLink.find('div.v-item-title').last().text().trim(),
-      vod_pic: thumb.attr('src') || thumb.attr('data-original'),
-      vod_remarks: thumbLink.find('div.v-item-bottom span').text().trim(),
+      vod_name: vodName,
+      vod_pic: vodPic,
+      vod_remarks: vodRemarks,
       ext: { url: thumbLink.attr('href') },
     });
   });
@@ -67,17 +74,16 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能
+// 3. 搜索功能 (保持之前优化后的逻辑)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   const text = encodeURIComponent(ext.text);
   const page = ext.page || 1;
 
-  // 获取搜索页面以提取动态参数 't'
   const { data: searchPageHtml } = await $fetch.get(`${appConfig.site}/search`, { headers });
   const $searchPage = cheerio.load(searchPageHtml);
-  // 优化：增强对 t 参数获取的健壮性
+  
   const t_param = $searchPage('input[name="t"]').val() || '';
   const t_query = t_param ? `&t=${t_param}` : '';
 
@@ -93,7 +99,7 @@ async function search(ext) {
     cards.push({
       vod_id: $(each).attr('href'),
       vod_name: vodInfo.find('div.title').text().trim(),
-      vod_pic: thumb.attr('src') || thumb.attr('data-original'),
+      vod_pic: thumb.attr('data-original') || thumb.attr('src'),
       vod_remarks: $(each).find('div.search-result-item-header div').text().trim(),
       ext: { url: $(each).attr('href') },
     });
@@ -102,7 +108,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. 获取播放列表
+// 4. 获取播放列表 (不变)
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -133,17 +139,17 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息 (核心解密)
+// 5. 获取播放信息 (核心解密) - 修正 0KB 播放问题
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
   const match = data.match(/window\.whatTMDwhatTMDPPPP\s*=\s*'([^']+)';/);
+  
   if (match && match[1]) {
     const encryptedData = match[1];
     
-    // 假设运行环境已内置或自行引入了 CryptoJS 库
     const key = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
     const iv = CryptoJS.enc.Utf8.parse("whatTMDwhatTMD".substring(0, 16));
     
@@ -158,17 +164,32 @@ async function getPlayinfo(ext) {
         const playInfo = JSON.parse(decryptedString);
 
         if (playInfo && playInfo.url) {
-            return jsonify({ urls: [playInfo.url], ui: 1 });
+            // 返回包含 Referer Header，解决防盗链 0KB 问题
+            return jsonify({ 
+                urls: [playInfo.url], 
+                ui: 1,
+                header: {
+                    'Referer': appConfig.site + '/', 
+                    'User-Agent': UA 
+                }
+            });
         }
     } catch (e) {
         console.error("AES 解密或 JSON 解析失败:", e);
     }
   }
   
-  // 如果解密失败，尝试作为备用方案直接从页面正则匹配
+  // 备用方案，同样添加 Header
   const directMatch = data.match(/url:\s*'([^']+)'/);
   if (directMatch && directMatch[1]) {
-      return jsonify({ urls: [directMatch[1]], ui: 1 });
+      return jsonify({ 
+          urls: [directMatch[1]], 
+          ui: 1,
+          header: {
+              'Referer': appConfig.site + '/', 
+              'User-Agent': UA 
+          }
+      });
   }
 
   return jsonify({ urls: [] });
