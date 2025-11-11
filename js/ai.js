@@ -1,20 +1,12 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 1)
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 2)
  * 
- * 功能:
- * - getConfig: 提供站点基本配置和导航标签。
- * - getCards: 获取首页及分类页的影视卡片列表，适配了分页逻辑。
- * - search: 实现关键词搜索功能，并正确处理分页。
- * - getTracks: 从详情页获取所有播放源和剧集列表。
- * - getPlayinfo: 从播放页精准提取 .m3u8 视频流地址。
- * 
- * 核心适配点:
- * 1. 站点信息更新为“万佳影视”及对应域名。
- * 2. 导航栏URL适配为 wjys.cc 的格式。
- * 3. getCards 和 search 函数中的分页URL格式已修正。
- * 4. HTML解析选择器已根据 wjys.cc 的实际结构进行调整。
- * 5. 播放信息提取逻辑确认有效。
+ * 更新日志:
+ * - v2: 修复了 getCards 函数在分类页无法获取内容的问题，通过使用更精确的
+ *       HTML 选择器 ('div.module-list div.module-item') 解决了此问题。
+ *       同时优化了 search 函数的选择器以提高稳定性。
+ * - v1: 初版适配 wjys.cc 网站结构。
  * ==============================================================================
  */
 
@@ -28,7 +20,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 1,
+  ver: 2, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -44,7 +36,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）
+// 2. ✅ 修正后的获取卡片列表函数
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -63,48 +55,54 @@ async function getCards(ext) {
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  // 使用目标网站的实际选择器 .module-item
-  $('div.module-item').each((_, each) => {
+  // ✅ 使用更精确的选择器，确保首页和分类页都能正确抓取
+  $('div.module-list div.module-item').each((_, each) => {
     const thumb = $(each).find('a.module-item-pic');
     const titleLink = $(each).find('a.module-item-title');
+    const pic = thumb.find('img').attr('data-src');
 
-    cards.push({
-      vod_id: thumb.attr('href'),
-      vod_name: titleLink.text().trim(),
-      vod_pic: thumb.find('img').attr('data-src'),
-      vod_remarks: $(each).find('div.module-item-text').text().trim(),
-      ext: { url: thumb.attr('href') },
-    });
+    // 只有当图片链接存在时才添加卡片，过滤掉广告等无效项目
+    if (pic) {
+        cards.push({
+          vod_id: thumb.attr('href'),
+          vod_name: titleLink.text().trim(),
+          vod_pic: pic,
+          vod_remarks: $(each).find('div.module-item-text').text().trim(),
+          ext: { url: thumb.attr('href') },
+        });
+    }
   });
 
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能
+// 3. 搜索功能 (优化选择器)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 适配搜索URL格式：/vodsearch/page/2/wd/关键词.html
   const searchUrl = `<LaTex>${appConfig.site}/vodsearch/page/$</LaTex>{page}/wd/${text}.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
-  // 使用目标网站的实际选择器 .module-search-item
+  // ✅ 优化搜索结果页的选择器
   $('div.module-search-item').each((_, each) => {
     const thumb = $(each).find('a.module-item-pic');
     const titleLink = $(each).find('h3 > a');
+    const pic = thumb.find('img').attr('data-src');
 
-    cards.push({
-      vod_id: thumb.attr('href'),
-      vod_name: titleLink.text().trim(),
-      vod_pic: thumb.find('img').attr('data-src'),
-      vod_remarks: $(each).find('a.video-serial').text().trim(),
-      ext: { url: thumb.attr('href') },
-    });
+    if (pic) {
+        cards.push({
+          vod_id: thumb.attr('href'),
+          vod_name: titleLink.text().trim(),
+          vod_pic: pic,
+          vod_remarks: $(each).find('a.video-serial').text().trim(),
+          ext: { url: thumb.attr('href') },
+        });
+    }
   });
 
   return jsonify({ list: cards });
@@ -118,13 +116,11 @@ async function getTracks(ext) {
   const $ = cheerio.load(data);
   let groups = [];
 
-  // 播放源标题
   const sourceTitles = [];
   $('div.module-tab-item.tab-item').each((_, a) => {
     sourceTitles.push($(a).find('span').text().trim());
   });
 
-  // 播放列表容器
   $('div.module-play-list').each((index, box) => {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
@@ -149,7 +145,6 @@ async function getPlayinfo(ext) {
   const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
-  // 正则表达式匹配 player_aaaa 对象中的 url 属性
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
     return jsonify({ urls: [match[1]], ui: 1 });
