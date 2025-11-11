@@ -1,11 +1,10 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 2)
- * 
- * 更新日志:
- * - v2: 修复了 getCards 函数在分类页无法获取内容的问题，通过使用更精确的
- *       HTML 选择器 ('div.module-list div.module-item') 解决了此问题。
- *       同时优化了 search 函数的选择器以提高稳定性。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 3)
+ * * 更新日志:
+ * - v3: 彻底修复 getCards 函数，纠正了卡片内部元素的选择器（a.module-item-pic -> div.module-item-pic > a），
+ * 确保了 vod_id 和 vod_pic 能够正确获取。
+ * - v2: 修复了 getCards 外层选择器和 search 函数的选择器。
  * - v1: 初版适配 wjys.cc 网站结构。
  * ==============================================================================
  */
@@ -20,7 +19,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 2, // 版本号更新
+  ver: 3, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -36,7 +35,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. ✅ 修正后的获取卡片列表函数
+// 2. ✅ 修正后的获取卡片列表函数 (已修复内部选择器)
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -55,20 +54,25 @@ async function getCards(ext) {
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  // ✅ 使用更精确的选择器，确保首页和分类页都能正确抓取
+  // ✅ 外层选择器正确：div.module-list div.module-item
   $('div.module-list div.module-item').each((_, each) => {
-    const thumb = $(each).find('a.module-item-pic');
+    // ❗ 修复点：先定位到图片/链接的容器 DIV
+    const picContainer = $(each).find('div.module-item-pic');
+    // 找到实际的 A 标签，用于获取 vod_id
+    const thumbLink = picContainer.find('a'); 
+    // 从容器中找到 IMG 标签，用于获取图片 URL
+    const pic = picContainer.find('img').attr('data-src');
+
     const titleLink = $(each).find('a.module-item-title');
-    const pic = thumb.find('img').attr('data-src');
 
     // 只有当图片链接存在时才添加卡片，过滤掉广告等无效项目
     if (pic) {
         cards.push({
-          vod_id: thumb.attr('href'),
+          vod_id: thumbLink.attr('href'), // 使用正确的链接元素
           vod_name: titleLink.text().trim(),
           vod_pic: pic,
           vod_remarks: $(each).find('div.module-item-text').text().trim(),
-          ext: { url: thumb.attr('href') },
+          ext: { url: thumbLink.attr('href') }, // 使用正确的链接元素
         });
     }
   });
@@ -76,21 +80,22 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 (优化选择器)
+// 3. 搜索功能 (选择器稳定，无需修改)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  const searchUrl = `<LaTex>${appConfig.site}/vodsearch/page/$</LaTex>{page}/wd/${text}.html`;
+  const searchUrl = `${appConfig.site}/vodsearch/page/${page}/wd/${text}.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
   // ✅ 优化搜索结果页的选择器
   $('div.module-search-item').each((_, each) => {
-    const thumb = $(each).find('a.module-item-pic');
+    // 搜索页的结构与分类页不同，此处选择器应是正确的
+    const thumb = $(each).find('a.module-item-pic'); 
     const titleLink = $(each).find('h3 > a');
     const pic = thumb.find('img').attr('data-src');
 
@@ -108,7 +113,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. 获取播放列表
+// 4. 获取播放列表 (无需修改)
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -139,7 +144,7 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息
+// 5. 获取播放信息 (无需修改)
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
