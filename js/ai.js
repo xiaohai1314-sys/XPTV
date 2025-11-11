@@ -1,11 +1,9 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 8 - 结构修正稳定版)
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 11 - 借鉴真狼的索引匹配结构)
  * * 核心修正:
- * 1. getCards 函数内部选择器修正 (V3)。
- * 2. search 函数内部选择器修正 (V4)。
- * 3. getTracks 播放源标题选择器修正 (V4)。
- * 4. getTracks 剧集列表的**循环结构修正**，确保播放源标题和剧集内容**索引完全匹配** (V8 修复)。
+ * 1. 彻底放弃复杂的 ID 匹配，回归到标题和内容面板的 **索引匹配结构** (V11 修复)。
+ * 2. 保证播放源标题和内容面板 (`div.module-tab-content`) 的索引严格同步。
  * ==============================================================================
  */
 
@@ -17,9 +15,9 @@ const headers = {
   'User-Agent': UA,
 };
 
-// 1. 站点配置
+// 1. 站点配置 (保持不变)
 const appConfig = {
-  ver: 8, // 版本号更新
+  ver: 11, // 版本号更新
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -35,7 +33,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）- V3 修复已生效
+// 2. 获取卡片列表（首页、分类页）
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -73,7 +71,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 - V4 修复已生效
+// 3. 搜索功能 (保持不变)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -106,7 +104,7 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. ✅ 获取播放列表 - 修正循环结构和链接选择器
+// 4. ✅ 获取播放列表 - 修正结构，使用索引匹配
 async function getTracks(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.url;
@@ -114,23 +112,27 @@ async function getTracks(ext) {
   const $ = cheerio.load(data);
   let groups = [];
 
-  // 播放源标题 (V4 修复已生效)
-  const sourceTitles = [];
-  $('div.module-tab-item.tab-item a').each((_, a) => {
-    sourceTitles.push($(a).text().trim());
-  });
+  // 1. 获取所有播放源标题容器 (即每个播放源的头部标签)
+  const titleBoxes = $('div.module-tab-item.tab-item');
+  
+  // 2. 获取所有内容面板 (剧集列表)
+  const contentBoxes = $('div.module-tab-content'); 
 
-  // ❗ V8 修复点：循环所有 'module-tab-content' 面板，确保索引与标题匹配
-  $('div.module-tab-content').each((index, contentBox) => {
-    // 使用预先获取的标题，或使用默认值
-    const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
-    let group = { title: sourceTitle, tracks: [] };
+  // 3. 循环标题容器，使用索引与内容面板匹配
+  titleBoxes.each((index, titleBox) => {
+    const titleLink = $(titleBox).find('a');
+    const sourceTitle = titleLink.text().trim() || `播放源 ${index + 1}`;
     
-    // 在每个内容面板内，找到真正的剧集列表容器
-    const playListBox = $(contentBox).find('div.module-play-list');
+    // ❗ 核心：根据索引获取对应的内容面板
+    const contentBox = $(contentBoxes[index]);
     
-    // 使用 V7 源码分析得到的准确链接选择器
-    playListBox.find('a.module-play-list-link').each((_, trackLink) => {
+    // 如果没有找到内容面板，或者内容为空，则跳过
+    if (!contentBox.length) return;
+
+    const group = { title: sourceTitle, tracks: [] };
+    
+    // 在内容面板内找到剧集/电影链接（使用源码中最准确的类名）
+    contentBox.find('a.module-play-list-link').each((_, trackLink) => {
       if ($(trackLink).attr('href')) {
         group.tracks.push({
           name: $(trackLink).text().trim(),
@@ -140,8 +142,28 @@ async function getTracks(ext) {
       }
     });
 
-    if (group.tracks.length > 0) groups.push(group);
+    if (group.tracks.length > 0) {
+        groups.push(group);
+    }
   });
+  
+  // 兜底逻辑：适用于没有 Tab 结构的简单电影页面
+  if (groups.length === 0) {
+      const fallbackTracks = [];
+      // 仍然使用最准确的链接选择器，但不限制容器
+      $('a.module-play-list-link').each((_, trackLink) => {
+          if ($(trackLink).attr('href')) {
+              fallbackTracks.push({
+                  name: $(trackLink).text().trim(),
+                  pan: '',
+                  ext: { play_url: $(trackLink).attr('href') },
+              });
+          }
+      });
+      if (fallbackTracks.length > 0) {
+          groups.push({ title: '默认线路', tracks: fallbackTracks });
+      }
+  }
 
   return jsonify({ list: groups });
 }
