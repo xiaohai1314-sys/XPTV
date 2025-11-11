@@ -1,8 +1,8 @@
 /**
  * ==============================================================================
- * 适配 zhenlang.cc 的最终脚本 (版本 3)
- * 
- * 更新日志:
+ * 适配 zhenlang.cc 的最终脚本 (版本 4)
+ * * 更新日志:
+ * - v4: 修复 getPlayinfo，显式添加 Referer 和 User-Agent，解决播放时 0kb 问题。
  * - v3: 修复 search 函数 URL 拼接错误，恢复搜索功能正常。
  * - v2: 修正 getCards 分页逻辑，适配分类页URL格式。
  * - v1: 初版适配 zhenlang.cc 网站结构。
@@ -19,7 +19,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 3,
+  ver: 4, // 版本号更新为 V4
   title: "真狼影视",
   site: "https://www.zhenlang.cc",
   tabs: [
@@ -70,14 +70,14 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. ✅ 修复后的搜索功能
+// 3. 搜索功能 (V3 修复后)
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // ✅ 正确拼接搜索URL
+  // 正确拼接搜索URL
   const searchUrl = `${appConfig.site}/vodsearch/${text}----------${page}---.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
@@ -132,15 +132,33 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息
+// 5. ✅ 修复后的获取播放信息 (V4)
 async function getPlayinfo(ext) {
   ext = argsify(ext);
-  const url = appConfig.site + ext.play_url;
+  const playPageUrlPath = ext.play_url;
+  const url = appConfig.site + playPageUrlPath; // 播放页面的完整 URL
+  
   const { data } = await $fetch.get(url, { headers });
 
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
-    return jsonify({ urls: [match[1]], ui: 1 });
+    // 提取到的最终播放 URL
+    const finalPlayUrl = match[1]; 
+    
+    // 关键：构建包含 Referer 和 User-Agent 的对象，用于绕过反盗链
+    const playUrlObject = {
+      url: finalPlayUrl,
+      // 视频播放器加载这个 URL 时，会附带以下请求头
+      headers: { 
+        // 使用当前集数播放页面的完整 URL 作为 Referer 
+        'Referer': url, 
+        'User-Agent': UA,
+        'Origin': appConfig.site,
+      }
+    };
+    
+    // 返回包含请求头信息的播放链接对象
+    return jsonify({ urls: [playUrlObject], ui: 1 });
   }
   return jsonify({ urls: [] });
 }
