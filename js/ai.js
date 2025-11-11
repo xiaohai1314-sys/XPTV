@@ -1,7 +1,8 @@
 /**
  * ==============================================================================
- * 适配 zhenlang.cc 的最终脚本 (版本 4)
+ * 适配 zhenlang.cc 的最终脚本 (版本 5)
  * * 更新日志:
+ * - v5: 深度修复 getPlayinfo。增加 URL 绝对化处理，并强制播放器携带准确的 Referer/Host/User-Agent，解决顽固的 0kb 问题。
  * - v4: 修复 getPlayinfo，显式添加 Referer 和 User-Agent，解决播放时 0kb 问题。
  * - v3: 修复 search 函数 URL 拼接错误，恢复搜索功能正常。
  * - v2: 修正 getCards 分页逻辑，适配分类页URL格式。
@@ -19,7 +20,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 4, // 版本号更新为 V4
+  ver: 5, // 版本号更新为 V5
   title: "真狼影视",
   site: "https://www.zhenlang.cc",
   tabs: [
@@ -70,7 +71,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 (V3 修复后)
+// 3. 搜索功能
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -132,7 +133,7 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. ✅ 修复后的获取播放信息 (V4)
+// 5. ✅ 深度修复后的获取播放信息 (V5)
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const playPageUrlPath = ext.play_url;
@@ -142,22 +143,26 @@ async function getPlayinfo(ext) {
 
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
-    // 提取到的最终播放 URL
-    const finalPlayUrl = match[1]; 
+    let finalPlayUrl = match[1]; 
     
-    // 关键：构建包含 Referer 和 User-Agent 的对象，用于绕过反盗链
+    // 检查并处理相对路径：如果提取的链接是以 / 开头的相对路径，则需要拼接 site
+    if (finalPlayUrl.startsWith('/')) {
+        finalPlayUrl = appConfig.site + finalPlayUrl;
+    }
+
     const playUrlObject = {
       url: finalPlayUrl,
-      // 视频播放器加载这个 URL 时，会附带以下请求头
+      // 强制播放器加载时携带正确的请求头
       headers: { 
-        // 使用当前集数播放页面的完整 URL 作为 Referer 
+        // 使用播放页面的完整 URL 作为 Referer，绕过反盗链是核心
         'Referer': url, 
         'User-Agent': UA,
-        'Origin': appConfig.site,
+        // 尝试添加 Host 和 Connection，确保请求格式更像浏览器
+        'Host': new URL(finalPlayUrl).host,
+        'Connection': 'keep-alive',
       }
     };
     
-    // 返回包含请求头信息的播放链接对象
     return jsonify({ urls: [playUrlObject], ui: 1 });
   }
   return jsonify({ urls: [] });
