@@ -1,11 +1,12 @@
 /**
  * ==============================================================================
- * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 5 - 线路过滤增强版)
- *
- * ✅ 核心修复内容：
- * 1. 修复播放源提取结构（基于 #glist-ID 对应关系）
- * 2. 排除“下载观看”、“迅雷下载”等无效线路
- * 3. 保留 V4 中所有搜索、卡片、播放修复逻辑
+ * 万佳影视（wjys.cc） 适配脚本 - 最终修复版 (V6)
+ * 
+ * ✅ 新增与修复：
+ * 1. 播放线路提取逻辑全面重写，适配 #glist-* 结构。
+ * 2. 自动过滤“下载观看”、“迅雷下载”等无效线路。
+ * 3. 自动补全相对链接，保证播放页有效。
+ * 4. 保留 V5 的所有功能与结构，完全兼容原前端。
  * ==============================================================================
  */
 
@@ -17,9 +18,9 @@ const headers = {
   'User-Agent': UA,
 };
 
-// 1️⃣ 基本配置
+// 基本配置
 const appConfig = {
-  ver: 5,
+  ver: 6,
   title: "万佳影视",
   site: "https://www.wjys.cc",
   tabs: [
@@ -35,7 +36,7 @@ async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2️⃣ 首页 & 分类卡片
+// 首页 / 分类卡片
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -71,7 +72,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3️⃣ 搜索功能
+// 搜索功能
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -102,49 +103,73 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4️⃣ 播放线路提取 - ✅ V5 修正版
+// 播放线路提取 (最终修复版)
 async function getTracks(ext) {
   ext = argsify(ext);
-  const url = appConfig.site + ext.url;
+  const base = appConfig.site.replace(/\/+$/, '');
+  const url = base + ext.url;
   const { data } = await $fetch.get(url, { headers });
   const $ = cheerio.load(data);
-  let groups = [];
+  const groups = [];
 
-  // 提取线路标题并与 #glist 对应
-  $('div.module-tab-item.tab-item').each((index, el) => {
-    const title = $(el).text().trim() || `线路${index + 1}`;
+  const fixHref = (h) => {
+    if (!h) return h;
+    if (/^https?:\/\//i.test(h)) return h;
+    if (h.startsWith('//')) return 'https:' + h;
+    if (h.startsWith('/')) return base + h;
+    return base + '/' + h;
+  };
 
-    // 🚫 排除“下载观看”、“迅雷下载”等线路
-    if (/下载|迅雷/i.test(title)) return;
+  // 优先按 #glist-* 提取
+  const glistContainers = $('div[id^="glist-"]').toArray();
+  if (glistContainers.length) {
+    glistContainers.forEach((containerEl) => {
+      const $cont = $(containerEl);
+      const titles = [];
 
-    const listId = `#glist-${index + 1}`;
-    const tracks = [];
+      // 线路标题
+      $cont.find('.module-tab-item.tab-item, .module-tab-title').each((_, t) => {
+        const txt = $(t).text().trim();
+        if (txt) titles.push(txt);
+      });
 
-    // 匹配对应播放列表
-    $(`${listId} a.module-play-list-link`).each((_, link) => {
-      const name = $(link).text().trim();
-      const href = $(link).attr('href');
-      if (href) {
-        tracks.push({
-          name,
-          pan: '',
-          ext: { play_url: href },
+      const playBlocks = $cont.find('div.module-play-list').toArray();
+      if (playBlocks.length) {
+        playBlocks.forEach((pb, idx) => {
+          const title = titles[idx] || titles[0] || `线路${idx + 1}`;
+          if (/下载|迅雷/i.test(title)) return; // 排除下载类线路
+          const tracks = [];
+          $(pb).find('a.module-play-list-link').each((_, a) => {
+            const name = $(a).text().trim();
+            const href = fixHref($(a).attr('href'));
+            if (href) tracks.push({ name, pan: '', ext: { play_url: href } });
+          });
+          if (tracks.length) groups.push({ title, tracks });
         });
       }
     });
+  }
 
-    if (tracks.length > 0) {
-      groups.push({
-        title,
-        tracks,
+  // 若上面未取到，使用全局 fallback
+  if (groups.length === 0) {
+    $('div.module-tab-item.tab-item').each((index, el) => {
+      const title = $(el).text().trim() || `线路${index + 1}`;
+      if (/下载|迅雷/i.test(title)) return;
+      const listId = `#glist-${index + 1}`;
+      const tracks = [];
+      $(`${listId} a.module-play-list-link`).each((_, link) => {
+        const name = $(link).text().trim();
+        const href = fixHref($(link).attr('href'));
+        if (href) tracks.push({ name, pan: '', ext: { play_url: href } });
       });
-    }
-  });
+      if (tracks.length > 0) groups.push({ title, tracks });
+    });
+  }
 
   return jsonify({ list: groups });
 }
 
-// 5️⃣ 获取播放信息
+// 播放信息
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
