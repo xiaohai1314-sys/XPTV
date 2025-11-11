@@ -1,34 +1,42 @@
 /**
  * ==============================================================================
- * 适配 zhenlang.cc 的最终脚本 (版本 5)
- * * 更新日志:
- * - v5: 深度修复 getPlayinfo。增加 URL 绝对化处理，并强制播放器携带准确的 Referer/Host/User-Agent，解决顽固的 0kb 问题。
- * - v4: 修复 getPlayinfo，显式添加 Referer 和 User-Agent，解决播放时 0kb 问题。
- * - v3: 修复 search 函数 URL 拼接错误，恢复搜索功能正常。
- * - v2: 修正 getCards 分页逻辑，适配分类页URL格式。
- * - v1: 初版适配 zhenlang.cc 网站结构。
+ * 适配 wjys.cc (万佳影视) 的最终脚本 (版本 1)
+ * 
+ * 功能:
+ * - getConfig: 提供站点基本配置和导航标签。
+ * - getCards: 获取首页及分类页的影视卡片列表，适配了分页逻辑。
+ * - search: 实现关键词搜索功能，并正确处理分页。
+ * - getTracks: 从详情页获取所有播放源和剧集列表。
+ * - getPlayinfo: 从播放页精准提取 .m3u8 视频流地址。
+ * 
+ * 核心适配点:
+ * 1. 站点信息更新为“万佳影视”及对应域名。
+ * 2. 导航栏URL适配为 wjys.cc 的格式。
+ * 3. getCards 和 search 函数中的分页URL格式已修正。
+ * 4. HTML解析选择器已根据 wjys.cc 的实际结构进行调整。
+ * 5. 播放信息提取逻辑确认有效。
  * ==============================================================================
  */
 
 const cheerio = createCheerio();
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const headers = {
-  'Referer': 'https://www.zhenlang.cc/',
-  'Origin': 'https://www.zhenlang.cc',
+  'Referer': 'https://www.wjys.cc/',
+  'Origin': 'https://www.wjys.cc',
   'User-Agent': UA,
 };
 
 // 1. 站点配置
 const appConfig = {
-  ver: 5, // 版本号更新为 V5
-  title: "真狼影视",
-  site: "https://www.zhenlang.cc",
+  ver: 1,
+  title: "万佳影视",
+  site: "https://www.wjys.cc",
   tabs: [
     { name: '首页', ext: { url: '/' } },
-    { name: '电影', ext: { url: '/vodshow/dianying-----------.html' } },
-    { name: '连续剧', ext: { url: '/vodshow/lianxuju-----------.html' } },
-    { name: '综艺', ext: { url: '/vodshow/zongyi-----------.html' } },
-    { name: '动漫', ext: { url: '/vodshow/dongman-----------.html' } }
+    { name: '电影', ext: { url: '/vodtype/dy.html' } },
+    { name: '剧集', ext: { url: '/vodtype/juji.html' } },
+    { name: '综艺', ext: { url: '/vodtype/zongyi.html' } },
+    { name: '动漫', ext: { url: '/vodtype/dongman.html' } }
   ]
 };
 
@@ -45,25 +53,26 @@ async function getCards(ext) {
 
   if (page > 1) {
     if (urlPath === '/') {
-      return jsonify({ list: [] });
+      return jsonify({ list: [] }); // 首页不支持分页
     }
-    // 适配分类页分页URL格式：/vodshow/dianying-----------2---.html
-    urlPath = urlPath.replace(/(-(\d+))?---.html/, `-----------${page}---.html`);
+    // 适配分类页分页URL格式：/vodtype/dy/page/2.html
+    urlPath = urlPath.replace('.html', `/page/${page}.html`);
   }
 
   const fullUrl = appConfig.site + urlPath;
   const { data } = await $fetch.get(fullUrl, { headers });
   const $ = cheerio.load(data);
 
-  $('ul.vodlist > li.vodlist_item').each((_, each) => {
-    const thumb = $(each).find('a.vodlist_thumb');
-    const titleLink = $(each).find('p.vodlist_title > a');
+  // 使用目标网站的实际选择器 .module-item
+  $('div.module-item').each((_, each) => {
+    const thumb = $(each).find('a.module-item-pic');
+    const titleLink = $(each).find('a.module-item-title');
 
     cards.push({
       vod_id: thumb.attr('href'),
-      vod_name: titleLink.attr('title'),
-      vod_pic: thumb.attr('data-original'),
-      vod_remarks: thumb.find('span.pic_text').text().trim(),
+      vod_name: titleLink.text().trim(),
+      vod_pic: thumb.find('img').attr('data-src'),
+      vod_remarks: $(each).find('div.module-item-text').text().trim(),
       ext: { url: thumb.attr('href') },
     });
   });
@@ -78,21 +87,22 @@ async function search(ext) {
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // 正确拼接搜索URL
-  const searchUrl = `${appConfig.site}/vodsearch/${text}----------${page}---.html`;
+  // 适配搜索URL格式：/vodsearch/page/2/wd/关键词.html
+  const searchUrl = `<LaTex>${appConfig.site}/vodsearch/page/$</LaTex>{page}/wd/${text}.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
   const $ = cheerio.load(data);
 
-  $('li.searchlist_item').each((_, each) => {
-    const thumb = $(each).find('a.vodlist_thumb');
-    const titleLink = $(each).find('h4.vodlist_title > a');
+  // 使用目标网站的实际选择器 .module-search-item
+  $('div.module-search-item').each((_, each) => {
+    const thumb = $(each).find('a.module-item-pic');
+    const titleLink = $(each).find('h3 > a');
 
     cards.push({
       vod_id: thumb.attr('href'),
-      vod_name: titleLink.attr('title'),
-      vod_pic: thumb.attr('data-original'),
-      vod_remarks: thumb.find('span.pic_text').text().trim(),
+      vod_name: titleLink.text().trim(),
+      vod_pic: thumb.find('img').attr('data-src'),
+      vod_remarks: $(each).find('a.video-serial').text().trim(),
       ext: { url: thumb.attr('href') },
     });
   });
@@ -110,16 +120,16 @@ async function getTracks(ext) {
 
   // 播放源标题
   const sourceTitles = [];
-  $('div.play_source_tab > a').each((_, a) => {
-    sourceTitles.push($(a).attr('alt').trim());
+  $('div.module-tab-item.tab-item').each((_, a) => {
+    sourceTitles.push($(a).find('span').text().trim());
   });
 
   // 播放列表容器
-  $('div.play_list_box').each((index, box) => {
+  $('div.module-play-list').each((index, box) => {
     const sourceTitle = sourceTitles[index] || `播放源 ${index + 1}`;
     let group = { title: sourceTitle, tracks: [] };
 
-    $(box).find('ul.content_playlist li a').each((_, trackLink) => {
+    $(box).find('div.module-play-list-content a').each((_, trackLink) => {
       group.tracks.push({
         name: $(trackLink).text().trim(),
         pan: '',
@@ -133,37 +143,16 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. ✅ 深度修复后的获取播放信息 (V5)
+// 5. 获取播放信息
 async function getPlayinfo(ext) {
   ext = argsify(ext);
-  const playPageUrlPath = ext.play_url;
-  const url = appConfig.site + playPageUrlPath; // 播放页面的完整 URL
-  
+  const url = appConfig.site + ext.play_url;
   const { data } = await $fetch.get(url, { headers });
 
+  // 正则表达式匹配 player_aaaa 对象中的 url 属性
   const match = data.match(/var player_aaaa.*?url['"]\s*:\s*['"]([^'"]+)['"]/);
   if (match && match[1]) {
-    let finalPlayUrl = match[1]; 
-    
-    // 检查并处理相对路径：如果提取的链接是以 / 开头的相对路径，则需要拼接 site
-    if (finalPlayUrl.startsWith('/')) {
-        finalPlayUrl = appConfig.site + finalPlayUrl;
-    }
-
-    const playUrlObject = {
-      url: finalPlayUrl,
-      // 强制播放器加载时携带正确的请求头
-      headers: { 
-        // 使用播放页面的完整 URL 作为 Referer，绕过反盗链是核心
-        'Referer': url, 
-        'User-Agent': UA,
-        // 尝试添加 Host 和 Connection，确保请求格式更像浏览器
-        'Host': new URL(finalPlayUrl).host,
-        'Connection': 'keep-alive',
-      }
-    };
-    
-    return jsonify({ urls: [playUrlObject], ui: 1 });
+    return jsonify({ urls: [match[1]], ui: 1 });
   }
   return jsonify({ urls: [] });
 }
