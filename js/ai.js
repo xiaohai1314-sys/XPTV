@@ -1,10 +1,9 @@
 /**
  * ==============================================================================
- * 适配 kkys01.com 的最终脚本 (版本 3) - 全面修复
+ * 适配 kkys01.com 的最终脚本 (版本 5) - 彻底解决海报/标题和播放 0KB 问题
  * * 更新日志:
- * - 修正 v3: 恢复 getConfig 确保 Tabs 显示。
- * - 修正 v3: 修正 getCards 海报/标题选择器，避免错误数据。
- * - 修正 v3: 在 getPlayinfo 返回中添加 'header' 参数，解决 0KB 播放的防盗链问题。
+ * - 修正 v5: 关键修复：getPlayinfo 返回 Header 格式，将 'header' 改为 'headers: [{...}]'。
+ * - 修正 v5: 增强 getCards/search 标题提取健壮性，确保取到正确标题和海报。
  * ==============================================================================
  */
 
@@ -18,7 +17,7 @@ const headers = {
 
 // 1. 站点配置
 const appConfig = {
-  ver: 3,
+  ver: 5,
   title: "可可影视",
   site: "https://www.kkys01.com",
   tabs: [
@@ -31,12 +30,12 @@ const appConfig = {
   ]
 };
 
-// 1. 修复 Tabs 显示问题 (使用纯对象返回)
+// 1. getConfig (保持纯对象返回，确保 Tabs 显示)
 async function getConfig() {
   return jsonify(appConfig);
 }
 
-// 2. 获取卡片列表（首页、分类页）- 修正海报和标题
+// 2. 获取卡片列表（首页、分类页）- 优化海报和标题提取
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -55,12 +54,14 @@ async function getCards(ext) {
     const thumbLink = $(each).find('a.v-item');
     const thumb = thumbLink.find('div.v-item-cover img.lazyload').last();
     
-    // 确保从卡片中提取正确信息，而非通用页面标题
-    const vodName = thumbLink.find('div.v-item-title').text().trim(); 
-    const vodPic = thumb.attr('data-original') || thumb.attr('src'); // 优先 data-original
+    // 增强标题提取：尝试从 v-item-title 文本获取，如果为空，则尝试从链接的 title 属性获取
+    const vodName = thumbLink.find('div.v-item-title').text().trim() || thumbLink.attr('title') || '未知标题'; 
+    
+    // 强制只使用 data-original 作为海报
+    const vodPic = thumb.attr('data-original'); 
     const vodRemarks = $(each).find('div.v-item-bottom span').text().trim();
     
-    if (!vodName || !vodPic) return; // 避免无效卡片
+    if (vodName === '未知标题' || !vodPic) return; 
 
     cards.push({
       vod_id: thumbLink.attr('href'),
@@ -74,7 +75,7 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. 搜索功能 (保持之前优化后的逻辑)
+// 3. 搜索功能 - 优化海报和标题提取
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -96,10 +97,14 @@ async function search(ext) {
     const thumb = $(each).find('div.search-result-item-pic img.lazyload').first();
     const vodInfo = $(each).find('div.search-result-item-main');
 
+    // 增强标题提取：从 vodInfo 标题获取
+    const vodName = vodInfo.find('div.title').text().trim() || $(each).attr('title') || '未知标题';
+
     cards.push({
       vod_id: $(each).attr('href'),
-      vod_name: vodInfo.find('div.title').text().trim(),
-      vod_pic: thumb.attr('data-original') || thumb.attr('src'),
+      vod_name: vodName,
+      // 强制只使用 data-original
+      vod_pic: thumb.attr('data-original'),
       vod_remarks: $(each).find('div.search-result-item-header div').text().trim(),
       ext: { url: $(each).attr('href') },
     });
@@ -139,7 +144,7 @@ async function getTracks(ext) {
   return jsonify({ list: groups });
 }
 
-// 5. 获取播放信息 (核心解密) - 修正 0KB 播放问题
+// 5. 获取播放信息 (核心解密) - 修复 0KB 播放 Header 格式
 async function getPlayinfo(ext) {
   ext = argsify(ext);
   const url = appConfig.site + ext.play_url;
@@ -147,6 +152,9 @@ async function getPlayinfo(ext) {
 
   const match = data.match(/window\.whatTMDwhatTMDPPPP\s*=\s*'([^']+)';/);
   
+  // 使用精确的播放页 URL 作为 Referer
+  const play_url_referer = url; 
+
   if (match && match[1]) {
     const encryptedData = match[1];
     
@@ -164,14 +172,16 @@ async function getPlayinfo(ext) {
         const playInfo = JSON.parse(decryptedString);
 
         if (playInfo && playInfo.url) {
-            // 返回包含 Referer Header，解决防盗链 0KB 问题
+            // 关键修复：使用 headers 键和数组格式，与 libvio.cc 脚本保持一致
+            const customHeaders = {
+                'Referer': play_url_referer, 
+                'User-Agent': UA 
+            };
+            
             return jsonify({ 
                 urls: [playInfo.url], 
                 ui: 1,
-                header: {
-                    'Referer': appConfig.site + '/', 
-                    'User-Agent': UA 
-                }
+                headers: [customHeaders] // 使用复数 'headers' 和数组格式
             });
         }
     } catch (e) {
@@ -179,16 +189,18 @@ async function getPlayinfo(ext) {
     }
   }
   
-  // 备用方案，同样添加 Header
+  // 备用方案，同样修复 Header 格式
   const directMatch = data.match(/url:\s*'([^']+)'/);
   if (directMatch && directMatch[1]) {
+      const customHeaders = {
+          'Referer': play_url_referer, 
+          'User-Agent': UA 
+      };
+      
       return jsonify({ 
           urls: [directMatch[1]], 
           ui: 1,
-          header: {
-              'Referer': appConfig.site + '/', 
-              'User-Agent': UA 
-          }
+          headers: [customHeaders] // 使用复数 'headers' 和数组格式
       });
   }
 
