@@ -10,7 +10,7 @@
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X   ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
@@ -21,7 +21,7 @@ const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio
 const YOUR_API_ENDPOINT = "http://192.168.1.7:3000/process-thread"; 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v9.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.3] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 v9.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -64,7 +64,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http'  )) return path;
+  if (path.startsWith('http'   )) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -154,6 +154,30 @@ async function getTracks(ext) {
     const charMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
 
     function purify(raw) {
+      // ================== 新增的“补丁”代码块 START ==================
+      // 优先处理“符号藏码”特例，例如：j(g)fr[9]v{m}6<j>k
+      // 特征：字符串中包含多种括号，如此处的 '()', '[]', '{}', '<>'
+      const isSpecialCase = /\(/.test(raw) && /\[/.test(raw); // 使用两种括号作为特征检测
+      if (isSpecialCase) {
+          let specialCode = '';
+          // 全局匹配所有被 () [] {} <> 包裹的字符
+          const regex = /\(([^)]+)\)|\[([^\]]+)\]|\{([^}]+)\}|\<([^>]+)\>/g;
+          const matches = raw.matchAll(regex);
+          for (const match of matches) {
+              // 将第一个非空的捕获组 (match[1] 到 match[4]) 拼接到结果中
+              const char = match[1] || match[2] || match[3] || match[4];
+              if (char) {
+                  specialCode += char;
+              }
+          }
+          // 如果成功提取到内容，则直接返回，不再执行后续的常规逻辑
+          if (specialCode.length > 0) {
+              return specialCode.toLowerCase();
+          }
+      }
+      // ================== 新增的“补丁”代码块 END ====================
+
+      // 如果不是上述特例，则执行以下原有的、完好的逻辑
       const codeMatch = raw.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/);
       const extracted = codeMatch ? codeMatch[1].trim() : raw.trim();
       let converted = '';
@@ -183,7 +207,7 @@ async function getTracks(ext) {
           const found = purify(text);
           if (found) { code = found; break; }
         }
-        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) {
+        if (!text.includes("http"   ) && !text.includes("/") && !text.includes(":")) {
           const found = purify(text);
           if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
         }
