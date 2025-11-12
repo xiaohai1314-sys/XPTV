@@ -1,5 +1,5 @@
 /**
- * 海绵小站前端插件 - v9.4 (最终版 - 用户指导模式)
+ * 海绵小站前端插件 - v9.3 (最终版 - 用户指导模式)
  *
  * 更新说明:
  * - 插件定位为“智能辅助工具”，为用户提供清晰的操作指引。
@@ -15,7 +15,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=tj7uh7hde2tqsavkim15lhsuls;bbs_token=5jxAYKEsRRLmEOSTucp4huSjUdwT6cz6JgyNX_2FmPcvUMGMu0;";
+const COOKIE = "bbs_sid=qeoi1k0a5jhhl056lfvq6phq57;bbs_token=QlbuAWh0k_2FzovLXZkDuJWtt15xLDhXlcU2eS1dFKAvrUvR_2Bm;";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★ 请将下面的IP地址和端口替换为您自己的 ★★★
 const YOUR_API_ENDPOINT = "http://192.168.1.7:3000/process-thread"; 
