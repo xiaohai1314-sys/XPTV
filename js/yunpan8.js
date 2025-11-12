@@ -11,7 +11,7 @@
  */
 
 // ★★★★★【用户配置区】★★★★★
-const BACKEND_API_URL = "http://192.168.10.111:3000/reply";
+const BACKEND_API_URL = "http://192.168.1.7:3000/reply";
 // ★★★★★★★★★★★★★★★★★★★
 
 const SITE_URL = "https://www.haimianxz.com";
