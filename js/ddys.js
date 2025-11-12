@@ -1,3 +1,7 @@
+// ================================================================
+// ✅ 低端影视（ddys.la）最终版 - 可播放修复版 (2025.11)
+// ================================================================
+
 const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const headers = {
@@ -6,9 +10,11 @@ const headers = {
   'User-Agent': UA,
 }
 
-// 1. 完整的、正确的 appConfig
+// ================================================================
+// 1️⃣ 基础配置 appConfig
+// ================================================================
 const appConfig = {
-  ver: 11, // 最终无误版本
+  ver: 11,
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [{
@@ -33,7 +39,9 @@ async function getConfig() {
     return jsonify(appConfig)
 }
 
-// 2. V7 版本中正确的 getCards 分页逻辑
+// ================================================================
+// 2️⃣ 列表解析 getCards
+// ================================================================
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -44,7 +52,6 @@ async function getCards(ext) {
       if (urlPath === '/') {
           return jsonify({ list: [] });
       }
-      // 正确的逻辑：区分处理分类页和发现页的分页URL
       if (urlPath.includes('/search/')) {
           urlPath = urlPath.replace(/(-(\d+))?\.html/, `----------${page}---.html`);
       } else {
@@ -72,14 +79,15 @@ async function getCards(ext) {
   return jsonify({ list: cards });
 }
 
-// 3. ✅ 修复后的 search 函数
+// ================================================================
+// 3️⃣ 搜索函数 search
+// ================================================================
 async function search(ext) {
   ext = argsify(ext);
   let cards = [];
   let text = encodeURIComponent(ext.text);
   let page = ext.page || 1;
 
-  // ✅ 正确拼接搜索地址
   const searchUrl = `${appConfig.site}/search/${text}----------${page}---.html`;
 
   const { data } = await $fetch.get(searchUrl, { headers });
@@ -101,7 +109,9 @@ async function search(ext) {
   return jsonify({ list: cards });
 }
 
-// 4. 优化后的 getTracks 函数
+// ================================================================
+// 4️⃣ 详情页播放列表 getTracks
+// ================================================================
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = appConfig.site + ext.url;
@@ -109,21 +119,17 @@ async function getTracks(ext) {
     const $ = cheerio.load(data);
     let groups = [];
 
-    // 遍历所有 class 为 'stui-vodlist__head' 的标题元素
     $('.stui-vodlist__head').each((index, head) => {
         const sourceTitle = $(head).find('h3').text().trim();
-        
-        // 查找紧随其后的 class 为 'stui-content__playlist' 的列表
         const playlist = $(head).next('ul.stui-content__playlist');
 
-        // 确保找到了对应的播放列表，并且标题不是“猜你喜欢”
         if (playlist.length > 0 && !sourceTitle.includes('猜你喜欢')) {
             let group = { title: sourceTitle, tracks: [] };
             
             playlist.find('li a').each((_, trackLink) => {
                 group.tracks.push({
                     name: $(trackLink).text().trim(),
-                    pan: '', // 保持原逻辑
+                    pan: '',
                     ext: { play_url: $(trackLink).attr('href') }
                 });
             });
@@ -137,41 +143,72 @@ async function getTracks(ext) {
     return jsonify({ list: groups });
 }
 
-// 5. ✅ 完整修复后的 getPlayinfo
+// ================================================================
+// 5️⃣ Base64 解码工具
+// ================================================================
+function base64decode(str) {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let out = "", i = 0;
+    str = str.replace(/[^A-Za-z0-9+/=]/g, "");
+    while (i < str.length) {
+        const enc1 = chars.indexOf(str.charAt(i++));
+        const enc2 = chars.indexOf(str.charAt(i++));
+        const enc3 = chars.indexOf(str.charAt(i++));
+        const enc4 = chars.indexOf(str.charAt(i++));
+        const chr1 = (enc1 << 2) | (enc2 >> 4);
+        const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+        const chr3 = ((enc3 & 3) << 6) | enc4;
+        out += String.fromCharCode(chr1);
+        if (enc3 != 64 && enc3 != -1) out += String.fromCharCode(chr2);
+        if (enc4 != 64 && enc4 != -1) out += String.fromCharCode(chr3);
+    }
+    return out;
+}
+
+// ================================================================
+// 6️⃣ 修复后的 getPlayinfo（带双层解密 + JSON 请求）
+// ================================================================
 async function getPlayinfo(ext) {
     ext = argsify(ext);
     const pageUrl = appConfig.site + ext.play_url;
     const { data } = await $fetch.get(pageUrl, { headers });
 
-    // 提取 var player_aaaa = {...url:"..."}
     const match = data.match(/var\s+player_aaaa\s*=\s*\{[^}]*?url\s*:\s*['"]([^'"]+)['"]/);
     if (!match || !match[1]) {
-        console.error("未找到 player_aaaa 或 url 字段");
+        console.error("❌ 未找到 player_aaaa 或 url 字段");
         return jsonify({ urls: [] });
     }
 
     try {
         let rawUrl = match[1].trim();
-        // ddys 新版格式一般为 m3u8|Base64 或 vod|Base64
-        if (rawUrl.includes('|')) {
-            rawUrl = rawUrl.split('|')[1];
-        }
 
-        // 尝试双层 Base64 解密
+        // 处理格式 m3u8|Base64
+        if (rawUrl.includes('|')) rawUrl = rawUrl.split('|')[1];
+
+        // 双层 Base64 解密
         let decoded = base64decode(rawUrl);
-        if (decoded.startsWith('aHR')) {
-            decoded = base64decode(decoded);
+        if (/^[A-Za-z0-9+/=]+$/.test(decoded)) {
+            try { decoded = base64decode(decoded); } catch (e) {}
         }
 
-        // 验证结果
+        // ✅ 第二步: 若是 ddys.pro 的接口，继续取 JSON
+        if (decoded.includes('ddys.pro') || decoded.includes('getvddr2')) {
+            const { data: json } = await $fetch.get(decoded, { headers });
+            if (json && json.url && json.url.startsWith('http')) {
+                return jsonify({ urls: [json.url], ui: 1 });
+            }
+        }
+
+        // ✅ 否则直接判断是否是有效 m3u8 链接
         if (decoded.startsWith('http')) {
             return jsonify({ urls: [decoded], ui: 1 });
-        } else {
-            console.error("解密失败，结果非URL:", decoded);
-            return jsonify({ urls: [] });
         }
+
+        console.error("⚠️ 解密失败或无效结果:", decoded);
+        return jsonify({ urls: [] });
+
     } catch (err) {
-        console.error("getPlayinfo 解密异常:", err);
+        console.error("❌ getPlayinfo 解密异常:", err);
         return jsonify({ urls: [] });
     }
 }
