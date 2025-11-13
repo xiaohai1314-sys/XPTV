@@ -1,5 +1,6 @@
 // --- 低端影视 ddys.la ---
 // 基于 girigirilove 播放逻辑重构版，带调试输出
+// 改进: 适配 ddys.la 的播放器 iframe 解析逻辑
 
 const cheerio = createCheerio()
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -10,7 +11,7 @@ const headers = {
 }
 
 const appConfig = {
-  ver: 20,
+  ver: 21, // 版本号更新
   title: "低端影视",
   site: "https://ddys.la",
   tabs: [
@@ -119,44 +120,68 @@ async function getTracks(ext) {
   return jsonify({ list: groups })
 }
 
+/**
+ * 改进后的 getPlayinfo 函数
+ * 逻辑：
+ * 1. 访问播放页面 (ext.play_url)，获取 iframe 的 src (即解析器 URL)。
+ * 2. 访问解析器 URL (ddcloud/index.php?url=...)。
+ * 3. 从解析器页面的 HTML 中提取出最终的视频地址。
+ */
 async function getPlayinfo(ext) {
   ext = argsify(ext)
-  const url = appConfig.site + ext.play_url
-  let debug = `🧩 播放调试信息\n[page] ${url}\n`
+  const playerPageUrl = appConfig.site + ext.play_url
+  let debug = `🧩 播放调试信息\n[playerPageUrl] ${playerPageUrl}\n`
 
   try {
-    const { data } = await $fetch.get(url, { headers })
-    const match = data.match(/player_aaaa\s*=\s*(\{.*?\})\s*<\/script>/)
-    if (!match) {
-      debug += "❌ 未匹配到 player_aaaa\n"
+    // 1. 访问播放页面，获取 iframe 的 src (解析器 URL)
+    const { data: playerPageData } = await $fetch.get(playerPageUrl, { headers })
+    const $ = cheerio.load(playerPageData)
+    
+    // 尝试从 iframe 标签中提取 src
+    const iframeSrc = $('iframe').attr('src')
+    if (!iframeSrc) {
+      debug += "❌ 未找到播放器 iframe 标签\n"
       return jsonify({ urls: [], desc: debug })
     }
 
-    const obj = JSON.parse(match[1])
-    let raw = obj.url || ''
-    debug += `[raw] ${raw}\n`
+    const parserUrl = iframeSrc.startsWith('http') ? iframeSrc : appConfig.site + iframeSrc
+    debug += `[parserUrl] ${parserUrl}\n`
 
-    // base64 解码
-    let decoded = ''
-    try { decoded = decodeURIComponent(base64decode(raw)) } catch (e) {
-      debug += `⚠️ base64 解码异常: ${e.message}\n`
+    // 2. 访问解析器 URL，获取最终视频地址
+    // 注意：这里需要确保 Referer 是播放页面，以防解析器检查来源
+    const parserHeaders = {
+        ...headers,
+        'Referer': playerPageUrl
     }
-    debug += `[decoded] ${decoded}\n`
-
-    // 部分站返回二次 base64
-    if (/^[A-Za-z0-9+/=]+$/.test(decoded)) {
-      try {
-        decoded = decodeURIComponent(base64decode(decoded))
-        debug += `[二次解码] ${decoded}\n`
-      } catch {}
+    const { data: parserData } = await $fetch.get(parserUrl, { headers: parserHeaders })
+    
+    // 3. 从解析器页面的 HTML 中提取最终的视频地址
+    // 目标是匹配 var data = JSON.parse('...') 中的 JSON 字符串
+    const match = parserData.match(/var data = JSON\.parse\('(.*?)'\);/)
+    if (!match || match.length < 2) {
+      debug += "❌ 未在解析器页面中匹配到 JSON 数据\n"
+      return jsonify({ urls: [], desc: debug })
     }
 
-    if (decoded.startsWith('http') && decoded.includes('.m3u8')) {
+    // match[1] 是被转义的 JSON 字符串，需要先进行反转义
+    const escapedJson = match[1]
+    // 替换掉转义的斜杠，使其成为有效的 JSON 字符串
+    const jsonString = escapedJson.replace(/\\(.)/g, '$1') 
+    
+    debug += `[jsonString] ${jsonString.substring(0, 100)}...\n`
+
+    const obj = JSON.parse(jsonString)
+    const finalUrl = obj.url || ''
+    
+    debug += `[finalUrl] ${finalUrl.substring(0, 100)}...\n`
+
+    if (finalUrl.startsWith('http') && finalUrl.includes('.m3u8')) {
       debug += `✅ 获取成功\n`
-      return jsonify({ urls: [decoded], ui: 1 })
+      // 返回最终的 M3U8 地址
+      return jsonify({ urls: [finalUrl], ui: 1, desc: debug })
     }
 
-    debug += `❌ 未识别出播放链接`
+    debug += `❌ 最终 URL 格式不正确: ${finalUrl}`
     return jsonify({ urls: [], desc: debug })
 
   } catch (e) {
@@ -165,9 +190,7 @@ async function getPlayinfo(ext) {
   }
 }
 
-/**
- * Base64 解码函数
- */
+// 保留原有的 base64decode 函数，尽管在新逻辑中不再需要，以防其他地方调用
 function base64decode(str) {
   const base64DecodeChars = new Array(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1)
   let c1, c2, c3, c4
@@ -189,7 +212,7 @@ function base64decode(str) {
       c4 = str.charCodeAt(i++) & 0xff
       if (c4 == 61) return out
       c4 = base64DecodeChars[c4]
-    } while (i < len && c4 == -1)
+      } while (i < len && c4 == -1)
     if (c4 == -1) break
     out += String.fromCharCode(((c3 & 0x03) << 6) | c4)
   }
