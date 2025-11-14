@@ -10,7 +10,7 @@ const headers = {
 // ⭐️ 配置后端 API 地址
 // 本地: "http://localhost:3000" 或 "http://127.0.0.1:3000"
 // 远程: 填写你的服务器地址
-const BACKEND_API = "http://localhost:3000"
+const BACKEND_API = "http://192.168.10.105:3000"
 
 const appConfig = {
   ver: 1,
