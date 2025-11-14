@@ -1,270 +1,126 @@
-const cheerio = createCheerio()
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
+/**
+ * 观影网脚本 - v18.0 (架构升级版)
+ *
+ * --- 核心思想 ---
+ * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
+ * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
+ * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
+ */
 
-// 【🚀 缓存机制】 - 完全保留您设计的缓存
-const searchCacheForGetCards = {} 
-const searchCache = {};
+// ================== 配置区 ==================
+// ★ 后端不再需要cheerio
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+// ★ 指向你的后端服务器地址
+const BACKEND_URL = 'http://192.168.1.3:5000'; 
 
-// 【✅ 已修改】 - 更新站点和分类路径
 const appConfig = {
-	ver: 1,
-	title: '极狐4K', // title 已更新
-	site: 'https://4kfox.com', // site 已更新
-	tabs: [
+    ver: 18.0,
+    title: '观影网 (后端版 )', // 标题变更以区分
+    site: 'https://www.gying.org/',
+    tabs: [
+        { name: '电影', ext: { id: 'mv?page=' } },
+        { name: '剧集', ext: { id: 'tv?page=' } },
+        { name: '动漫', ext: { id: 'ac?page=' } },
+    ],
+};
 
-		{
-			name: '电影',
-			ext: {
-				id: '/list/dianying.html', // id 已更新
-			},
-		},
-		{
-			name: '剧集',
-			ext: {
-				id: '/list/juji.html', // id 已更新
-			},
-		},
-		{
-			name: '动漫',
-			ext: {
-				id: '/list/dongman.html', // id 已更新
-			},
-		}
-	],
+// ★★★★★【Cookie相关逻辑已全部移除】★★★★★
+
+// ================== 核心函数 ==================
+
+function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+
+// ★ 【Cookie 和 fetchWithCookie 已被移除】
+
+// --- init (与V17.0完全一致) ---
+async function init(ext) {
+    return jsonify({});
 }
 
+// --- getConfig (与V17.0完全一致) ---
 async function getConfig() {
-	return jsonify(appConfig)
+    return jsonify(appConfig);
 }
 
+// =======================================================================
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// =======================================================================
+
+// --- 【改造】getCards ---
 async function getCards(ext) {
-	ext = argsify(ext)
-	let cards = []
-	let { page = 1, id } = ext
-	
-    // 【✅ 已修改】 - 适配新的分页URL格式
-	let url;
-	if (id === '/') {
-        // 首页分页格式: /page/X.html
-		url = `${appConfig.site}/page/${page}.html`;
-	} else {
-        // 分类页分页格式: /list/dianying-X.html
-        // 使用正则表达式确保路径正确拼接
-        url = `${appConfig.site}${id.replace(/\.html$/, '')}-${page}.html`;
-	}
+    ext = argsify(ext);
+    const { page = 1, id } = ext;
+    // ★ 直接请求后端 /getCards 接口
+    const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
+    log(`请求后端获取卡片列表: ${url}`);
 
-	const { data } = await $fetch.get(url, {
-		headers: { "User-Agent": UA },
-	});
-	
-	const $ = cheerio.load(data);
-
-    // 【✅ 已修改】 - 适配新的列表项选择器
-	$('.hl-vod-list .hl-list-item').each((_, e) => {
-		const a = $(e).find('a.hl-item-thumb');
-		const href = a.attr('href');
-		const title = $(e).find('.hl-item-title a').attr('title');
-		const cover = a.attr('data-original');
-        const remarks = $(e).find('.hl-pic-text .remarks').text().trim(); // 新增备注提取
-
-		cards.push({
-			vod_id: href,
-			vod_name: title,
-			vod_pic: cover,
-			vod_remarks: remarks, // 返回备注信息
-			ext: {
-				url: `${appConfig.site}${href}`,
-			},
-		});
-	});
-
-    // 【✅ 已修改】 - 适配新的分页总数提取逻辑，同时保留您的原有判断
-    let pagecount = 0;
-    const pageInfo = $('.hl-page-tips a').text().trim(); // 格式: "当前页 / 总页数"
-    if (pageInfo) {
-        const parts = pageInfo.split('/');
-        if (parts.length === 2) {
-            pagecount = parseInt(parts[1].trim()) || 0;
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
+        log(`✅ 成功从后端获取到 ${result.list.length} 个项目。`);
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 请求后端卡片列表异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        return jsonify({ list: [] });
     }
-
-    // 保留您的健壮性判断
-    if (cards.length === 0) {
-        pagecount = page > 1 ? page - 1 : 1;
-    } else if (pagecount === 0) {
-        pagecount = page;
-    }
-    
-    searchCacheForGetCards.pagecount = pagecount;
-    
-	return jsonify({
-		list: cards,
-        pagecount: pagecount,
-        total: cards.length,
-	});
 }
 
+// --- 【改造】getTracks ---
 async function getTracks(ext) {
     ext = argsify(ext);
-    const detailUrl = ext.url;
-
-    const { data: detailHtml } = await $fetch.get(detailUrl, {
-        headers: { 'User-Agent': UA },
-    });
-    
-    const $ = cheerio.load(detailHtml);
-    
-    // 【✅ 已修改】 - 适配新的资源列表选择器，并保留您的命名逻辑
-    const resourceGroups = [];
-    const groupTabs = $('#downlist .hl-tabs-btn-down');
-
-    if (groupTabs.length === 0) {
-        $utils.toastError('没有找到资源分组');
-        return jsonify({ list: [] });
-    }
-
-    const postTitle = $('.hl-dc-title').text().trim().split('(')[0].trim();
-
-    groupTabs.each((index, tab) => {
-        const groupTitle = $(tab).attr('alt').trim();
-        const tracks = [];
-
-        const contentBox = $(`.hl-downs-list-down`).eq(index);
-        contentBox.find('.hl-downs-box').each((_, item) => {
-            const linkElement = $(item).find('a.down-name');
-            const finalPanUrl = linkElement.attr('href');
-            const originalTitle = linkElement.find('em.filename').text().trim();
-            
-            if (finalPanUrl && originalTitle) {
-                // --- 【✅ 完全保留】您强大的自定义命名逻辑 ---
-                let newName = originalTitle;
-                const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
-                
-                if (specMatch) {
-                    const tags = specMatch.join(' ');
-                    newName = `${postTitle} [${tags}]`;
-                } else {
-                    newName = `${postTitle} [${groupTitle}]`; // 如果匹配不到，使用分组名作为补充
-                }
-                // --- 自定义命名逻辑结束 ---
-
-                tracks.push({
-                    name: newName,
-                    pan: finalPanUrl,
-                });
-            }
-        });
-
-        if (tracks.length > 0) {
-            resourceGroups.push({
-                title: groupTitle,
-                tracks: tracks,
-            });
+    const detailUrl = ext.url; 
+    // ★ 直接请求后端 /getTracks 接口
+    const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
+    log(`请求后端获取详情数据: ${url}`);
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
-    });
-
-    if (resourceGroups.length === 0) {
-        $utils.toastError('未提取到任何有效资源');
+        if (result.message) {
+            $utils.toastError(result.message, 4000);
+        }
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 获取详情数据异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
         return jsonify({ list: [] });
     }
-    
-    return jsonify({
-        list: resourceGroups,
-    });
 }
 
-
-async function getPlayinfo(ext) {
-	ext = argsify(ext)
-	return jsonify({ urls: [ext.url] })
-}
-
+// --- 【改造】search ---
 async function search(ext) {
-	ext = argsify(ext);
-	const text = ext.text || '';
-	const page = ext.page || 1;
-
-	if (!text) {
-		return jsonify({ list: [] });
-	}
-
-	// 【✅ 完全保留】您的缓存逻辑
-	if (searchCache.keyword !== text) {
-		try { $log(`新关键词 "${text}"，重置搜索缓存`); } catch(e) { console.log(`新关键词 "${text}"，重置搜索缓存`); }
-		searchCache.keyword = text;
-		searchCache.data = {};
-		searchCache.pagecount = 0;
-	}
-
-	if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
-		try { $log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); } catch(e) { console.log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); }
-		return jsonify({ list: [], pagecount: searchCache.pagecount });
-	}
-
-    if (searchCache.data && searchCache.data[page]) {
-        try { $log(`命中第 ${page} 页的缓存`); } catch(e) { console.log(`命中第 ${page} 页的缓存`); }
-        return jsonify({
-            list: searchCache.data[page],
-            pagecount: searchCache.pagecount
-        });
-    }
-
-	try { $log(`缓存未命中，请求第 ${page} 页`); } catch(e) { console.log(`缓存未命中，请求第 ${page} 页`); }
-    
-    // 【✅ 已修改】 - 适配新的搜索URL格式
-	const url = `${appConfig.site}/search/${encodeURIComponent(text)}----------${page}---.html`;
-	
-	const { data } = await $fetch.get(url, {
-		headers: { 'User-Agent': UA },
-	});
-
-	const $ = cheerio.load(data);
-	const cards = [];
-
-    // 【✅ 已修改】 - 适配新的搜索结果列表选择器
-	$('.hl-one-list .hl-list-item').each((_, e) => {
-		const a = $(e).find('a.hl-item-thumb');
-		const href = a.attr('href');
-		const title = $(e).find('.hl-item-title a').attr('title');
-		const cover = a.attr('data-original');
-        const remarks = $(e).find('.hl-pic-text .remarks').text().trim();
-
-		cards.push({
-			vod_id: href,
-			vod_name: title,
-			vod_pic: cover,
-			vod_remarks: remarks,
-			ext: {
-				url: `${appConfig.site}${href}`,
-			},
-		});
-	});
-
-	// 【✅ 已修改】 - 适配新的搜索分页总数提取逻辑
-	let pagecount = searchCache.pagecount;
-    if (pagecount === 0) {
-        const pageInfo = $('.hl-page-total').text().trim(); // 格式: "当前页 / 总页数"
-        if (pageInfo) {
-            const parts = pageInfo.split('/');
-            if (parts.length === 2) {
-                pagecount = parseInt(parts[1].trim()) || 0;
-            }
+    ext = argsify(ext);
+    const text = ext.text;
+    const page = ext.page || 1;
+    // ★ 直接请求后端 /search 接口
+    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
+    log(`请求后端执行搜索: ${url}`);
+    try {
+        const { data } = await $fetch.get(url);
+        const result = JSON.parse(data);
+        if (result.status !== "success") {
+            throw new Error(result.message || '后端返回错误');
         }
+        log(`✅ 成功从后端获取到 ${result.list.length} 个搜索结果。`);
+        return jsonify({ list: result.list });
+    } catch (e) {
+        log(`❌ 搜索异常: ${e.message}`);
+        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        return jsonify({ list: [] });
     }
+}
 
-	// 【✅ 完全保留】您的分页健壮性判断
-	if (cards.length === 0) {
-		pagecount = page > 1 ? page - 1 : (pagecount > 0 ? pagecount : 1);
-	} else if (pagecount === 0) {
-		pagecount = page;
-	}
-
-	searchCache.pagecount = pagecount;
-	searchCache.data[page] = cards;
-    try { $log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); } catch(e) { console.log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); }
-
-	return jsonify({
-		list: cards,
-		pagecount: pagecount,
-	});
+// --- 【原封不动】getPlayinfo ---
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const panLink = ext.pan;
+    return jsonify({ urls: [panLink] });
 }
