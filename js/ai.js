@@ -7,12 +7,9 @@ const headers = {
   'User-Agent': UA,
 }
 
-// ⭐️ 配置后端 API 地址
-const BACKEND_API = "http://192.168.10.105:3000"
-
 const appConfig = {
   ver: 1,
-  title: "天逸搜",
+  title: "天逸搜-测试版",
   site: "https://www.tianyiso.com",
   tabs: [{
     name: '只有搜索功能',
@@ -37,27 +34,6 @@ async function getCards(ext) {
 async function getTracks(ext) {
   const { url } = argsify(ext)
   
-  try {
-    // 方式1: 尝试使用后端 API
-    const { data: apiData } = await $fetch.get(`${BACKEND_API}/getTracks?url=${encodeURIComponent(url)}`, {
-      headers: {
-        'Accept': 'application/json'
-      }
-    })
-    
-    if (apiData && apiData.tracks && apiData.tracks.length > 0) {
-      return jsonify({ 
-        list: [{
-          title: '在线',
-          tracks: apiData.tracks
-        }]
-      })
-    }
-  } catch (e) {
-    console.log('后端 API 调用失败，尝试直接抓取:', e.message)
-  }
-  
-  // 方式2: 如果后端 API 失败，回退到直接抓取
   try {
     const { data } = await $fetch.get(url, {
       headers
@@ -92,15 +68,15 @@ async function getTracks(ext) {
       })
     }
   } catch (e) {
-    console.log('直接抓取失败:', e.message)
+    // 静默失败
   }
   
-  // 如果都失败，返回空
+  // 返回原链接
   return jsonify({ 
     list: [{
-      title: '未找到',
+      title: '资源链接',
       tracks: [{
-        name: '暂无可用链接',
+        name: '查看详情',
         pan: url,
       }]
     }]
@@ -116,7 +92,7 @@ async function getPlayinfo(ext) {
 async function search(ext) {
   ext = argsify(ext)
   let cards = [];
-  let text = encodeURIComponent(ext.text)
+  let text = ext.text
   let page = ext.page || 1
   
   // 只支持第一页
@@ -127,74 +103,82 @@ async function search(ext) {
   }
   
   try {
-    // ⭐️ 优先使用后端 Puppeteer API（更稳定）
-    const { data: apiData } = await $fetch.get(`${BACKEND_API}/search?k=${text}`, {
-      headers: {
-        'Accept': 'application/json'
-      }
-    })
-    
-    if (apiData && apiData.list && apiData.list.length > 0) {
-      console.log(`使用后端 API 成功获取 ${apiData.list.length} 个结果`)
-      return jsonify({
-        list: apiData.list
-      })
-    }
-  } catch (e) {
-    console.log('后端 API 调用失败，尝试直接抓取:', e.message)
-  }
-  
-  // ⭐️ 回退方案：直接使用 cheerio 抓取（可能被反爬）
-  try {
-    const url = appConfig.site + `/search?k=${text}`
+    const url = `${appConfig.site}/search?k=${encodeURIComponent(text)}`
     const { data } = await $fetch.get(url, {
-      headers
+      headers,
+      timeout: 30000
     })
     
     const $ = cheerio.load(data)
     
-    // 方式1: 查找所有 /s/ 开头的链接
-    $('a[href^="/s/"]').each((_, each) => {
+    // 查找所有搜索结果链接
+    $('a[href^="/s/"]').each((index, each) => {
       const path = $(each).attr('href')
       if (!path) return
       
       // 去重
       if (cards.some(card => card.vod_id === path)) return
       
-      // 尝试多种方式提取标题
+      // 提取标题 - 多种方式
       let title = ''
       
-      // 尝试1: 查找 template 标签
+      // 方式1: template 标签
       const templateText = $(each).find('template').first().text().trim()
-      if (templateText) {
+      if (templateText && templateText.length > 2) {
         title = templateText
       }
       
-      // 尝试2: 查找第一个有意义的文本节点
+      // 方式2: 遍历 div 找标题
       if (!title) {
         $(each).find('div').each((_, div) => {
-          const text = $(div).text().trim()
-          if (text && text.length > 3 && !text.includes('时间:') && !text.includes('格式:')) {
-            title = text
+          const divText = $(div).text().trim()
+          // 排除时间、格式等信息
+          if (divText && 
+              divText.length > 3 && 
+              !divText.includes('时间:') && 
+              !divText.includes('格式:') &&
+              !divText.includes('大小:')) {
+            title = divText
             return false // break
           }
         })
       }
       
-      // 尝试3: 使用链接的完整文本（第一行）
+      // 方式3: 获取第一行文本
       if (!title) {
-        const fullText = $(each).text().trim()
-        const lines = fullText.split('\n')
-        title = lines[0] || `资源 ${path.replace('/s/', '').substring(0, 8)}`
+        const allText = $(each).text().trim()
+        const lines = allText.split('\n').map(l => l.trim()).filter(l => l)
+        for (let line of lines) {
+          if (line && 
+              line.length > 2 && 
+              !line.includes('时间:') && 
+              !line.includes('格式:')) {
+            title = line
+            break
+          }
+        }
       }
+      
+      // 方式4: 备用方案
+      if (!title || title.length < 2) {
+        title = `资源 ${path.split('/').pop() || index}`
+      }
+      
+      // 清理标题
+      title = title.replace(/\s+/g, ' ').trim()
       
       // 提取备注信息
       let remarks = ''
       const fullText = $(each).text()
-      const remarksMatch = fullText.match(/(时间:.*)/s)
-      if (remarksMatch) {
-        remarks = remarksMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim()
-      }
+      const timeMatch = fullText.match(/时间:\s*([^\n]+)/)
+      const formatMatch = fullText.match(/格式:\s*([^\n]+)/)
+      const sizeMatch = fullText.match(/大小:\s*([^\n]+)/)
+      
+      const remarkParts = []
+      if (timeMatch) remarkParts.push(`时间: ${timeMatch[1].trim()}`)
+      if (formatMatch) remarkParts.push(`格式: ${formatMatch[1].trim()}`)
+      if (sizeMatch) remarkParts.push(`大小: ${sizeMatch[1].trim()}`)
+      remarks = remarkParts.join(' ')
       
       cards.push({
         vod_id: path,
@@ -207,9 +191,30 @@ async function search(ext) {
       })
     })
     
-    console.log(`直接抓取获取 ${cards.length} 个结果`)
+    // 如果没找到结果，添加一个提示
+    if (cards.length === 0) {
+      cards.push({
+        vod_id: 'no-result',
+        vod_name: `未找到"${text}"的搜索结果`,
+        vod_pic: '',
+        vod_remarks: '请尝试其他关键词',
+        ext: {
+          url: appConfig.site
+        }
+      })
+    }
+    
   } catch (e) {
-    console.log('直接抓取失败:', e.message)
+    // 添加错误提示
+    cards.push({
+      vod_id: 'error',
+      vod_name: '搜索出错',
+      vod_pic: '',
+      vod_remarks: e.message || '网络连接失败',
+      ext: {
+        url: appConfig.site
+      }
+    })
   }
   
   return jsonify({
