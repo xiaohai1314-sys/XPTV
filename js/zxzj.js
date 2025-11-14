@@ -1,1 +1,217 @@
-var _0xod9='jsjiami.com.v7';const _0x29c5a0=_0x4150;(function(_0x4cc2b8,_0x3190e9,_0x10d51d,_0x378026,_0x267040,_0x40aeee,_0x277d0d){return _0x4cc2b8=_0x4cc2b8>>0x5,_0x40aeee='hs',_0x277d0d='hs',function(_0x1d456a,_0x4eaf0a,_0x212c5e,_0x41a0a0,_0x59b4e3){const _0x4349b8=_0x4150;_0x41a0a0='tfi',_0x40aeee=_0x41a0a0+_0x40aeee,_0x59b4e3='up',_0x277d0d+=_0x59b4e3,_0x40aeee=_0x212c5e(_0x40aeee),_0x277d0d=_0x212c5e(_0x277d0d),_0x212c5e=0x0;const _0xb8df19=_0x1d456a();while(!![]&&--_0x378026+_0x4eaf0a){try{_0x41a0a0=parseInt(_0x4349b8(0x1b2,'98]r'))/0x1+-parseInt(_0x4349b8(0x1f5,'4mv)'))/0x2*(-parseInt(_0x4349b8(0x1e4,'stA@'))/0x3)+-parseInt(_0x4349b8(0x1d9,'ZH^j'))/0x4+parseInt(_0x4349b8(0x1db,'BJJ#'))/0x5*(parseInt(_0x4349b8(0x18e,'$cT^'))/0x6)+-parseInt(_0x4349b8(0x1e8,'$wiv'))/0x7*(parseInt(_0x4349b8(0x177,'QrtF'))/0x8)+parseInt(_0x4349b8(0x1e1,'Tf9i'))/0x9+parseInt(_0x4349b8(0x1d6,'4mv)'))/0xa*(-parseInt(_0x4349b8(0x1f6,'Yoap'))/0xb);}catch(_0x255db6){_0x41a0a0=_0x212c5e;}finally{_0x59b4e3=_0xb8df19[_0x40aeee]();if(_0x4cc2b8<=_0x378026)_0x212c5e?_0x267040?_0x41a0a0=_0x59b4e3:_0x267040=_0x59b4e3:_0x212c5e=_0x59b4e3;else{if(_0x212c5e==_0x267040['replace'](/[nAPGNFySDqQRBTxlWf=]/g,'')){if(_0x41a0a0===_0x4eaf0a){_0xb8df19['un'+_0x40aeee](_0x59b4e3);break;}_0xb8df19[_0x277d0d](_0x59b4e3);}}}}}(_0x10d51d,_0x3190e9,function(_0xb20a48,_0x133e78,_0x3bf66d,_0x4722f2,_0x4c3ab5,_0x45f6ea,_0x5aa148){return _0x133e78='\x73\x70\x6c\x69\x74',_0xb20a48=arguments[0x0],_0xb20a48=_0xb20a48[_0x133e78](''),_0x3bf66d=`\x72\x65\x76\x65\x72\x73\x65`,_0xb20a48=_0xb20a48[_0x3bf66d]('\x76'),_0x4722f2=`\x6a\x6f\x69\x6e`,(0x1c15af,_0xb20a48[_0x4722f2](''));});}(0x18a0,0x92d0e,_0x3c4b,0xc7),_0x3c4b)&&(_0xod9=0x768);const cheerio=createCheerio(),UA='Mozilla/5.0\x20(Macintosh;\x20Intel\x20Mac\x20OS\x20X\x2010_15_7)\x20AppleWebKit/537.36\x20(KHTML,\x20like\x20Gecko)\x20Chrome/130.0.0.0\x20Safari/537.36',headers={'Referer':'https://v.ikanbot.com/','Origin':_0x29c5a0(0x175,'Ltsf'),'User-Agent':UA},appConfig={'ver':0x1,'title':_0x29c5a0(0x173,'(M46'),'site':_0x29c5a0(0x1c2,'(M46'),'tabs':[{'name':'电影','ext':{'url':_0x29c5a0(0x17d,'stA@')}},{'name':'剧集','ext':{'url':'https://v.ikanbot.com/hot/index-tv-%E7%83%AD%E9%97%A8-p-{page}.html'}}]};async function getConfig(){const _0x392934=_0x29c5a0,_0x15929d={'nJRFP':function(_0x475e4a,_0x4fdaa2){return _0x475e4a(_0x4fdaa2);}};return _0x15929d[_0x392934(0x1cf,'euhZ')](jsonify,appConfig);}function _0x4150(_0xc90e15,_0x1cecff){const _0x3c4ba7=_0x3c4b();return _0x4150=function(_0x4150c8,_0x14857e){_0x4150c8=_0x4150c8-0x16b;let _0x321ae8=_0x3c4ba7[_0x4150c8];if(_0x4150['gsmeuJ']===undefined){var _0x57bcb1=function(_0x2b48b0){const _0x1f1e5f='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=';let _0x16905e='',_0xb896ed='';for(let _0x3173e9=0x0,_0x37377a,_0xb6a4b1,_0x2006eb=0x0;_0xb6a4b1=_0x2b48b0['charAt'](_0x2006eb++);~_0xb6a4b1&&(_0x37377a=_0x3173e9%0x4?_0x37377a*0x40+_0xb6a4b1:_0xb6a4b1,_0x3173e9++%0x4)?_0x16905e+=String['fromCharCode'](0xff&_0x37377a>>(-0x2*_0x3173e9&0x6)):0x0){_0xb6a4b1=_0x1f1e5f['indexOf'](_0xb6a4b1);}for(let _0x56adcc=0x0,_0x276b04=_0x16905e['length'];_0x56adcc<_0x276b04;_0x56adcc++){_0xb896ed+='%'+('00'+_0x16905e['charCodeAt'](_0x56adcc)['toString'](0x10))['slice'](-0x2);}return decodeURIComponent(_0xb896ed);};const _0x424c12=function(_0x36e72e,_0x16854a){let _0x2d34ad=[],_0x3e605b=0x0,_0x303c13,_0x4fb968='';_0x36e72e=_0x57bcb1(_0x36e72e);let _0x373a7f;for(_0x373a7f=0x0;_0x373a7f<0x100;_0x373a7f++){_0x2d34ad[_0x373a7f]=_0x373a7f;}for(_0x373a7f=0x0;_0x373a7f<0x100;_0x373a7f++){_0x3e605b=(_0x3e605b+_0x2d34ad[_0x373a7f]+_0x16854a['charCodeAt'](_0x373a7f%_0x16854a['length']))%0x100,_0x303c13=_0x2d34ad[_0x373a7f],_0x2d34ad[_0x373a7f]=_0x2d34ad[_0x3e605b],_0x2d34ad[_0x3e605b]=_0x303c13;}_0x373a7f=0x0,_0x3e605b=0x0;for(let _0x3ffd9f=0x0;_0x3ffd9f<_0x36e72e['length'];_0x3ffd9f++){_0x373a7f=(_0x373a7f+0x1)%0x100,_0x3e605b=(_0x3e605b+_0x2d34ad[_0x373a7f])%0x100,_0x303c13=_0x2d34ad[_0x373a7f],_0x2d34ad[_0x373a7f]=_0x2d34ad[_0x3e605b],_0x2d34ad[_0x3e605b]=_0x303c13,_0x4fb968+=String['fromCharCode'](_0x36e72e['charCodeAt'](_0x3ffd9f)^_0x2d34ad[(_0x2d34ad[_0x373a7f]+_0x2d34ad[_0x3e605b])%0x100]);}return _0x4fb968;};_0x4150['pBmhES']=_0x424c12,_0xc90e15=arguments,_0x4150['gsmeuJ']=!![];}const _0x2509cf=_0x3c4ba7[0x0],_0x4a102b=_0x4150c8+_0x2509cf,_0x4cd463=_0xc90e15[_0x4a102b];return!_0x4cd463?(_0x4150['QWIEku']===undefined&&(_0x4150['QWIEku']=!![]),_0x321ae8=_0x4150['pBmhES'](_0x321ae8,_0x14857e),_0xc90e15[_0x4a102b]=_0x321ae8):_0x321ae8=_0x4cd463,_0x321ae8;},_0x4150(_0xc90e15,_0x1cecff);}async function getCards(_0x4761ea){const _0xad6f33=_0x29c5a0,_0x36d715={'cHzto':function(_0x446021,_0x27406f){return _0x446021(_0x27406f);},'YqIWg':_0xad6f33(0x1f0,'X!5c'),'aCGBy':'data-src','iMoeO':function(_0x2c7ed9,_0x3283db){return _0x2c7ed9+_0x3283db;},'fDMmw':function(_0x2bd26f,_0x20f639){return _0x2bd26f(_0x20f639);},'mHJdn':_0xad6f33(0x18b,'X!5c'),'AtsgY':'/play/','saCTC':function(_0xa54964,_0x279134){return _0xa54964==_0x279134;},'iIxoD':_0xad6f33(0x181,'dkgs'),'HOIJa':_0xad6f33(0x1e2,'^*LU')};_0x4761ea=_0x36d715['fDMmw'](argsify,_0x4761ea);let _0x155e87=[],_0xf32b42=_0x4761ea[_0xad6f33(0x19e,'xqZP')],_0x37dffb=_0x4761ea[_0xad6f33(0x1d7,'QrtF')]||0x1;_0x36d715['saCTC'](_0x37dffb,0x1)?_0xf32b42=_0xf32b42['replace'](_0x36d715[_0xad6f33(0x1ba,'ATmh')],''):_0xf32b42=_0xf32b42[_0xad6f33(0x1a0,']]FD')](_0xad6f33(0x186,'xqZP'),_0x37dffb);const {data:_0x58b68b}=await $fetch[_0xad6f33(0x1f8,'[$Pk')](_0xf32b42,{'headers':headers}),_0x1cc827=cheerio[_0xad6f33(0x1aa,'P]hh')](_0x58b68b);return _0x36d715[_0xad6f33(0x1c7,'QcGa')](_0x1cc827,_0x36d715[_0xad6f33(0x1a6,'stA@')])['each']((_0x19c8e0,_0x56c639)=>{const _0x4079f6=_0xad6f33;_0x155e87[_0x4079f6(0x1d8,'kX%x')]({'vod_id':_0x36d715[_0x4079f6(0x198,'1hIg')](_0x1cc827,_0x56c639)['find'](_0x36d715['YqIWg'])[_0x4079f6(0x17e,'20O9')](_0x4079f6(0x1bd,'sVGp')),'vod_name':_0x1cc827(_0x56c639)[_0x4079f6(0x1a4,'SH#6')]('p')[_0x4079f6(0x1ca,']]FD')](),'vod_pic':appConfig['site']+_0x36d715['cHzto'](_0x1cc827,_0x56c639)[_0x4079f6(0x1ad,'xqZP')](_0x4079f6(0x1cb,'ZH^j'))[_0x4079f6(0x1b5,'X!5c')](_0x36d715[_0x4079f6(0x18f,'HYLi')]),'vod_remarks':'','ext':{'url':_0x36d715['iMoeO'](appConfig[_0x4079f6(0x1a1,'KxY7')],_0x36d715[_0x4079f6(0x1bc,'@ZsX')](_0x1cc827,_0x56c639)[_0x4079f6(0x19a,'sXJc')](_0x36d715['YqIWg'])['attr'](_0x36d715[_0x4079f6(0x1b8,'sXJc')])),'id':_0x36d715[_0x4079f6(0x1ec,'z[AY')](_0x1cc827,_0x56c639)[_0x4079f6(0x16f,'HYLi')](_0x36d715[_0x4079f6(0x1b6,'rk#E')])[_0x4079f6(0x1ab,'@6y6')](_0x4079f6(0x1a5,']Aeg'))[_0x4079f6(0x192,')]rt')](_0x36d715[_0x4079f6(0x1e7,'HYLi')],'')[_0x4079f6(0x1e0,'#@%I')]()}});}),_0x36d715['fDMmw'](jsonify,{'list':_0x155e87});}async function getTracks(_0x291057){const _0x4204af=_0x29c5a0,_0xe52b4a={'QDwhn':function(_0x56b422,_0x18e1be){return _0x56b422+_0x18e1be;},'AWHbO':function(_0x46af64,_0x14163c){return _0x46af64(_0x14163c);},'epdgQ':function(_0x46bb25,_0x39f395){return _0x46bb25(_0x39f395);},'IUzUf':function(_0x170f42,_0x293ebc){return _0x170f42(_0x293ebc);},'PvXRv':'#current_id','vObbj':function(_0x18f033,_0xa61823){return _0x18f033(_0xa61823);},'Xzjkt':_0x4204af(0x1b1,')]rt'),'xlDFG':function(_0x3cca01,_0x581a28){return _0x3cca01<_0x581a28;},'qcnvP':function(_0x4fa4d7,_0x16dac9){return _0x4fa4d7+_0x16dac9;},'MuyuZ':function(_0x5b2376,_0x43689c){return _0x5b2376%_0x43689c;},'LlNjy':function(_0x49efa3,_0x14dfc2){return _0x49efa3+_0x14dfc2;},'gzChi':function(_0x409f71,_0x2a0574){return _0x409f71(_0x2a0574);},'ncKxk':_0x4204af(0x1a3,'IbDC'),'VphBg':function(_0x5d302a,_0x416582){return _0x5d302a(_0x416582);}};_0x291057=_0xe52b4a['epdgQ'](argsify,_0x291057);let _0x5af4b9=[],_0x2ab8dd=_0x291057[_0x4204af(0x1dc,'X!5c')];const {data:_0xab99fc}=await $fetch['get'](_0x2ab8dd,{'headers':headers}),_0x21ff68=cheerio['load'](_0xab99fc);let _0x48a816=_0xe52b4a['IUzUf'](_0x21ff68,_0xe52b4a[_0x4204af(0x1b9,'d*)a')])['val'](),_0xdbd205=_0xe52b4a['vObbj'](_0x21ff68,_0xe52b4a['Xzjkt'])[_0x4204af(0x1ef,'$cT^')]();if(!_0x48a816||!_0xdbd205)return;let _0xa52f4=_0x48a816['length'],_0xdeec75=_0x48a816['substring'](_0xa52f4-0x4,_0xa52f4),_0x5061fe=[];for(let _0x1e9a5f=0x0;_0xe52b4a[_0x4204af(0x1be,'SH#6')](_0x1e9a5f,_0xdeec75['length']);_0x1e9a5f++){let _0xea68ed=parseInt(_0xdeec75[_0x1e9a5f]),_0x412223=_0xe52b4a['qcnvP'](_0xe52b4a[_0x4204af(0x195,'12Gh')](_0xea68ed,0x3),0x1);_0x5061fe[_0x1e9a5f]=_0xdbd205[_0x4204af(0x1c5,'P]hh')](_0x412223,_0x412223+0x8),_0xdbd205=_0xdbd205['substring'](_0xe52b4a[_0x4204af(0x1f3,'B#yu')](_0x412223,0x8));}let _0x163991=_0x5061fe[_0x4204af(0x1e9,'4mv)')](''),_0x466ba5=_0xe52b4a[_0x4204af(0x1d5,'sVGp')](_0x21ff68,_0xe52b4a['ncKxk'])['val']();_0x2ab8dd=_0x4204af(0x19f,'20O9')+_0x291057['id']+'&mtype='+_0x466ba5+_0x4204af(0x188,'XZo$')+_0x163991;let _0xf2d9c0=await $fetch[_0x4204af(0x1ea,'Tf9i')](_0x2ab8dd,{'headers':headers}),_0x2c33c1=_0xe52b4a[_0x4204af(0x1c3,'Ltsf')](parseJsonIfString,_0xf2d9c0['data'])[_0x4204af(0x19d,'20O9')][_0x4204af(0x1ce,'nTOD')],_0x519d93=[];return _0x2c33c1[_0x4204af(0x1a8,'T[OD')]((_0x4deb77,_0x4c79ab)=>{const _0x5034ec=_0x4204af;_0x519d93[_0x5034ec(0x178,'#@%I')]('线路'+_0xe52b4a[_0x5034ec(0x1c1,'d*)a')](_0x4c79ab,0x1)[_0x5034ec(0x1bb,'sVGp')]());let _0x4e5f27={'title':_0x519d93[_0x4c79ab],'tracks':[]};_0xe52b4a[_0x5034ec(0x1c4,'egj3')](parseJsonIfString,_0x4deb77[_0x5034ec(0x19c,'B#yu')])[_0x5034ec(0x1d0,'sXJc')]((_0x524c5e,_0xea1ddd)=>{const _0x1299b1=_0x5034ec;_0x4e5f27[_0x1299b1(0x1d1,'SH#6')][_0x1299b1(0x17f,'ATmh')]({'name':_0x524c5e['url'][_0x1299b1(0x1b7,'euhZ')]('$')[0x0],'ext':{'url':_0x524c5e[_0x1299b1(0x1c9,'HYLi')]['split']('$')[0x1]}});}),_0x5af4b9[_0x5034ec(0x184,'sXJc')](_0x4e5f27);}),jsonify({'list':_0x5af4b9});}async function getPlayinfo(_0x51b6a7){const _0x19e1f6=_0x29c5a0,_0xebfb48={'LQUnS':function(_0x29bf3,_0x2dc0ac){return _0x29bf3(_0x2dc0ac);},'hxbGO':function(_0x50581a,_0x1a2212){return _0x50581a(_0x1a2212);}};return _0x51b6a7=_0xebfb48['LQUnS'](argsify,_0x51b6a7),_0xebfb48['hxbGO'](jsonify,{'urls':[_0x51b6a7[_0x19e1f6(0x1cd,'98]r')]]});}async function search(_0x43ec3f){const _0x5bd24c=_0x29c5a0,_0x2ca239={'JNQML':function(_0x3e5e98,_0xfdd1cf){return _0x3e5e98!==_0xfdd1cf;},'XHTWL':'joWmv','RvNyC':function(_0x5264b0,_0x2e3284){return _0x5264b0(_0x2e3284);},'jLCVO':'div.media-left\x20a.cover-link','LyVah':'href','nrURj':function(_0x69e785,_0x1fa515){return _0x69e785(_0x1fa515);},'sCZWs':function(_0x319d99,_0x2e0adb){return _0x319d99+_0x2e0adb;},'uxOyY':_0x5bd24c(0x189,')]rt'),'oACqG':function(_0x38cf24,_0x3eed3c){return _0x38cf24(_0x3eed3c);},'QhZpa':function(_0xc6d19c,_0x3a4400){return _0xc6d19c>_0x3a4400;},'BBJrB':_0x5bd24c(0x187,'P]hh'),'mVlZB':'div.media'};_0x43ec3f=_0x2ca239[_0x5bd24c(0x1a2,'KI*a')](argsify,_0x43ec3f);let _0x224fec=[],_0x46da14=encodeURIComponent(_0x43ec3f[_0x5bd24c(0x16c,'20O9')]),_0xdae1bd=0x1;_0x2ca239['QhZpa'](_0xdae1bd,0x1)?_0x2ca239['JNQML'](_0x2ca239[_0x5bd24c(0x1ee,'98]r')],_0x5bd24c(0x194,'4mv)'))?_0xdae1bd='&p='+_0xdae1bd:_0x3a4f28[_0x5bd24c(0x199,'rk#E')][_0x5bd24c(0x174,'d*)a')]({'name':_0x568b61['url'][_0x5bd24c(0x1b7,'euhZ')]('$')[0x0],'ext':{'url':_0x168bd5[_0x5bd24c(0x1c0,'IbDC')][_0x5bd24c(0x179,'4z1Q')]('$')[0x1]}}):_0xdae1bd='';const _0x1f35e7=_0x2ca239[_0x5bd24c(0x1e6,'XeEx')](appConfig['site'],'/search?q='+_0x46da14+_0xdae1bd),{data:_0x52c553}=await $fetch[_0x5bd24c(0x1e3,'kX%x')](_0x1f35e7,{'headers':headers}),_0x4d5356=cheerio[_0x5bd24c(0x171,']Aeg')](_0x52c553);return _0x4d5356(_0x2ca239[_0x5bd24c(0x1b4,'12Gh')])['each']((_0x181988,_0x4de67e)=>{const _0x5a85cf=_0x5bd24c,_0xe8e28f={'naLYQ':_0x5a85cf(0x196,'ATmh')};if(_0x2ca239[_0x5a85cf(0x191,'P]hh')](_0x2ca239['XHTWL'],_0x2ca239[_0x5a85cf(0x17b,']]FD')]))try{return _0x207b48[_0x5a85cf(0x1e5,'1hIg')](_0x49a110);}catch(_0x41756b){return _0x547a78[_0x5a85cf(0x18d,'SH#6')](_0xe8e28f[_0x5a85cf(0x1c6,'Tf9i')],_0x41756b),null;}else _0x224fec[_0x5a85cf(0x182,'XeEx')]({'vod_id':_0x2ca239[_0x5a85cf(0x18c,'rk#E')](_0x4d5356,_0x4de67e)[_0x5a85cf(0x18a,'sVGp')](_0x2ca239[_0x5a85cf(0x1a7,'KxY7')])[_0x5a85cf(0x1af,'[$Pk')](_0x2ca239[_0x5a85cf(0x1dd,'sVGp')]),'vod_name':_0x4d5356(_0x4de67e)['find'](_0x5a85cf(0x1b3,'d*)a'))[_0x5a85cf(0x19b,'12Gh')](),'vod_pic':_0x2ca239[_0x5a85cf(0x17a,'KxY7')](_0x4d5356,_0x4de67e)[_0x5a85cf(0x197,'BJJ#')](_0x5a85cf(0x1ed,'sVGp'))[_0x5a85cf(0x176,'ATmh')](_0x5a85cf(0x1f7,'4mv)')),'vod_remarks':_0x4d5356(_0x4de67e)[_0x5a85cf(0x18a,'sVGp')](_0x5a85cf(0x1cc,'[$Pk'))[_0x5a85cf(0x190,'(M46')](),'ext':{'url':_0x2ca239[_0x5a85cf(0x1df,'^*LU')](appConfig[_0x5a85cf(0x16e,'@E&L')],_0x2ca239[_0x5a85cf(0x1f4,'P]hh')](_0x4d5356,_0x4de67e)['find'](_0x2ca239[_0x5a85cf(0x1a9,'Yoap')])[_0x5a85cf(0x1eb,'P]hh')](_0x5a85cf(0x1c8,'ZH^j'))),'id':_0x4d5356(_0x4de67e)['find'](_0x2ca239[_0x5a85cf(0x170,'98]r')])['attr']('href')['replace'](_0x2ca239['uxOyY'],'')[_0x5a85cf(0x1b0,'IbDC')]()}});}),jsonify({'list':_0x224fec});}function _0x3c4b(){const _0x314d02=(function(){return[...[_0xod9,'WPAxjQGPsWjDWifamnNiWQ.SBcAToFnmRf.yvql7==','WOxdMSk1','WOVdGCovfq','W7/dQSoo','wmkpWP1xW6T+W6OLWOX2','WOLfWQa','W7ldMIz6','CWvDWPGX','W49lW6GWW5JcQs0','WPFcUtlcTJf+','w8kEWO5kWQa','dmkLW68XWRa','WOhdOKNdMSkY','vmo2b8ofyq','yqj6WRytACk1W693W5BcIsTM','nmkqhCo2','dJraua','WQlcTmkEsCojnqhcGSk9nWeXiW','nCkJbmoMW7rYW4vfl8kD','WQddLYFdQmo2BtzVW5yk','W7tdG8on','F8o1eSomya','W7/cGmoWamoG','jSkYW7yFWQ0','WP3cT3KChCoZWOz2','WR/dUCk9W5xdUwtdNNrWlaVcR0TW','mCkyW5PMWRioWQyjW4VcH8o4DSobESonomkN','gsrh','W6OwWRddO8omW6Sp','W6HPESk+WRi','fCkOyeJdMa','WRhdNmkQWOZdKa','WQ7dQMGKWONcJ8o/WR8','oL0NW6G','W6NcRmo5','WRiwk8o6','AHXUWR/cRG','v8oLmSkdzCoMW6xcGCkYpa3cPuhdHWZdU8o3mSkfkNFcUwycWPSYiJZdKSoaW4m','WR51WOzBW7i','W4lcOWW','W6dcN8oiW7PGba','EaCZW4WpW4uo','iCktrJ/cIZGIW5tcKG','EhtcPx7dNG','WR0qcSoAiq','yqn/WRiqASkXW5XZW7ZcVtL6','pCkNamkgW6LvW4bhgG','i0aT'],...(function(){return[...['tmkAWOG','oeykw8ky','xCkuWPhcOW','rhNcMwFdGG','WRdcSCkMW7K','WPBdGCk3WO8','WPz7WO9/W78','DSkdWQNcTq','yGJdN8o6CwRcVmkeWOZdUhldMSk5','WRldJZjIB0NcPmkY5ywK','W7BdT8oxDq','WO7dGWKPld/cNmoqBx5hW4KhW7HDW6ZcOcJdG8kFW6y','WQhcQmo7wq','DSoismkRWOpcRgODWRZcGq','WPNcRvKa','W4dcICoMbmoZ','jqunW783','WQFdRmo5nHC','W5jgzmk1WQy','WResWQ/dSSoTWObdWOVcMSkNp8ovW7ZdIZ1Jr27dPaldQc3dPg3cQu4wWRRcU8kgW7dcT0NdLu82cG1EmCkVoNSCWRu0amkNebrgWOLVW5PJW4BdRMnUWQ3dIf/dRmoCvSoHcmo9W5DD','smkfWP3cPq','WRdcQCo8qW','uL/cP0hdJG','omkndweaoHKLWRa','fSkEsxC','WOaFW4xdS8k1WQ7dOSoF','W5LrW6KD','WRtdJ0JdKCkX','W4PBW4xdPSk5WP4','WPGWoCo4lq','W5ldG8kDr3XcWPm','W4hdVdZdJKddKW','vCoLkSoj','W6NdG8oeW6G','WQpdTxxdKmku','WOBcUshcUIG','WO3dSLCvuK7cH8ocW7S2','WPhdQ8kEWQNdSa','WQ/dGsT4','WPKSdSofbW','WPZdQsddG1JcN2u','kxW4W6TrCcldUCoPpSomACom','oN8SW6vW','sIhdUmoAW4a','WONcSSo5sSoRW6nndmo0q8k3lmoAbmkpWRtcPCoLWQS','W7xcIxJcVa','W7TaCSk5WRG','WOxdSvRdISk8WQe','W49nW7qr'],...(function(){return['CZhdUCoB','rN3cMfddHSoVWOK','tCkqWP3cTG','W4rzW4G','qCkfWP3cPXiNW6KRWQVdGCkOgxNdRdpdMCobW7VdO8oXWOhdKIddQYPOWO3cO8kjBdhcNmo8nWP5i8kha8kzqCoT','WO3dGCoDdtRcMvi','ob4SW4G','F8oMnHBcOq','jtHNWPNcNvu','WOxcOJ3cSq','CSkEWQ3cTW','WPePWPldImo/','itSBW7Ss','nvBcNmklitZdOa','zSoFCmkiW4S','WR8npSoS','rCozk8oq','WRawemoahW','W5DcW4RdPq','F8oNqCk3W6P2','sSklWOHl','CJPaWPtcN1NdKw8','W43dQq/dM1BcL2xdNq','W44cW74AWOmTgwypm0ldTq','W67cT8kkCmoQomkutmkoB8k3gCo5WQKIW6LkmSoQWOOiWPvhx8kBbCo+uCkg','AGldRCo1W5G','W6ddHCovW7W','WQJdSNldVSkW','BJ9JWRCv','W4rSW5arW5C','W5BdTmo8t8o5','WQNcLCo3rmod','r8oJf8ozESoQW6/cJW','WPb5W7G8iG','w8o+iCol','WPVcPXFcKX0','FCoKa8oAzq','CYD/','W5FdHSotDCoH','WRpdKcD8FHZdV8ocrHtdVmorsW1pW4ZcJrZdV8o6W5m','WRddHXuBoa','h1yoBmk+','WQaxpCo7p8k3pKPl','W6dcQmobWRJcNq','iSotW7bLkW','W77dTComgG'];}())];}())];}());_0x3c4b=function(){return _0x314d02;};return _0x3c4b();};function parseJsonIfString(_0x1625b0){const _0x2ccfb4=_0x29c5a0,_0x251771={'YTCyn':'Invalid\x20JSON\x20string','ELsxf':'string','NhGwm':'nHAVp','Lyzmg':function(_0x4014fc,_0x1bf28d){return _0x4014fc===_0x1bf28d;},'fGLUi':_0x2ccfb4(0x1ac,'P]hh')};if(typeof _0x1625b0===_0x251771[_0x2ccfb4(0x185,'rk#E')]){if(_0x2ccfb4(0x17c,'1hIg')!==_0x251771[_0x2ccfb4(0x1bf,'sVGp')])try{return JSON[_0x2ccfb4(0x1d4,'rk#E')](_0x1625b0);}catch(_0x26591c){if(_0x251771[_0x2ccfb4(0x1de,'4z1Q')](_0x251771[_0x2ccfb4(0x16b,'egj3')],_0x251771[_0x2ccfb4(0x180,'B#yu')]))return console['error'](_0x251771[_0x2ccfb4(0x1d3,'^*LU')],_0x26591c),null;else{if(typeof _0x421d9e===_0x2ccfb4(0x1ae,'Yoap'))try{return _0x2cce0c[_0x2ccfb4(0x16d,'B#yu')](_0x44d1be);}catch(_0x617468){return _0x5e8b7d['error'](_0x251771['YTCyn'],_0x617468),null;}return _0x5898b4;}}else return _0x3cead5[_0x2ccfb4(0x1d2,'[$Pk')](_0x4e532);}return _0x1625b0;}var version_ = 'jsjiami.com.v7';
+/**
+ * 脚本名称: 爱看机器人 (ikanbot) 视频信息抓取器
+ * 功能: 从 v.ikanbot.com 网站抓取电影和剧集信息，包括列表、详情和播放地址。
+ * 作者: (原始作者未知, 由 Manus 反混淆和注释)
+ * 版本: 1.0
+ */
+
+// =================================================================================
+// 1. 全局配置 (Global Configuration)
+// =================================================================================
+
+// 模拟浏览器的 User-Agent，避免被服务器识别为爬虫
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
+// HTTP 请求头，包含 Referer 和 Origin，模拟真实的用户访问来源
+const headers = {
+    'Referer': 'https://v.ikanbot.com/',
+    'Origin': 'https://v.ikanbot.com',
+    'User-Agent': UA
+};
+
+// 应用的基本配置信息
+const appConfig = {
+    'ver': 1,
+    'title': '爱看机器人',
+    'site': 'https://v.ikanbot.com',
+    'tabs': [
+        {
+            'name': '电影',
+            'ext': { 'url': 'https://v.ikanbot.com/hot/index-movie-%E7%83%AD%E9%97%A8-p-{page}.html' }
+        },
+        {
+            'name': '剧集',
+            'ext': { 'url': 'https://v.ikanbot.com/hot/index-tv-%E7%83%AD%E9%97%A8-p-{page}.html' }
+        }
+    ]
+};
+
+// 依赖项 (假设在环境中已提供)
+// const cheerio = createCheerio(); // 用于解析 HTML
+// const $fetch = ...;             // HTTP 请求客户端
+// const jsonify = (data) => JSON.stringify(data); // 将对象转为 JSON 字符串
+// const argsify = (jsonString) => JSON.parse(jsonString); // 将 JSON 字符串转为对象
+
+// =================================================================================
+// 2. 核心功能函数 (Core Functions)
+// =================================================================================
+
+/**
+ * 获取应用配置
+ * @returns {string} - JSON 格式的应用配置
+ */
+async function getConfig() {
+    return jsonify(appConfig);
+}
+
+/**
+ * 获取分类下的视频卡片列表 (电影或剧集)
+ * @param {string} args - JSON 字符串，包含 'url' 和 'page'
+ * @returns {string} - JSON 格式的视频列表
+ */
+async function getCards(args) {
+    const { url, page = 1 } = argsify(args);
+    let targetUrl = url;
+
+    // 根据页码调整 URL
+    if (page === 1) {
+        targetUrl = url.replace('-p-{page}', '');
+    } else {
+        targetUrl = url.replace('{page}', page);
+    }
+
+    // 发起 HTTP 请求获取页面 HTML
+    const { data: html } = await $fetch.get(targetUrl, { headers });
+    const $ = cheerio.load(html);
+    const videoList = [];
+
+    // 使用 Cheerio 解析 HTML，提取视频信息
+    $('div.media').each((index, element) => {
+        const <LaTex>$element = $</LaTex>(element);
+        videoList.push({
+            'vod_id': $element.find('a.cover-link').attr('href'),
+            'vod_name': $element.find('p').text(),
+            'vod_pic': appConfig.site + $element.find('img.lazyload').attr('data-src'),
+            'vod_remarks': '',
+            'ext': {
+                'url': appConfig.site + $element.find('a.cover-link').attr('href'),
+                'id': $element.find('a.cover-link').attr('href').replace('/play/', '').replace('.html', '')
+            }
+        });
+    });
+
+    return jsonify({ 'list': videoList });
+}
+
+/**
+ * 获取视频的播放列表 (Tracks)
+ * @param {string} args - JSON 字符串，包含视频详情页的 'url' 和 'id'
+ * @returns {string} - JSON 格式的播放列表
+ */
+async function getTracks(args) {
+    const { url, id } = argsify(args);
+    const playList = [];
+
+    // 1. 访问视频详情页，获取加密播放列表所需参数
+    const { data: html } = await $fetch.get(url, { headers });
+    const $ = cheerio.load(html);
+
+    const currentId = $('#current_id').val(); // 视频ID
+    const currentKey = $('#current_key').val(); // 解密密钥的一部分
+    const mtype = $('#mtype').val(); // 媒体类型
+
+    if (!currentId || !currentKey) return;
+
+    // 2. 解密算法，从 currentKey 中提取真正的密钥
+    const keyLength = currentId.length;
+    const keySuffix = currentId.substring(keyLength - 4, keyLength);
+    let decodedParts = [];
+
+    let tempKey = currentKey;
+    for (let i = 0; i < keySuffix.length; i++) {
+        const digit = parseInt(keySuffix[i]);
+        const startIndex = (digit % 3) + 1;
+        decodedParts[i] = tempKey.substring(startIndex, startIndex + 8);
+        tempKey = tempKey.substring(startIndex + 8);
+    }
+    const finalKey = decodedParts.join('');
+
+    // 3. 构建请求播放列表的 API URL
+    const apiUrl = `/api/get_player_list?id=<LaTex>${id}&mtype=$</LaTex>{mtype}&key=${finalKey}`;
+    const fullApiUrl = appConfig.site + apiUrl;
+
+    // 4. 请求 API 获取播放列表数据
+    const { data: apiResponse } = await $fetch.get(fullApiUrl, { headers });
+    const playData = parseJsonIfString(apiResponse).data.pl;
+    const sources = [];
+
+    // 5. 解析播放列表数据
+    playData.forEach((source, index) => {
+        sources.push(`线路${index + 1}`);
+        const trackGroup = {
+            'title': sources[index],
+            'tracks': []
+        };
+        parseJsonIfString(source.v).forEach((episode) => {
+            trackGroup.tracks.push({
+                'name': episode.url.split('$')[0],
+                'ext': { 'url': episode.url.split('$')[1] }
+            });
+        });
+        playList.push(trackGroup);
+    });
+
+    return jsonify({ 'list': playList });
+}
+
+/**
+ * 获取最终的播放信息 (m3u8 地址)
+ * @param {string} args - JSON 字符串，包含播放页的 'url'
+ * @returns {string} - JSON 格式的播放信息
+ */
+async function getPlayinfo(args) {
+    const { url } = argsify(args);
+    return jsonify({ 'urls': [url] });
+}
+
+/**
+ * 搜索视频
+ * @param {string} args - JSON 字符串，包含搜索关键词 'wd'
+ * @returns {string} - JSON 格式的搜索结果列表
+ */
+async function search(args) {
+    const { wd } = argsify(args);
+    const searchResults = [];
+    const encodedKeyword = encodeURIComponent(wd);
+
+    // 构建搜索 URL
+    const searchUrl = `<LaTex>${appConfig.site}/search?q=$</LaTex>{encodedKeyword}`;
+
+    // 获取搜索结果页面
+    const { data: html } = await $fetch.get(searchUrl, { headers });
+    const $ = cheerio.load(html);
+
+    // 解析搜索结果
+    $('div.media').each((index, element) => {
+        const <LaTex>$element = $</LaTex>(element);
+        searchResults.push({
+            'vod_id': $element.find('div.media-left a.cover-link').attr('href'),
+            'vod_name': $element.find('h5.title a').text(),
+            'vod_pic': $element.find('img.lazyload').attr('data-src'),
+            'vod_remarks': $element.find('p.other-info').text(),
+            'ext': {
+                'url': appConfig.site + $element.find('div.media-left a.cover-link').attr('href'),
+                'id': $element.find('div.media-left a.cover-link').attr('href').replace('/play/', '').replace('.html', '')
+            }
+        });
+    });
+
+    return jsonify({ 'list': searchResults });
+}
+
+/**
+ * 辅助函数：如果输入是字符串，则解析为 JSON
+ * @param {any} data
+ * @returns {object | any}
+ */
+function parseJsonIfString(data) {
+    if (typeof data === 'string') {
+        try {
+            return JSON.parse(data);
+        } catch (e) {
+            console.error('Invalid JSON string', e);
+            return null;
+        }
+    }
+    return data;
+}
