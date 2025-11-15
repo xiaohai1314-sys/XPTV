@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - 完整版（精准分页 + 统一海报 + 稳定兼容）
+// 描述: “趣乐兔”搜索插件 - 完整版（精准分页 + 统一海报 + 稳定兼容 + 分页锁）
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.1.7:3005/search";
@@ -35,13 +35,28 @@ async function getConfig() {
     });
 }
 
-// ================== 核心：搜索（精准分页版） ==================
+// ================== 分页锁记录 ==================
+let SEARCH_END = {};   // 记录某个关键词是否已经确定只有一页
+
+// ================== 核心：搜索（精准分页版 + 分页锁） ==================
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || "";
     const page = parseInt(ext.page || 1);
 
     if (!keyword) return jsonify({ list: [] });
+
+    // 如果以前已经判定该关键词只有 1 页，则永远不让翻页
+    if (SEARCH_END[keyword]) {
+        log(`[search] 关键词 "${keyword}" 已锁定为单页`);
+        return jsonify({
+            list: [],
+            page: 1,
+            pagecount: 1,
+            pages: 1,
+            hasmore: false
+        });
+    }
 
     const url = `${API_ENDPOINT}?keyword=${encodeURIComponent(keyword)}&page=${page}`;
     log(`[search] 请求 URL: ${url}`);
@@ -69,9 +84,13 @@ async function search(ext) {
             ext: { pan_url: item.url }
         }));
 
-        // ======= 精准分页 =======
-        // 你后端 pageSize 固定为 20 → list 满 20 = 有下一页
-        const hasMore = (list.length === pageSize);
+        // ======= 分页锁判定 =======
+        if (list.length < pageSize) {
+            SEARCH_END[keyword] = true;  // 当前页不足 → 说明只有1页
+            log(`[search] 关键词 "${keyword}" 仅有一页，已锁定`);
+        }
+
+        const hasMore = !SEARCH_END[keyword];
 
         log(`[search] 当前页数量 = ${list.length}, hasMore = ${hasMore}`);
 
