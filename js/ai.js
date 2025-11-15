@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - 完整版（精准分页 + 统一海报 + 稳定兼容 + 分页锁）
+// 描述: “趣乐兔”搜索插件 - 完整版（分类优化 + 精准分页 + 单页锁 + 多页稳定 + 统一海报）
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.1.7:3005/search";
@@ -7,7 +7,7 @@ const SITE_URL = "https://pan.funletu.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
 
-// ★★★ 使用你指定的海报图片 ★★★
+// 默认海报
 const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
@@ -30,15 +30,18 @@ async function getConfig() {
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
-            { name: "搜索", ext: {} }
+            { 
+                name: "搜索", 
+                ext: { type: 3 }  // 指定搜索类型，App可识别
+            }
         ]
     });
 }
 
 // ================== 分页锁记录 ==================
-let SEARCH_END = {};   // 记录某个关键词是否已经确定只有一页
+let SEARCH_END = {};   // 记录单页关键词
 
-// ================== 核心：搜索（精准分页版 + 分页锁） ==================
+// ================== 核心搜索函数 ==================
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || "";
@@ -46,9 +49,9 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // 如果以前已经判定该关键词只有 1 页，则永远不让翻页
-    if (SEARCH_END[keyword]) {
-        log(`[search] 关键词 "${keyword}" 已锁定为单页`);
+    // 已锁定单页，且请求页 >1，阻止翻页
+    if (SEARCH_END[keyword] && page > 1) {
+        log(`[search] 关键词 "${keyword}" 已锁定单页，阻止翻页`);
         return jsonify({
             list: [],
             page: 1,
@@ -75,22 +78,22 @@ async function search(ext) {
         const list = resp.data.list;
         const pageSize = 20;
 
-        // ======= 格式化 UI 卡片 =======
+        // 格式化卡片
         const cards = list.map(item => ({
             vod_id: item.url,
             vod_name: item.title,
-            vod_pic: POSTER_DEFAULT,       // ★ 统一海报
+            vod_pic: POSTER_DEFAULT,
             vod_remarks: item.size || "",
             ext: { pan_url: item.url }
         }));
 
-        // ======= 分页锁判定 =======
-        if (list.length < pageSize) {
-            SEARCH_END[keyword] = true;  // 当前页不足 → 说明只有1页
+        // 单页锁逻辑：只锁第一页不足 pageSize
+        if (page === 1 && list.length < pageSize) {
+            SEARCH_END[keyword] = true;
             log(`[search] 关键词 "${keyword}" 仅有一页，已锁定`);
         }
 
-        const hasMore = !SEARCH_END[keyword];
+        const hasMore = list.length === pageSize && !SEARCH_END[keyword];
 
         log(`[search] 当前页数量 = ${list.length}, hasMore = ${hasMore}`);
 
@@ -134,10 +137,12 @@ async function init() { return getConfig(); }
 async function home() {
     const cfg = await getConfig();
     const tabs = JSON.parse(cfg).tabs;
+    // 返回分类信息，保证 App 能渲染
     return jsonify({ class: tabs, filters: {} });
 }
 
 async function category() {
+    // 空分类列表也保持标准格式
     return jsonify({ list: [] });
 }
 
