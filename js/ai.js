@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - 完整版（分类优化 + 精准分页 + 单页锁 + 多页稳定 + 统一海报）
+// 描述: “趣乐兔”搜索插件 - 稳定版（首页分类 + 单页锁 + 搜索切换清理）
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.1.7:3005/search";
@@ -7,7 +7,7 @@ const SITE_URL = "https://pan.funletu.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
 
-// 默认海报
+// 固定占位海报
 const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
@@ -30,16 +30,14 @@ async function getConfig() {
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
-            { 
-                name: "搜索", 
-                ext: { type: 3 }  // 指定搜索类型，App可识别
-            }
+            { name: "搜索", ext: { text: "" } } // 改为 text 字段，防止转圈
         ]
     });
 }
 
 // ================== 分页锁记录 ==================
 let SEARCH_END = {};   // 记录单页关键词
+let LAST_KEYWORD = ""; // 记录上一次搜索关键词
 
 // ================== 核心搜索函数 ==================
 async function search(ext) {
@@ -48,6 +46,13 @@ async function search(ext) {
     const page = parseInt(ext.page || 1);
 
     if (!keyword) return jsonify({ list: [] });
+
+    // --- 搜索切换时清理锁 ---
+    if (keyword !== LAST_KEYWORD) {
+        SEARCH_END = {};
+        LAST_KEYWORD = keyword;
+        log(`[search] 检测到新关键词 "${keyword}"，已清理锁`);
+    }
 
     // 已锁定单页，且请求页 >1，阻止翻页
     if (SEARCH_END[keyword] && page > 1) {
@@ -78,7 +83,7 @@ async function search(ext) {
         const list = resp.data.list;
         const pageSize = 20;
 
-        // 格式化卡片
+        // 格式化卡片，统一占位海报
         const cards = list.map(item => ({
             vod_id: item.url,
             vod_name: item.title,
@@ -137,12 +142,10 @@ async function init() { return getConfig(); }
 async function home() {
     const cfg = await getConfig();
     const tabs = JSON.parse(cfg).tabs;
-    // 返回分类信息，保证 App 能渲染
     return jsonify({ class: tabs, filters: {} });
 }
 
 async function category() {
-    // 空分类列表也保持标准格式
     return jsonify({ list: [] });
 }
 
