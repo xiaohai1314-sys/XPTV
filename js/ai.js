@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (回退到最兼容的 PNG 占位图)
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (使用 Data URI 占位图)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
@@ -7,8 +7,9 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const DEBUG = true;
 const SITE_URL = "https://pan.funletu.com"; 
 
-// ★★★ 最终占位图：使用最兼容的 PNG 格式 (120x160 尺寸) ★★★
-const PLACEHOLDER_PIC = "https://placehold.co/120x160/2563eb/ffffff/png?text=趣乐兔"; 
+// ★★★ 核心修复：使用 Base64 编码的 1x1 像素透明 PNG Data URI ★★★
+// 这是一个最小化的有效图片占位符，可以最大限度地避免网络和安全问题。
+const PLACEHOLDER_PIC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="; 
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -73,7 +74,7 @@ async function search(ext) {
             return {
                 vod_id: item.url, 
                 vod_name: item.title,
-                // 使用最兼容的 PNG 占位图
+                // 使用 Data URI 占位图
                 vod_pic: PLACEHOLDER_PIC, 
                 vod_remarks: item.size || '未知大小', 
                 ext: { pan_url: item.url } 
