@@ -1,12 +1,14 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (新增海报占位图)
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (根据用户请求使用 favicon.svg 作为占位图)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const DEBUG = true;
-// ★★★ 新增占位图配置，使用标准海报比例 (180x270)，深色背景，突出“趣乐兔”字样 ★★★
-const PLACEHOLDER_PIC = "https://placehold.co/180x270/1f2937/ffffff?text=趣乐兔"; 
+// ★★★ 新增网站基础URL，用于构建 favicon 绝对路径 ★★★
+const SITE_URL = "https://pan.funletu.com"; 
+// ★★★ 根据用户请求，使用网站的 /favicon.svg 作为占位图 ★★★
+const PLACEHOLDER_PIC = `${SITE_URL}/favicon.svg`; 
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -28,7 +30,7 @@ async function getConfig() {
     return jsonify({
         ver: 1.0,
         title: '趣乐兔搜索',
-        site: 'https://pan.funletu.com',
+        site: SITE_URL, // 使用定义的 SITE_URL
         tabs: [{ name: '搜索', ext: {} }],
     });
 }
@@ -70,7 +72,7 @@ async function search(ext) {
             return {
                 vod_id: item.url, 
                 vod_name: item.title,
-                // ▼▼▼ 使用更专业尺寸的占位图 ▼▼▼
+                // ▼▼▼ 使用网站的 favicon.svg 作为占位图 ▼▼▼
                 vod_pic: PLACEHOLDER_PIC, 
                 // ▲▲▲
                 vod_remarks: item.size || '未知大小', 
