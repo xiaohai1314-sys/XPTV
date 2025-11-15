@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (修复翻页和图片空白问题)
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (修复多页和转圈问题)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
@@ -7,8 +7,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const DEBUG = true;
 const SITE_URL = "https://pan.funletu.com"; 
 
-// ★★★ 图片占位：使用空字符串 ""，让宿主应用使用其默认空白占位符 ★★★
-const EMPTY_PIC = ""; 
+// 占位图：回退到网站图标 URL (尽管可能因安全策略失败，但比 Data URI 兼容性好一点)
+const FALLBACK_PIC = `${SITE_URL}/favicon.svg`; 
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -41,9 +41,9 @@ async function search(ext) {
     const searchText = ext.text || '';
     const page = parseInt(ext.page || 1, 10);
 
-    // ★★★ 修复点 1：强制限制只请求第一页 (解决重复请求和转圈问题) ★★★
+    // ★★★ 修复点 1：只允许请求 Page 1，Page > 1 时立即返回空列表以阻止无限翻页和转圈 ★★★
     if (page > 1) {
-        log(`[search] 收到页码 ${page} 请求，返回空列表以停止翻页。`);
+        log(`[search] 收到页码 ${page} 请求，返回空列表以停止翻页和转圈。`);
         return jsonify({ list: [] });
     }
 
@@ -51,6 +51,7 @@ async function search(ext) {
     if (!searchText) return jsonify({ list: [] });
 
     const encodedKeyword = encodeURIComponent(searchText);
+    // 注意：尽管后端 API 可能不处理 page 参数，我们仍传递它以匹配前端逻辑
     const requestUrl = `${API_ENDPOINT}?keyword=${encodedKeyword}&page=${page}`;
     log(`[search] 正在请求自建后端: ${requestUrl}`);
 
@@ -76,15 +77,25 @@ async function search(ext) {
             return {
                 vod_id: item.url, 
                 vod_name: item.title,
-                // ★★★ 修复点 2：使用空字符串作为图片，依赖宿主应用的默认占位符 ★★★
-                vod_pic: EMPTY_PIC, 
+                // ★★★ 占位图：使用 FALLBACK_PIC (网站图标 URL) ★★★
+                vod_pic: FALLBACK_PIC, 
                 vod_remarks: item.size || '未知大小', 
                 ext: { pan_url: item.url } 
             };
         });
 
         log(`[search] ✓ 成功获取并格式化 ${cards.length} 个卡片`);
-        return jsonify({ list: cards });
+        
+        // ★★★ 关键点：返回所有结果，并告诉前端这是最后一页（通过返回空的 Total 属性） ★★★
+        // 由于我们只处理 page=1，这里的 total 属性是可选的，但为了兼容性，我们确保前端认为只有一页
+        return jsonify({ 
+            list: cards,
+            // 确保总数不会触发下一页请求
+            total: cards.length,
+            page: 1,
+            pagecount: 1,
+            limit: cards.length
+        });
 
     } catch (e) {
         log(`[search] ❌ 请求或解析时发生异常: ${e.message}`);
