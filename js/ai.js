@@ -2,7 +2,7 @@
 // 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://192.168.1.7:3005/search"; // ★★★ 指向我们自己的新后端服务 ★★★
+const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const DEBUG = true;
 
@@ -27,7 +27,7 @@ async function getConfig() {
         ver: 1.0,
         title: '趣乐兔搜索',
         site: 'https://pan.funletu.com',
-        tabs: [{ name: '搜索', ext: {} }], // 只有一个无功能的标签页
+        tabs: [{ name: '搜索', ext: {} }],
     });
 }
 
@@ -45,34 +45,36 @@ async function search(ext) {
     log(`[search] 正在请求自建后端: ${requestUrl}`);
 
     try {
-        // 假设 $fetch.get 返回 { data: <后端返回的整个JSON对象> }
-        const { data: backendResponse } = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
-
+        // ★★★ 核心修复点 1：不使用解构，直接获取响应对象 ★★★
+        const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+        
         // 检查后端服务的返回码 (200)
-        if (backendResponse.code !== 200) { 
-            log(`[search] ❌ 后端服务返回错误: code=${backendResponse.code}, msg=${backendResponse.msg}`);
+        if (response.code !== 200) { 
+            log(`[search] ❌ 后端服务返回错误: code=${response.code}, msg=${response.msg}`);
             return jsonify({ list: [] });
         }
 
-        // ★★★ 核心修复点：正确地从 backendResponse.data 中获取 list 数组 ★★★
+        // ★★★ 核心修复点 2：直接从 JSON 对象中获取 data.list ★★★
         // 您的后端JSON结构为 {code: 200, data: {list: [...]}}
-        const results = backendResponse.data?.list; 
+        const results = response.data?.list; 
 
         if (!results || !Array.isArray(results)) {
             log(`[search] ❌ 在返回的JSON中找不到 data.list 数组或数组为空`);
+            // 额外检查：如果 data 存在但 list 不存在，可能是解析问题，打印详细信息
+            if (response.data) {
+                log(`[search] Debug: response.data 存在，但 list 缺失。Keys: ${Object.keys(response.data).join(', ')}`);
+            }
             return jsonify({ list: [] });
         }
         
         // 格式化数据为前端要求的卡片结构
         const cards = results.map(item => {
             return {
-                // 使用网盘链接作为唯一ID
                 vod_id: item.url, 
                 vod_name: item.title,
                 vod_pic: '', 
-                // 备注使用 size 字段
                 vod_remarks: item.size || '未知大小', 
-                ext: { pan_url: item.url } // 将链接也存入ext
+                ext: { pan_url: item.url } 
             };
         });
 
@@ -97,7 +99,6 @@ async function getTracks(ext) {
         return jsonify({ list: [] });
     }
 
-    // 构造标准的资源列表结构
     return jsonify({
         list: [{
             title: '在线资源',
@@ -109,25 +110,21 @@ async function getTracks(ext) {
     });
 }
 
-// --- 兼容接口 (保持原样，仅做简单转发) ---
+// --- 兼容接口 (保持原样) ---
 async function init() { 
     return getConfig(); 
 }
-
 async function home() { 
     const config = await getConfig();
     const tabs = JSON.parse(config).tabs;
     return jsonify({ class: tabs, filters: {} }); 
 }
-
 async function category(tid, pg) { 
     return jsonify({ list: [] }); 
 } 
-
 async function detail(id) { 
     return getTracks({ id: id }); 
 }
-
 async function play(flag, id) { 
     return jsonify({ url: id }); 
 }
