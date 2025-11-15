@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (使用 Data URI 占位图)
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (修复翻页和图片空白问题)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
@@ -7,9 +7,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const DEBUG = true;
 const SITE_URL = "https://pan.funletu.com"; 
 
-// ★★★ 核心修复：使用 Base64 编码的 1x1 像素透明 PNG Data URI ★★★
-// 这是一个最小化的有效图片占位符，可以最大限度地避免网络和安全问题。
-const PLACEHOLDER_PIC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="; 
+// ★★★ 图片占位：使用空字符串 ""，让宿主应用使用其默认空白占位符 ★★★
+const EMPTY_PIC = ""; 
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -42,6 +41,12 @@ async function search(ext) {
     const searchText = ext.text || '';
     const page = parseInt(ext.page || 1, 10);
 
+    // ★★★ 修复点 1：强制限制只请求第一页 (解决重复请求和转圈问题) ★★★
+    if (page > 1) {
+        log(`[search] 收到页码 ${page} 请求，返回空列表以停止翻页。`);
+        return jsonify({ list: [] });
+    }
+
     log(`[search] 搜索关键词: "${searchText}", 页码: ${page}`);
     if (!searchText) return jsonify({ list: [] });
 
@@ -63,9 +68,6 @@ async function search(ext) {
 
         if (!results || !Array.isArray(results)) {
             log(`[search] ❌ 在返回的JSON中找不到 data.list 数组或数组为空`);
-            if (response.data) {
-                log(`[search] Debug: response.data 存在，但 list 缺失。Keys: ${Object.keys(response.data).join(', ')}`);
-            }
             return jsonify({ list: [] });
         }
         
@@ -74,8 +76,8 @@ async function search(ext) {
             return {
                 vod_id: item.url, 
                 vod_name: item.title,
-                // 使用 Data URI 占位图
-                vod_pic: PLACEHOLDER_PIC, 
+                // ★★★ 修复点 2：使用空字符串作为图片，依赖宿主应用的默认占位符 ★★★
+                vod_pic: EMPTY_PIC, 
                 vod_remarks: item.size || '未知大小', 
                 ext: { pan_url: item.url } 
             };
