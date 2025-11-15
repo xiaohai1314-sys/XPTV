@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (JSON解析修正)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
@@ -45,8 +45,11 @@ async function search(ext) {
     log(`[search] 正在请求自建后端: ${requestUrl}`);
 
     try {
-        // ★★★ 核心修复点 1：不使用解构，直接获取响应对象 ★★★
-        const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+        // ★★★ 核心修复点 1：获取包含 JSON 字符串的响应对象 ★★★
+        const { data: jsonString } = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+
+        // ★★★ 核心修复点 2：手动将 JSON 字符串解析为对象 ★★★
+        const response = JSON.parse(jsonString);
         
         // 检查后端服务的返回码 (200)
         if (response.code !== 200) { 
@@ -54,13 +57,11 @@ async function search(ext) {
             return jsonify({ list: [] });
         }
 
-        // ★★★ 核心修复点 2：直接从 JSON 对象中获取 data.list ★★★
-        // 您的后端JSON结构为 {code: 200, data: {list: [...]}}
+        // ★★★ 核心修复点 3：从正确解析后的 JSON 对象中获取 data.list ★★★
         const results = response.data?.list; 
 
         if (!results || !Array.isArray(results)) {
             log(`[search] ❌ 在返回的JSON中找不到 data.list 数组或数组为空`);
-            // 额外检查：如果 data 存在但 list 不存在，可能是解析问题，打印详细信息
             if (response.data) {
                 log(`[search] Debug: response.data 存在，但 list 缺失。Keys: ${Object.keys(response.data).join(', ')}`);
             }
