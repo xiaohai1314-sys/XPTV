@@ -1,349 +1,148 @@
+/**
+ * 趣乐兔 (pan.funletu.com) 专用脚本
+ * 
+ * 功能: 
+ * 1. 使用网站的后端API进行搜索，而非抓取HTML。
+ * 2. 直接从搜索结果获取标题、大小和夸克网盘链接。
+ * 3. 详情页功能被简化，因为搜索已返回所有必要信息。
+ * 
+ * 作者: Manus
+ * 日期: 2025-11-15
+ */
+
+// 必要的库，由运行环境提供
 const cheerio = createCheerio()
+const CryptoJS = createCryptoJS()
 
-// {
-//     "channels": [
-//     "QukanMovie",
-//     "vip115hot",
-//     "dianying4k",
-//     "ysxb48",
-//     "Quark_Movies",
-//     "MCPH03",
-//     "MCPH01",
-//     "MCPH02",
-//     "clouddriveresources",
-//     "Channel_Shares_115",
-//     "dianyingshare",
-//     "shareAliyun",
-//     "quanziyuanshe",
-//     "yydf_hzl",
-//     "tianyirigeng",
-//     "ucquark",
-//     "Aliyun_4K_Movies",
-//     "leoziyuan",
-//     "SharePanFilms",
-//     "kduanju",
-//     "MCPH860",
-//     "shangguandianyingyuan1",
-//     "Resourcesharing",
-//     "baicaoZY",
-//     "MCPH608",
-//     "MCPH086"
-// ],"only":""
-// }
+// 定义一个通用的浏览器User-Agent
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 
-//only是过滤网盘用的，内容为域名的截取，如driver.uc.com，就可以填uc，用英文逗号,分割
-let $config = argsify($config_str)
-const UA = 'MOBILE_UA'
-let appConfig = {
-    ver: 1,
-    title: 'tg搜索',
-    site: 'https://tgs.xptvhelper.link/s/',
-    // tabs: [
-    //     {
-    //         name: '只能搜索',
-    //         ui: 1,
-    //         ext: {
-    //             id: '',
-    //         },
-    //     },
-    // ],
+// 网站和API的基本配置
+const appConfig = {
+  ver: 1,
+  title: "趣乐兔",
+  site: "https://pan.funletu.com",
+  apiUrl: "https://b.funletu.com/search", // API端点
+  tabs: [{
+    name: 'API搜索', // 标签页名称，表明这是基于API的
+    ext: {
+      url: '/'
+    },
+  }]
 }
 
+/**
+ * 获取应用配置
+ */
 async function getConfig() {
-    let config = appConfig
-    config.tabs = []
-    let channels = $config.channels
-    channels.forEach((e) => {
-        config.tabs.push({
-            name: e,
-            // ui: 1,
-            ext: {
-                channel: e,
-            },
-        })
-    })
-    return jsonify(config)
+  return jsonify(appConfig)
 }
 
+/**
+ * 获取首页卡片（此网站首页无动态卡片，返回空列表）
+ */
 async function getCards(ext) {
-    ext = argsify(ext)
-    let cards = []
-    let page = ext.page || 1
-    let url = `${appConfig.site}${ext.channel}`
-    let headers = {
-        'User-Agent': UA,
-    }
-
-    try {
-        if (page > 1) {
-            let config = argsify($cache.get('tgs-card-config'))
-            if (config && config.hasMore) {
-                url = config.nextPage
-                headers['Referer'] = `${appConfig.site}${ext.channel}`
-                headers['X-Requested-With'] = 'XMLHttpRequest'
-            } else
-                return jsonify({
-                    list: cards,
-                })
-        }
-
-        let { data } = await $fetch.get(url, {
-            headers,
-        })
-        if (page > 1) {
-            data = data.slice(1, -1).replaceAll('\\"', '"').replaceAll('\\n', '').replaceAll('\\/', '/')
-        }
-
-        const $ = cheerio.load(data)
-
-        if ($('div.tgme_widget_message_bubble').length === 0) return
-
-        $('div.tgme_widget_message_bubble').each((_, element) => {
-            let title = ''
-            let hrefs = []
-            let cover = ''
-            let remarks = ''
-            try {
-                const html = $(element).find('.tgme_widget_message_text').html().replace(/<b[^>]*>|<\/b>|<a[^>]*>|<\/a>|<mark[^>]*>|<\/mark>|<i[^>]*>|<\/i>|<div[^>]*>|<\/div>/g, '').replace(/【[^】]*】/g, '')
-                html.split('<br>').forEach((e) => {
-                    const titletext = e.trim()
-                    if (/(名称|名字|短剧|资源标题)(：|:)/.test(titletext)) {
-                        title = titletext
-                            .split(/：|:/)[1]
-                            .trim()
-                        //如果第一字符是[则匹配第二个[
-                        if (title.startsWith('[')) {
-                            title = title.split('][')[0].replace('[', '')
-                        } else { title = title.split(/（|\(|\[|(更新?至|全)/)[0] }
-                    } else if (/（|\(|\[|(更新?至|全)/.test(titletext)) {
-                        title = titletext.split(/（|\(|\[|(更新?至|全)/)[0]
-                    } else if (/(.+)\s(更新?至|全)/.test(titletext)) {
-                        title = titletext.split(/更新?至|全/)[0]
-                    } else if (/S\d+/.test(titletext)) {
-                        title = titletext.split('S')[0]
-                    }
-                })
-                title = title.replace(/<b>/, '').replace(/4K.*$/g, '').replace('发行时间', '').replace('描述', '').trim()
-
-
-                $(element)
-                    .find('.tgme_widget_message_text > a')
-                    .each((_, element) => {
-                        const href = $(element).attr('href').replace(/(115\.com)|(anxia\.com)|(115cdn\.com)/, '115.com')
-                        if (href.match(/https:\/\/(.+)\/(s|t)\/(.+)/)) {
-                            hrefs.push(href)
-                        }
-                    })
-                cover = $(element)
-                    .find('.tgme_widget_message_photo_wrap')
-                    .attr('style')
-                    .match(/image\:url\('(.+)'\)/)[1]
-                remarks = hrefs[0].match(/https:\/\/(.+)\/(s|t)\//)[1].replace(/(115\.com)|(anxia\.com)|(115cdn\.com)/, '115')
-                    .replace(/(pan\.quark\.cn)/, '夸克')
-                    .replace(/(drive\.uc\.cn)/, 'UC')
-                    .replace(/(www\.aliyundrive\.com)|(www\.alipan\.com)/, '阿里')
-                    .replace(/(cloud\.189\.cn)/, '天翼')
-                    .trim();
-            } catch (e) {
-                // $utils.toastError(`${ext.channel}搜索失败`)
-            }
-            if (remarks === '') return
-
-            const keys = ($config.only ? $config.only.toLowerCase() : "").split(",").filter(Boolean);
-            let hitRemark = [];
-            if (keys.length) {
-                hrefs = hrefs.filter(h => {
-                    try {
-                        const match = h.match(/^(https?:\/\/)?([^\/:]+)/i);
-                        if (!match) {
-                            return false;
-                        }
-                        const domain = match[2].toLowerCase();
-                        const hit = keys.find(k => domain.includes(k.toLowerCase()));
-                        if (hit && !hitRemark.includes(hit)) {
-                            hitRemark.push(hit);
-                        }
-
-                        return !!hit;
-                    } catch (err) {
-                        return ;
-                    }
-                });
-            }
-            if(hrefs.length>0){
-
-                cards.push({
-                    vod_id: hrefs[0],
-                    vod_name: title,
-                    vod_pic: cover,
-                    vod_remarks: hitRemark.length>0?hitRemark.join('，'):remarks,
-                    ext: {
-                        url: hrefs,
-                        name: title,
-                    },
-                })
-            }
-        })
-
-        let nextPage = $('.js-messages_more_wrap a').attr('href')
-        nextPage = nextPage ? `https://tgs.xptvhelper.link${nextPage}` : ''
-        if (nextPage) {
-            let config = {
-                hasMore: true,
-                nextPage,
-            }
-            $cache.set('tgs-card-config', jsonify(config))
-        } else {
-            $cache.set(
-                'tgs-card-config',
-                jsonify({
-                    hasMore: false,
-                })
-            )
-        }
-        return jsonify({
-            list: cards.reverse(),
-        })
-    } catch (error) {
-        $print(error)
-    }
+  ext = argsify(ext)
+  let cards = []
+  return jsonify({
+    list: cards,
+  })
 }
 
+/**
+ * 获取播放轨道/网盘链接
+ * 
+ * @param {string} ext - 包含网盘链接的扩展参数
+ * 
+ * 说明：
+ * 由于search函数在搜索时已经获取了最终的网盘链接并存储在ext.pan_url中，
+ * 此函数只需直接读取并返回该链接即可，无需再次发起网络请求。
+ */
 async function getTracks(ext) {
-    ext = argsify(ext)
-    let tracks = []
-    let urls = ext.url
-    const name = ext.name
-    urls.forEach((url) => {
-        tracks.push({
-            name: name,
-            pan: url,
-        })
-    })
-    return jsonify({
-        list: [
-            {
-                title: '默认分组',
-                tracks,
-            },
-        ],
-    })
+  const { pan_url } = argsify(ext)
+  
+  if (!pan_url) {
+    return jsonify({ list: [] });
+  }
+
+  return jsonify({ 
+    list: [{
+      title: '在线资源',
+      tracks: [{
+        name: '夸克网盘',
+        pan: pan_url, // 直接使用传入的链接
+      }]
+    }]
+  })
 }
 
+/**
+ * 获取播放信息（此脚本不涉及直接播放，返回空）
+ */
 async function getPlayinfo(ext) {
-    return jsonify({ urls: [] })
+  return jsonify({
+    urls: [],
+  })
 }
 
+/**
+ * 搜索功能实现
+ * 
+ * @param {string} ext - 包含搜索文本(text)和页码(page)的参数
+ * 
+ * 说明：
+ * 此函数通过向网站的后端API发送一个POST请求来获取搜索结果。
+ */
 async function search(ext) {
-    ext = argsify(ext)
-    let cards = []
-    let page = ext.page || 1
-    if (page > 1) {
-        return jsonify({
-            list: [],
-        })
-    }
-    let text = encodeURIComponent(ext.text)
-    const requests = $config.channels.map(async (channel) => {
-        const url = `${appConfig.site}${channel}?q=${text}`;
-        try {
-            const { data } = await $fetch.get(url, {
-                headers: {
-                    'User-Agent': UA,
-                },
-            });
-            const $ = cheerio.load(data)
-            if ($('div.tgme_widget_message_bubble').length === 0) return
-            $('div.tgme_widget_message_bubble').each((_, element) => {
-                let title = ''
-                let hrefs = []
-                let cover = ''
-                let remarks = ''
-                try {
-                    const html = $(element).find('.tgme_widget_message_text').html().replace(/<b[^>]*>|<\/b>|<a[^>]*>|<\/a>|<mark[^>]*>|<\/mark>|<i[^>]*>|<\/i>|<div[^>]*>|<\/div>/g, '').replace(/【[^】]*】/g, '')
-                    html.split('<br>').forEach((e) => {
-                        const titletext = e.trim()
-                        if (/(名称|名字|短剧|资源标题)(：|:)/.test(titletext)) {
-                            title = titletext
-                                .split(/：|:/)[1]
-                                .trim()
-                            //如果第一字符是[则匹配第二个[
-                            if (title.startsWith('[')) {
-                                title = title.split('][')[0].replace('[', '')
-                            } else { title = title.split(/（|\(|\[|(更新?至|全)/)[0] }
-                        } else if (/（|\(|\[|(更新?至|全)/.test(titletext)) {
-                            title = titletext.split(/（|\(|\[|(更新?至|全)/)[0]
-                        } else if (/(.+)\s(更新?至|全)/.test(titletext)) {
-                            title = titletext.split(/更新?至|全/)[0]
-                        } else if (/S\d+/.test(titletext)) {
-                            title = titletext.split('S')[0]
-                        }
-                    })
-                    title = title.replace(/<b>/, '').replace(/4K.*$/g, '').replace('发行时间', '').replace('描述', '').trim()
+  ext = argsify(ext)
+  const page = ext.page || 1;
 
-                    $(element)
-                        .find('.tgme_widget_message_text > a')
-                        .each((_, element) => {
-                            const href = $(element).attr('href').replace(/(115\.com)|(anxia\.com)|(115cdn\.com)/, '115.com')
-                            if (href.match(/https:\/\/(.+)\/(s|t)\/(.+)/)) {
-                                hrefs.push(href)
-                            }
-                        })
-                    cover = $(element)
-                        .find('.tgme_widget_message_photo_wrap')
-                        .attr('style')
-                        .match(/image\:url\('(.+)'\)/)[1]
-                    remarks = hrefs[0].match(/https:\/\/(.+)\/(s|t)\//)[1].replace(/(115\.com)|(anxia\.com)|(115cdn\.com)/, '115')
-                        .replace(/(pan\.quark\.cn)/, '夸克')
-                        .replace(/(drive\.uc\.cn)/, 'UC')
-                        .replace(/(www\.aliyundrive\.com)|(www\.alipan\.com)/, '阿里')
-                        .replace(/(cloud\.189\.cn)/, '天翼')
-                        .trim();
-                } catch (e) {
-                    //$utils.toastError(`${channel}搜索失败`)
-                }
-                if (remarks === '') return
-                const keys = ($config.only ? $config.only.toLowerCase() : "").split(",").filter(Boolean);
-                let hitRemark = [];
-                if (keys.length) {
-                    hrefs = hrefs.filter(h => {
-                        try {
-                            const match = h.match(/^(https?:\/\/)?([^\/:]+)/i);
-                            if (!match) {
-                                return false;
-                            }
-                            const domain = match[2].toLowerCase();
-                            const hit = keys.find(k => domain.includes(k.toLowerCase()));
-                            if (hit && !hitRemark.includes(hit)) {
-                                hitRemark.push(hit);
-                            }
-                            return !!hit;
-                        } catch (err) {
-                            return ;
-                        }
-                    });
-                }
-                if(hrefs.length>0){
-                    cards.push({
-                        vod_id: hrefs[0],
-                        vod_name: title,
-                        vod_pic: cover,
-                        vod_remarks: hitRemark.length>0?hitRemark.join('，'):remarks,
-                        vod_duration: channel,
-                        ext: {
-                            url: hrefs,
-                            name: title,
-                        },
-                    })
-                }
-            })
-        } catch (error) {
-            //
-        }
+  // 构建发送给API的请求体 (Payload)
+  const payload = {
+    keyword: ext.text,
+    page: page,
+    pageSize: 20, // 每页加载20条数据
+    sortBy: "sort",
+    order: "desc",
+    filetypeid: 0,
+    categoryid: 0,
+    courseid: 1,
+    offset: 0
+  };
 
+  // 定义请求头
+  const headers = {
+    'Content-Type': 'application/json',
+    'Origin': appConfig.site,
+    'Referer': appConfig.site + '/',
+    'User-Agent': UA,
+  };
+
+  // 使用$fetch.post方法发起API请求
+  const { data: responseJson } = await $fetch.post(appConfig.apiUrl, {
+    headers: headers,
+    body: payload, // 将 payload 作为请求体
+  });
+
+  const cards = [];
+  // 检查API返回的数据是否有效
+  if (responseJson && responseJson.code === 200 && responseJson.data && responseJson.data.list) {
+    responseJson.data.list.forEach(item => {
+      cards.push({
+        // vod_id 使用网盘链接或唯一ID均可，这里用ID更规范
+        vod_id: JSON.stringify({ pan_url: item.url }), 
+        vod_name: item.title,
+        vod_pic: '', // 网站API不提供图片
+        vod_remarks: item.size || '未知大小', // 将文件大小作为备注
+        ext: {
+          // 将网盘链接存到ext中，方便getTracks直接使用
+          pan_url: item.url, 
+        },
+      });
     });
-    await Promise.all(requests);
-    return jsonify({
-        list: cards,
-    })
+  }
+
+  return jsonify({
+      list: cards,
+  });
 }
