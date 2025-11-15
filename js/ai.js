@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - 稳定版（首页分类 + 单页锁 + 搜索切换清理）
+// 描述: “趣乐兔”搜索插件 - 彻底修正版（首页不转圈 + 锁优化）
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.1.7:3005/search";
@@ -30,14 +30,14 @@ async function getConfig() {
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
-            { name: "搜索", ext: { text: "" } } // 改为 text 字段，防止转圈
+            { name: "搜索", ext: { text: "", id: 1, type: 3 } } // 加 id/type 确保 App 分类识别
         ]
     });
 }
 
 // ================== 分页锁记录 ==================
 let SEARCH_END = {};   // 记录单页关键词
-let LAST_KEYWORD = ""; // 记录上一次搜索关键词
+let LAST_KEYWORD = ""; // 上一次搜索关键词
 
 // ================== 核心搜索函数 ==================
 async function search(ext) {
@@ -47,16 +47,16 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // --- 搜索切换时清理锁 ---
+    // 搜索切换时清理锁
     if (keyword !== LAST_KEYWORD) {
         SEARCH_END = {};
         LAST_KEYWORD = keyword;
-        log(`[search] 检测到新关键词 "${keyword}"，已清理锁`);
+        log(`[search] 新关键词 "${keyword}"，清理锁`);
     }
 
-    // 已锁定单页，且请求页 >1，阻止翻页
+    // 已锁定单页且请求页>1，阻止翻页
     if (SEARCH_END[keyword] && page > 1) {
-        log(`[search] 关键词 "${keyword}" 已锁定单页，阻止翻页`);
+        log(`[search] 关键词 "${keyword}" 单页锁生效，阻止翻页`);
         return jsonify({
             list: [],
             page: 1,
@@ -83,7 +83,7 @@ async function search(ext) {
         const list = resp.data.list;
         const pageSize = 20;
 
-        // 格式化卡片，统一占位海报
+        // 格式化卡片，固定占位海报
         const cards = list.map(item => ({
             vod_id: item.url,
             vod_name: item.title,
@@ -92,15 +92,15 @@ async function search(ext) {
             ext: { pan_url: item.url }
         }));
 
-        // 单页锁逻辑：只锁第一页不足 pageSize
-        if (page === 1 && list.length < pageSize) {
+        // 锁定逻辑：当前页不足 pageSize → 单页/末页锁定
+        if (list.length < pageSize) {
             SEARCH_END[keyword] = true;
-            log(`[search] 关键词 "${keyword}" 仅有一页，已锁定`);
+            log(`[search] 关键词 "${keyword}" 单页或末页锁定`);
         }
 
         const hasMore = list.length === pageSize && !SEARCH_END[keyword];
 
-        log(`[search] 当前页数量 = ${list.length}, hasMore = ${hasMore}`);
+        log(`[search] 当前页数量=${list.length}, hasMore=${hasMore}`);
 
         return jsonify({
             list: cards,
@@ -142,7 +142,8 @@ async function init() { return getConfig(); }
 async function home() {
     const cfg = await getConfig();
     const tabs = JSON.parse(cfg).tabs;
-    return jsonify({ class: tabs, filters: {} });
+    // filters 返回固定结构，避免 App 二次请求触发转圈
+    return jsonify({ class: tabs, filters: { all: [] } });
 }
 
 async function category() {
