@@ -32,7 +32,12 @@ return jsonify({
 ver: 1.1,
 title: ‘趣乐兔搜索’,
 site: SITE_URL,
-tabs: [{ name: ‘搜索’, ext: {} }],
+// ★★★ 修复2：tabs 需要包含 type_id 和 type_name 字段 ★★★
+tabs: [{
+type_id: ‘1’,
+type_name: ‘搜索’,
+ext: {}
+}],
 });
 }
 
@@ -139,15 +144,22 @@ async function init() {
 return getConfig();
 }
 
-// ★★★ 修复2：home() 返回有效的默认分类，避免转圈 ★★★
+// ★★★ 修复2：home() 返回正确格式的分类 ★★★
 async function home() {
-log(’[home] 返回默认分类’);
-return jsonify({
-class: [
-{ type_id: ‘search’, type_name: ‘搜索’ }
-],
-filters: {}
-});
+log(’[home] 返回主页分类’);
+const config = await getConfig();
+const configObj = JSON.parse(config);
+const tabs = configObj.tabs || [];
+
+```
+log(`[home] 返回 ${tabs.length} 个分类`);
+
+return jsonify({ 
+    class: tabs, 
+    filters: {} 
+}); 
+```
+
 }
 
 async function category(tid, pg) {
