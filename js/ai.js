@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 修复版（仅修复占位图和页数问题）
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (修复多页和转圈问题)
 
 // — 配置区 —
 const API_ENDPOINT = “http://192.168.1.7:3005/search”;
@@ -7,7 +7,7 @@ const UA = ‘Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 const DEBUG = true;
 const SITE_URL = “https://pan.funletu.com”;
 
-// ★★★ 修复1：使用 Base64 编码的透明 1x1 像素图片作为占位图，避免蓝色问号 ★★★
+// ★★★ 修复1：使用透明的 Base64 图片作为占位图，避免显示蓝色问号 ★★★
 const FALLBACK_PIC = “data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=”;
 
 // — 辅助函数 —
@@ -42,13 +42,13 @@ const searchText = ext.text || ‘’;
 const page = parseInt(ext.page || 1, 10);
 
 ```
-// ★★★ 修复2：只允许请求 Page 1，Page > 1 时立即返回空列表以阻止无限翻页 ★★★
+// ★★★ 修复2：只允许请求 Page 1，Page > 1 时立即返回空列表以阻止无限翻页和转圈 ★★★
 if (page > 1) {
-    log(`[search] 收到页码 ${page} 请求，返回空列表以停止翻页。`);
+    log(`[search] 收到页码 ${page} 请求，返回空列表以停止翻页和转圈。`);
     return jsonify({ 
         list: [],
         page: page,
-        pagecount: 1,  // 明确告知总共只有1页
+        pagecount: 1,
         limit: 0,
         total: 0
     });
@@ -58,6 +58,7 @@ log(`[search] 搜索关键词: "${searchText}", 页码: ${page}`);
 if (!searchText) return jsonify({ list: [] });
 
 const encodedKeyword = encodeURIComponent(searchText);
+// 注意：尽管后端 API 可能不处理 page 参数，我们仍传递它以匹配前端逻辑
 const requestUrl = `${API_ENDPOINT}?keyword=${encodedKeyword}&page=${page}`;
 log(`[search] 正在请求自建后端: ${requestUrl}`);
 
@@ -83,7 +84,7 @@ try {
         return {
             vod_id: item.url, 
             vod_name: item.title,
-            // ★★★ 修复1：使用透明占位图，避免显示蓝色问号 ★★★
+            // ★★★ 修复1：使用透明占位图 ★★★
             vod_pic: FALLBACK_PIC, 
             vod_remarks: item.size || '未知大小', 
             ext: { pan_url: item.url } 
@@ -92,13 +93,13 @@ try {
 
     log(`[search] ✓ 成功获取并格式化 ${cards.length} 个卡片`);
     
-    // ★★★ 修复2：明确返回 pagecount: 1，告诉前端只有一页数据 ★★★
+    // ★★★ 修复2：返回所有结果，并明确告诉前端这是最后一页 ★★★
     return jsonify({ 
         list: cards,
+        total: cards.length,
         page: 1,
-        pagecount: 1,      // 关键：明确只有1页
-        limit: cards.length,
-        total: cards.length
+        pagecount: 1,
+        limit: cards.length
     });
 
 } catch (e) {
