@@ -1,10 +1,12 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (JSON解析修正)
+// 描述: “趣乐兔”专属前端插件，纯搜索功能 - 最终修复版 (新增海报占位图)
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.7:3005/search"; 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const DEBUG = true;
+// ★★★ 新增占位图配置，使用标准海报比例 (180x270)，深色背景，突出“趣乐兔”字样 ★★★
+const PLACEHOLDER_PIC = "https://placehold.co/180x270/1f2937/ffffff?text=趣乐兔"; 
 
 // --- 辅助函数 ---
 function log(msg) { 
@@ -45,19 +47,14 @@ async function search(ext) {
     log(`[search] 正在请求自建后端: ${requestUrl}`);
 
     try {
-        // ★★★ 核心修复点 1：获取包含 JSON 字符串的响应对象 ★★★
         const { data: jsonString } = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
-
-        // ★★★ 核心修复点 2：手动将 JSON 字符串解析为对象 ★★★
         const response = JSON.parse(jsonString);
         
-        // 检查后端服务的返回码 (200)
         if (response.code !== 200) { 
             log(`[search] ❌ 后端服务返回错误: code=${response.code}, msg=${response.msg}`);
             return jsonify({ list: [] });
         }
 
-        // ★★★ 核心修复点 3：从正确解析后的 JSON 对象中获取 data.list ★★★
         const results = response.data?.list; 
 
         if (!results || !Array.isArray(results)) {
@@ -73,7 +70,9 @@ async function search(ext) {
             return {
                 vod_id: item.url, 
                 vod_name: item.title,
-                vod_pic: '', 
+                // ▼▼▼ 使用更专业尺寸的占位图 ▼▼▼
+                vod_pic: PLACEHOLDER_PIC, 
+                // ▲▲▲
                 vod_remarks: item.size || '未知大小', 
                 ext: { pan_url: item.url } 
             };
