@@ -1,72 +1,75 @@
 /**
- * Nullbr 影视库前端插件 - V4.0 (最终正确版)
+ * Nullbr 影视库前端插件 - V9.1 (V1.0 终极精简版)
  *
  * 最终架构:
- * 1. home() 的职责：返回【分类(class)】和【一个空的列表(list)】。
- *    - 返回 class 是为了让 App 渲染 Tab。
- *    - 返回空的 list 是为了满足 App 对 home() 返回值的结构要求。
- *    - home() 绝不进行任何网络请求。
- * 2. category() 的职责：根据 App 传递的 tid 获取真实的影视列表。
- *    - App 在渲染完 Tab 后，会立即自动调用 category() 来填充首页列表。
- *    - 用户点击 Tab 或翻页时，也会调用 category()。
+ * 1. home() 函数严格、一字不差地回归到 V1.0 的正确实现。
+ * 2. category() 函数被彻底简化，移除了 getCards 中间层，直接负责网络请求，
+ *    并增加了最强的容错逻辑来处理任何可能的 tid 格式。
+ * 3. 这是对 V1.0 的最终修正，旨在解决 `id=undefined` 的唯一问题。
  *
  * 作者: Manus
  * 日期: 2025-11-16
  */
 
 // --- 核心配置区 ---
-const API_BASE_URL = 'http://192.168.1.7:3003'; // 【重要】请再次确认此 IP
+const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
-function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V4.0] ${message}`); }
-
-// --- 分类定义 (V3.0 的正确格式) ---
-const CATEGORIES = [
-    { name: '热门电影', ext: { id: 2142788 } },
-    { name: '热门剧集', ext: { id: 2143362 } },
-    { name: '高分电影', ext: { id: 2142753 } },
-    { name: '高分剧集', ext: { id: 2143363 } },
-];
+function jsonify(data) { return JSON.stringify(data); }
+function log(message) { console.log(`[Nullbr插件 V9.1] ${message}`); }
 
 // --- App 插件入口函数 ---
 
-async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 4.0, title: 'Nullbr影视库', site: API_BASE_URL, tabs: CATEGORIES }); }
-
-// ★★★★★【最终修正的 home() 函数】★★★★★
-async function home() {
-    log("home() 被调用，返回分类和一个空列表...");
-    
-    // 1. 准备分类数据 (使用 App 需要的正确结构)
-    const classData = CATEGORIES.map(c => ({
-        "cate_id": c.ext.id.toString(),
-        "cate_name": c.name
-    }));
-
-    // 2. 返回 class 和一个空的 list
+// getConfig 和 init 保持 V1.0 的样子
+async function init(ext) { return getConfig(); }
+async function getConfig() {
+    log("初始化插件配置...");
+    const categories = [
+        { name: '热门电影', ext: { id: 2142788 } },
+        { name: '热门剧集', ext: { id: 2143362 } },
+        { name: '高分电影', ext: { id: 2142753 } },
+        { name: '高分剧集', ext: { id: 2143363 } },
+    ];
     return jsonify({
-        'class': classData,
-        'list': [], // 返回一个空列表！
-        'filters': {}
+        ver: 9.1,
+        title: 'Nullbr影视库',
+        site: API_BASE_URL,
+        tabs: categories,
     });
 }
 
-// ★★★★★【最终修正的 category() 函数】★★★★★
-async function category(tid, pg, filter, ext) {
-    log(`category() 被调用: tid=${tid}, pg=${pg}`);
+// home() 严格保持 V1.0 的样子
+async function home() {
+    log("home() 被调用，获取分类...");
+    const config = JSON.parse(await getConfig());
+    return jsonify({
+        class: config.tabs,
+        filters: {}
+    });
+}
+
+// ★★★★★【category() 函数 - 终极简化与容错】★★★★★
+async function category(tid, pg) {
+    log(`category() 被调用: tid 的原始值是 <LaTex>${JSON.stringify(tid)}, 类型是 $</LaTex>{typeof tid}`);
     
-    // App 首次加载列表时，会自动用第一个分类的 ID 调用此函数
-    const categoryId = tid;
-    const page = pg || 1;
-
-    if (!categoryId) {
-        log("警告: category() 收到的 tid 为空，这不应该发生在 V4.0 架构中。返回空列表。");
-        return jsonify({ list: [] });
+    let categoryId;
+    // 增加最强的容错逻辑，应对任何可能的 tid 格式
+    if (typeof tid === 'object' && tid !== null && tid.id) {
+        categoryId = tid.id; // 格式: { id: 2142788 }
+    } else if (typeof tid === 'string' || typeof tid === 'number') {
+        categoryId = tid; // 格式: 2142788 或 "2142788"
+    } else {
+        // 如果 tid 是 undefined, null, 或者其他意外格式，则使用默认值
+        log("警告: tid 格式未知或为空，使用默认分类 ID。");
+        const config = JSON.parse(await getConfig());
+        categoryId = config.tabs[0].ext.id;
     }
+    
+    const page = pg || 1;
+    log(`解析后的 categoryId: <LaTex>${categoryId}, page: $</LaTex>{page}`);
 
-    const requestUrl = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
+    const requestUrl = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{categoryId}&page=${page}`;
     log(`正在请求后端: ${requestUrl}`);
 
     try {
@@ -78,11 +81,11 @@ async function category(tid, pg, filter, ext) {
         }
 
         const cards = data.items.map(item => {
-            const vod_id = `${item.media_type}_${item.tmdbid}`;
+            const vod_id = `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`;
             return {
                 vod_id: vod_id,
                 vod_name: item.title,
-                vod_pic: `${TMDB_IMAGE_BASE_URL}${item.poster}`,
+                vod_pic: `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}`,
                 vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '未知'),
             };
         });
