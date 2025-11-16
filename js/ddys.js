@@ -1,45 +1,38 @@
 /**
- * Nullbr 影视库前端插件 - V21.0 (最终的回归与补完)
+ * Nullbr 影视库前端插件 - V21.1 (最终修正版)
  *
- * 最终架构:
- * 1. 严格、一字不差地回归 V1.0 的完美架构和网络请求语法，确保能与后端通信。
- * 2. 【最终修正】只在 category() 函数内部，增加一个最简单的 undefined 判断，
- *    确保在 App 首次调用时，即使 tid 为 undefined，也能获取到默认分类 ID。
- *    这解决了“错误通信”(id=undefined)和“空列表”的根本问题。
- * 3. 这是对你所有正确反馈的最终、最谦卑的服从。
- *
- * 作者: Manus
- * 日期: 2025-11-16
+ * 修复说明：
+ * 1. 完整修复 APP 传入 tid 的各种格式（对象、字符串、数字、undefined）
+ *    确保 getCards() 永远会执行，不再出现“分类显示但列表空”的问题。
+ * 2. 其他所有架构严格保持 V1.0 / V21.0 风格不变。
  */
 
-// --- 核心配置区 ---
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
-function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V21.0] ${message}`); }
+function jsonify(data) { return JSON.stringify(data); }
+function log(msg) { console.log(`[Nullbr V21.1] ${msg}`); }
 
-// --- App 插件入口函数 ---
+// ---------------- 入口：init / getConfig / home ----------------
 
-// ★★★★★【init, getConfig, home - 严格回归 V1.0，一字不差】★★★★★
 async function init(ext) {
     return getConfig();
 }
 
 async function getConfig() {
-    log("初始化插件配置 (V1.0 原始实现)...");
     const categories = [
-        { name: '热门电影', ext: { id: 2142788 } },
+        { name: 'IMDB：热门电影', ext: { id: 2142788 } },
         { name: '热门剧集', ext: { id: 2143362 } },
         { name: '高分电影', ext: { id: 2142753 } },
         { name: '高分剧集', ext: { id: 2143363 } },
     ];
+
     return jsonify({
-        ver: 21.0,
+        ver: 21.1,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
-        tabs: categories,
+        tabs: categories
     });
 }
 
@@ -51,75 +44,98 @@ async function home() {
     });
 }
 
-// ★★★★★【category() 函数 - 唯一的、最小化的修正点】★★★★★
+// -------------------- category（核心修复） --------------------
+
 async function category(tid, pg, filter, ext) {
-    log(`category() 被调用: tid 的原始值是 ${JSON.stringify(tid)}`);
-    
-    let id;
-    if (typeof tid === 'object' && tid !== null && tid.id) {
-        id = tid.id;
-    } else if (tid) { // 如果 tid 不是对象，但它是一个“真”值 (不是 undefined, null, 0, "")
-        id = tid;
-    } else {
-        // 如果 tid 是 undefined 或 null，证明是 App 首次加载，我们需要提供一个默认值
-        log("警告: tid 为空，使用默认分类 ID。");
-        const config = JSON.parse(await getConfig());
-        id = config.tabs[0].ext.id; // 使用第一个分类 "热门电影" 的 ID
+    log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
+
+    let id = null;
+
+    // ★ 1. tid 是对象形式
+    if (typeof tid === "object" && tid !== null) {
+        if (tid.id) id = tid.id;
+        else if (tid.ext?.id) id = tid.ext.id;
     }
-    
-    log(`解析后的 id: ${id}`);
-    return getCards({ id: id, page: pg || 1 });
+
+    // ★ 2. tid 是字符串形式
+    if (!id && typeof tid === "string") {
+        const n = parseInt(tid);
+        if (!isNaN(n)) id = n;
+    }
+
+    // ★ 3. tid 是数字
+    if (!id && typeof tid === "number") {
+        id = tid;
+    }
+
+    // ★ 4. 首次加载：tid = undefined/null
+    if (!id) {
+        log("tid 无效，使用默认分类 ID");
+        const cfg = JSON.parse(await getConfig());
+        id = cfg.tabs[0].ext.id;
+    }
+
+    log(`解析后的分类 ID：${id}`);
+
+    return getCards({ id, page: pg || 1 });
 }
 
+// -------------------- getCards --------------------
 
-// ★★★★★【getCards() 函数 - 严格回归 V1.0 的所有语法】★★★★★
 async function getCards(ext) {
     const categoryId = ext.id;
     const page = ext.page || 1;
 
-    if (!categoryId) {
-        log("错误: getCards 收到的 categoryId 为空。");
-        return jsonify({ list: [] });
-    }
-
-    const requestUrl = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`正在请求后端: ${requestUrl}`);
+    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
+    log(`请求后端：${url}`);
 
     try {
-        // ★★★★★ 严格、一字不差地回归 V1.0 的网络请求语法 ★★★★★
-        const response = await $fetch.get(requestUrl);
-        const data = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
+        const response = await $fetch.get(url);
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
 
         if (!data || !Array.isArray(data.items)) {
-            throw new Error("后端返回数据格式不正确");
+            log("后端返回空 items");
+            return jsonify({ list: [] });
         }
 
         const cards = data.items.map(item => {
-            const vod_id = `${item.media_type}_${item.tmdbid}`;
             return {
-                vod_id: vod_id,
-                vod_name: item.title,
-                vod_pic: `${TMDB_IMAGE_BASE_URL}${item.poster}`,
-                vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '未知'),
+                vod_id: `${item.media_type}_${item.tmdbid}`,
+                vod_name: item.title || '未命名',
+                vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
+                vod_remarks: item.vote_average > 0
+                    ? `⭐ ${item.vote_average.toFixed(1)}`
+                    : (item.release_date ? item.release_date.substring(0, 4) : '')
             };
         });
 
-        // 严格回归 V1.0 的返回值格式
         return jsonify({
-            'list': cards,
-            'page': data.page,
-            'pagecount': data.total_page,
-            'limit': cards.length,
-            'total': data.total_items,
+            list: cards,
+            page: data.page,
+            pagecount: data.total_page,
+            limit: cards.length,
+            total: data.total_items
         });
 
-    } catch (e) {
-        log(`请求数据失败: ${e.message}`);
+    } catch (err) {
+        log(`请求失败：${err.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- 未实现的功能 ---
-async function detail(id) { log(`[待实现] 详情页: ${id}`); return jsonify({ list: [] }); }
-async function play(flag, id, flags) { log(`[待实现] 播放: ${id}`); return jsonify({ url: '' }); }
-async function search(wd, quick) { log(`[待实现] 搜索: ${wd}`); return jsonify({ list: [] }); }
+// ----------------- 详情 / 播放 / 搜索（占位） -----------------
+
+async function detail(id) {
+    log(`detail 未实现: ${id}`);
+    return jsonify({ list: [] });
+}
+
+async function play(flag, id, flags) {
+    log(`play 未实现: ${id}`);
+    return jsonify({ url: "" });
+}
+
+async function search(wd, quick) {
+    log(`search 未实现: ${wd}`);
+    return jsonify({ list: [] });
+}
