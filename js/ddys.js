@@ -1,5 +1,5 @@
 // --- 配置区 ---
-const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
+const MY_BACKEND_URL = "http://192.168.1.3:3003/api"; // 【重要】请确认这是您新后端的地址
 // 强制使用 HTTPS 基础 URL
 const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
 // 替代图片 URL (用于数据中缺少 poster 字段时)
@@ -7,7 +7,7 @@ const FALLBACK_PIC = 'https://placehold.co/500x750/3498db/ffffff?text=No+Poster'
 const DEBUG = true;
 
 // --- 辅助函数 ---
-function log(msg) { if (DEBUG) console.log(`[插件V6.8] ${msg}`); }
+function log(msg) { if (DEBUG) console.log(`[插件V6.9] ${msg}`); }
 
 // 强化解析函数，处理字符串、对象或 null/undefined
 function argsify(ext) { 
@@ -106,16 +106,17 @@ async function getCards(params) {
 
 // 规范函数1: getConfig (用于初始化)
 async function getConfig() {
-    log("==== 插件初始化 V6.8 (终极兼容性修复 - 恢复图片) ====");
+    log("==== 插件初始化 V6.9 (修复分类Tab不显示问题) ====");
     // 分类在这里写死
+    // 修复点: 确保 ext 字段是 JSON 字符串，以兼容更多 APP 插件加载器
     const CATEGORIES = [
-        { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
-        { name: 'IMDb-热门剧集', ext: { listId: 2143362 } },
-        { name: 'IMDb-高分电影', ext: { listId: 2142753 } },
-        { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
+        { name: 'IMDb-热门电影', ext: jsonify({ listId: 2142788 }) },
+        { name: 'IMDb-热门剧集', ext: jsonify({ listId: 2143362 }) },
+        { name: 'IMDb-高分电影', ext: jsonify({ listId: 2142753 }) },
+        { name: 'IMDb-高分剧集', ext: jsonify({ listId: 2143363 }) }
     ];
     return jsonify({
-        ver: 6.8,
+        ver: 6.9,
         title: '影视聚合(API)',
         site: MY_BACKEND_URL,
         tabs: CATEGORIES,
@@ -131,7 +132,8 @@ async function home() {
 
 // 规范函数3: category (APP调用以获取分类下的内容)
 async function category(tid, pg) {
-    const ext = argsify(tid);
+    // 这里的 argsify(tid) 会把 getConfig 中 stringified 的 ext 重新解析回对象
+    const ext = argsify(tid); 
     const listId = ext.listId;
     
     if (!listId) {
