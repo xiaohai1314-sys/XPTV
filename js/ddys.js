@@ -1,11 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V26.0 (最终的、目标明确的修复版)
+ * Nullbr 影视库前端插件 - V27.0 (最健壮的防御性修正版)
  *
  * 目标:
  * 1. 保持 home() 不变，确保分类 Tab 正常显示。
- * 2. 修复 category() 逻辑，使其能正确处理 App 传入的分类名称字符串 (tid="热门剧集")。
- * 3. 修复 getCards() 中致命的 <LaTex> 语法错误，确保脚本能运行。
- * 4. 彻底解决分类内容重复的问题。
+ * 2. 【核心修复】在 category() 中对传入的 tid 字符串进行 .trim() 清理，
+ * 以对抗 App 环境可能引入的不可见字符或空格，确保 ID 查找成功。
+ * 3. 修复 getCards() 中致命的 <LaTex> 语法错误。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -16,7 +16,7 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V26.0] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V27.0] ${msg}`); }
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -33,7 +33,7 @@ async function init(ext) {
 
 async function getConfig() {
     return jsonify({
-        ver: 26.0,
+        ver: 27.0,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: CATEGORIES
@@ -43,18 +43,18 @@ async function getConfig() {
 // 保持 home() 不变，确保分类 Tab 正常显示。
 async function home() {
     return jsonify({
-        class: CATEGORIES, // App 识别这个格式来绘制 Tab
+        class: CATEGORIES, 
         filters: {}
     });
 }
 
-// -------------------- category（修复分类重复的逻辑） --------------------
+// -------------------- category（对传入字符串进行清理） --------------------
 
 async function category(tid, pg, filter, ext) {
     log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
     let id = null;
 
-    // 1. 尝试解析 Object 或 Number (如 App 传入了 type_id 或 ext 对象)
+    // 1. 尝试解析 Object 或 Number
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
         else if (tid.ext?.id) id = tid.ext.id;
@@ -62,25 +62,29 @@ async function category(tid, pg, filter, ext) {
         id = tid;
     }
     
-    // 2. ★★★ 核心修复：处理 App 传入的分类名称字符串 (如 "热门剧集") ★★★
+    // 2. ★★★ 核心修复：处理字符串，并进行防御性清理 ★★★
     if (!id && typeof tid === "string") {
-        // 2a. 尝试解析为数字 (万一 tid 是 "2142788")
-        const n = parseInt(tid);
+        const trimmedTid = tid.trim(); // <-- 清除字符串前后的空格和不可见字符
+
+        // 2a. 尝试解析为数字 (如果 tid 是 "2142788")
+        const n = parseInt(trimmedTid);
         if (!isNaN(n)) {
             id = n;
         } else {
-            // 2b. tid 是一个名称，手动查找 ID
-            const foundCategory = CATEGORIES.find(cat => cat.name === tid);
+            // 2b. tid 是一个分类名称，手动查找 ID
+            const foundCategory = CATEGORIES.find(cat => cat.name === trimmedTid);
             if (foundCategory) {
                 id = foundCategory.ext.id;
-                log(`category()：找到匹配的 ID ${id}，对应分类 "${tid}"`);
+                log(`category()：防御性查找成功，ID ${id}，对应分类 "${trimmedTid}"`);
+            } else {
+                log(`category()：防御性查找失败。传入的清理后名称为: "${trimmedTid}"`);
             }
         }
     }
 
     // 3. 最终回退
     if (!id) {
-        log("category()：所有解析均失败，使用默认分类 ID");
+        log("category()：所有解析均失败，回退到第一个默认分类 ID");
         id = CATEGORIES[0].ext.id;
     }
 
@@ -119,10 +123,8 @@ async function getCards(ext) {
         }
         const cards = data.items.map(item => {
             return {
-                // ★★★ 语法修正 ★★★
                 vod_id: `${item.media_type}_${item.tmdbid}`,
                 vod_name: item.title || '未命名',
-                // ★★★ 语法修正 ★★★
                 vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
                 vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
             };
