@@ -1,145 +1,162 @@
-// --- 配置区 ---
-const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
-const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
-const FALLBACK_PIC = 'https://img.tukuppt.com/png_preview/00/42/01/P5kFr2sEwJ.jpg';
-const DEBUG = true;
+/**
+ * Nullbr 影视库前端插件 - V1.0
+ *
+ * 功能:
+ * 1. 实现分类 Tab 展示 (热门/高分电影、热门/高分剧集)。
+ * 2. 实现从后端加载并展示对应分类的影视列表。
+ *
+ * 作者: Manus
+ * 日期: 2025-11-16
+ */
 
-// --- 辅助函数 (与您原版一致) ---
-function log(msg) { if (DEBUG) console.log(`[插件V7.0-最终修正版] ${msg}`); }
-function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
-function jsonify(data) { return JSON.stringify(data); }
+// --- 核心配置区 ---
+// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+// 【重要】请将此地址替换为你的后端服务实际运行的 IP 和端口
+const API_BASE_URL = 'http://192.168.1.7:3003';
 
-// --- 核心数据获取与格式化函数 ---
-async function getCards(params) {
-    let requestUrl;
-    let context;
+// TMDB 图片服务器地址，用于拼接海报路径
+const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-    if (params.listId) {
-        context = 'Category';
-        requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
-    } else if (params.keyword) {
-        context = 'Search';
-        requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}&page=${params.page || 1}`;
-    } else {
-        return jsonify({ list: [] });
-    }
 
-    log(`[${context}] 正在请求后端: ${requestUrl}`);
-    try {
-        const { data } = await $fetch.get(requestUrl);
-        if (!data || !Array.isArray(data.items)) {
-            log(`[${context}] ⚠️ 后端返回数据格式不正确，返回空列表。`);
-            return jsonify({ list: [] });
-        }
+// --- 辅助函数 ---
 
-        const cards = data.items.map(item => ({
-            vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
-            vod_name: item.title,
-            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
-            vod_remarks: item.release_date || item.vote_average?.toFixed(1) || '',
-            ext: { tmdbid: item.tmdbid, type: item.media_type }
-        }));
-
-        const pagecount = data.total_page || data.total_pages || 1;
-        const page = data.page || params.page || 1;
-
-        log(`[${context}] ✓ 成功格式化 ${cards.length} 个卡片 (第${page}页/共${pagecount}页)`);
-        return jsonify({
-            page: page,
-            pagecount: pagecount,
-            list: cards
-        });
-
-    } catch (e) {
-        log(`[${context}] ❌ 请求或处理数据时发生异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
+/**
+ * 将 JavaScript 对象转换为 JSON 字符串。
+ * @param {object} data - 需要转换的对象。
+ * @returns {string} - JSON 字符串。
+ */
+function jsonify(data) {
+    return JSON.stringify(data);
 }
 
-// --- APP 插件入口函数 ---
+/**
+ * 打印日志，方便调试。
+ * @param {string} message - 要打印的信息。
+ */
+function log(message) {
+    console.log(`[Nullbr插件] ${message}`);
+}
 
-// 规范函数1: getConfig
+
+// --- App 插件入口函数 ---
+
+/**
+ * App 启动时调用此函数，用于获取插件的基本信息和分类 Tab。
+ * @returns {Promise<string>} - 返回包含配置信息的 JSON 字符串。
+ */
 async function getConfig() {
-    log("==== 插件初始化 V7.0 ====");
-    const CATEGORIES = [
-        { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
-        { name: 'IMDb-热门剧集', ext: { listId: 2143362 } },
-        { name: 'IMDb-高分电影', ext: { listId: 2142753 } },
-        { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
+    log("初始化插件配置 (V1.0)...");
+
+    // 根据你提供的 ID 和名称创建分类数组
+    const categories = [
+        { name: '热门电影', ext: { id: 2142788 } },
+        { name: '热门剧集', ext: { id: 2143362 } },
+        { name: '高分电影', ext: { id: 2142753 } },
+        { name: '高分剧集', ext: { id: 2143363 } },
     ];
+
+    // 返回 App 需要的 JSON 格式
     return jsonify({
-        ver: 7.0,
-        title: '影视聚合(API)',
-        site: MY_BACKEND_URL,
-        tabs: CATEGORIES,
+        ver: 1.0,                   // 插件版本号
+        title: 'Nullbr影视库',      // 插件显示在顶部的名称
+        site: API_BASE_URL,         // 关联的网站地址，这里指向我们的后端
+        tabs: categories,           // App会根据这个数组生成底部的Tab按钮
     });
 }
 
-// 规范函数2: home
-async function home() {
-    const c = await getConfig();
-    const config = JSON.parse(c);
-    return jsonify({ class: config.tabs, filters: {} });
-}
+/**
+ * App 在用户点击分类 Tab 或在列表末尾上滑翻页时调用此函数。
+ * @param {object} ext - 从 getConfig 的 tabs 中传递过来的对象，例如 { id: 2142788, page: 1 }。
+ * @returns {Promise<string>} - 返回包含影视列表的 JSON 字符串。
+ */
+async function getCards(ext) {
+    const categoryId = ext.id;
+    const page = ext.page || 1; // App 翻页时会提供新的 page 值
 
-// 规范函数3: category
-async function category(tid, pg) {
-    const listId = tid.listId;
-    log(`[category] APP请求分类, listId: ${listId}, page: ${pg}`);
-    return getCards({ listId: listId, page: pg || 1 });
-}
+    // 构造请求后端 /api/list 接口的完整 URL
+    const requestUrl = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{categoryId}&page=${page}`;
+    log(`正在请求分类数据: ${requestUrl}`);
 
-// 规范函数4: search
-async function search(ext) {
-    ext = argsify(ext);
-    const searchText = ext.text || '';
-    const page = parseInt(ext.page || 1, 10);
-
-    if (!searchText) return jsonify({ list: [] });
-
-    log(`[search] APP请求搜索, keyword: "${searchText}", page: ${page}`);
-    return getCards({ keyword: searchText, page: page });
-}
-
-// 规范函数5: detail
-async function detail(id) {
-    log(`[detail] APP请求详情, vod_id: ${id}`);
     try {
-        const { tmdbid, type } = JSON.parse(id);
-        if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
+        // 使用 App 环境提供的 $fetch 工具发起网络请求
+        // 假设 $fetch 返回的对象中，响应体在 data 属性里
+        const response = await $fetch.get(requestUrl);
+        const data = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
 
-        const requestUrl = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
-        log(`[detail] 正在请求后端: ${requestUrl}`);
-        
-        const { data } = await $fetch.get(requestUrl);
-        if (!data || !Array.isArray(data['115'])) {
-            throw new Error("后端未返回有效的115资源列表");
+        if (!data || !Array.isArray(data.items)) {
+            throw new Error("返回的数据格式不正确，缺少 items 数组。");
         }
 
-        const tracks = data['115'].map(item => ({
-            name: `[115] ${item.title} (${item.size})`,
-            pan: item.share_link,
-            ext: {}
-        }));
+        // 将后端返回的 items 数组，转换成 App 需要的卡片(vod)格式
+        const cards = data.items.map(item => {
+            // 构造一个唯一的 vod_id，格式为 "类型_tmdbid"，例如 "movie_1062722"
+            // 这样做可以方便在详情页(detail)中解析出 type 和 tmdbid
+            const vod_id = `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`;
 
-        log(`[detail] ✓ 成功解析出 ${tracks.length} 个115网盘链接`);
+            return {
+                vod_id: vod_id,
+                vod_name: item.title,
+                vod_pic: `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}`,
+                // 在卡片右上角显示的备注信息，优先显示评分，否则显示上映年份
+                vod_remarks: item.vote_average > 0
+                    ? `⭐ ${item.vote_average.toFixed(1)}`
+                    : (item.release_date ? item.release_date.substring(0, 4) : '未知'),
+            };
+        });
+
+        // 返回 App 需要的完整格式
         return jsonify({
-            list: [{ title: '115网盘资源', tracks: tracks }]
+            list: cards,
+            page: data.page,            // 当前页码
+            pagecount: data.total_page, // 总页数，用于告知 App 是否还有下一页
+            limit: cards.length,        // 当前页返回的数量
+            total: data.total_items,    // 总项目数
         });
 
     } catch (e) {
-        log(`[detail] ❌ 获取详情时发生异常: ${e.message}`);
+        log(`请求分类 <LaTex>${categoryId} 失败: $</LaTex>{e.message}`);
+        // 如果发生错误，返回一个空列表，避免 App 崩溃
         return jsonify({ list: [] });
     }
 }
 
-// 规范函数6: play
-async function play(flag, id) {
-    log(`[play] APP请求播放, URL: ${id}`);
-    return jsonify({ url: id });
+
+// --- 兼容接口和未实现的功能 ---
+// 这些是 App 可能调用的其他标准函数，我们先提供一个基本框架。
+
+async function init(ext) {
+    // init 通常只是调用 getConfig
+    return getConfig();
 }
 
-// 规范函数7: init
-async function init() {
-    return getConfig();
+async function home() {
+    // home 接口通常用于提供分类和筛选数据
+    const config = JSON.parse(await getConfig());
+    return jsonify({
+        class: config.tabs,
+        filters: {} // 暂时没有筛选功能
+    });
+}
+
+async function category(tid, pg, filter, ext) {
+    // category 接口是 getCards 的另一种调用方式
+    const id = (typeof tid === 'object') ? tid.id : tid;
+    return getCards({ id: id, page: pg || 1 });
+}
+
+// 以下功能待实现
+async function detail(id) {
+    log(`[待实现] 请求详情页: ${id}`);
+    return jsonify({ list: [] });
+}
+
+async function play(flag, id, flags) {
+    log(`[待实现] 请求播放: ${id}`);
+    return jsonify({ url: '' });
+}
+
+async function search(wd, quick) {
+    log(`[待实现] 搜索: ${wd}`);
+    return jsonify({ list: [] });
 }
