@@ -1,90 +1,36 @@
 // ============================================
 // 影视聚合插件 - 调试版
-// 版本: v6.3.1
-// 更新日期: 2024-11-16
-// 功能: 支持分类浏览、搜索、资源获取、可视化调试
+// 版本: v6.4.0
+// 基于您原来可用的代码结构
 // ============================================
 
-// --- 配置区 ---
-const PLUGIN_VERSION = "6.3.1";
+const PLUGIN_VERSION = "6.4.0";
 const MY_BACKEND_URL = "http://192.168.1.7:3003/api";
 const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
 const FALLBACK_PIC = 'https://img.tukuppt.com/png_preview/00/42/01/P5kFr2sEwJ.jpg';
+const DEBUG = true;
 
 // --- 调试日志收集器 ---
 const debugLogs = [];
 function log(msg) { 
-    const logMsg = `[v${PLUGIN_VERSION}][${new Date().toLocaleTimeString()}] ${msg}`;
-    console.log(logMsg);
-    debugLogs.push(logMsg);
-    if (debugLogs.length > 50) debugLogs.shift();
+    if (DEBUG) {
+        const logMsg = `[v${PLUGIN_VERSION}][${new Date().toLocaleTimeString()}] ${msg}`;
+        console.log(logMsg);
+        debugLogs.push(logMsg);
+        if (debugLogs.length > 50) debugLogs.shift();
+    }
 }
 
-// --- 辅助函数 ---
+function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
 
-// --- 分类映射表 ---
-const CATEGORY_MAP = {
-    '1': { name: 'IMDb-热门电影', listId: 2142788 },
-    '2': { name: 'IMDb-热门剧集', listId: 2143362 },
-    '3': { name: 'IMDb-高分电影', listId: 2142753 },
-    '4': { name: 'IMDb-高分剧集', listId: 2143363 },
-    'debug': { name: '🐛调试日志', debug: true }
-};
+// --- 核心数据获取与格式化函数 ---
 
-// --- 核心数据获取函数 ---
-async function getCards(params) {
-    let requestUrl;
-    let context;
-
-    if (params.listId) {
-        context = 'Category';
-        requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
-    } else if (params.keyword) {
-        context = 'Search';
-        requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}`;
-    } else {
-        log(`[getCards] 参数不足`);
-        return jsonify({ list: [] });
-    }
-
-    log(`[${context}] 请求: ${requestUrl}`);
-    
-    try {
-        const response = await $fetch.get(requestUrl);
-        log(`[${context}] 收到响应，类型: ${typeof response}`);
-        
-        const data = response.data || response;
-        
-        if (!data.items || !Array.isArray(data.items)) {
-            log(`[${context}] 错误: 无items数组，keys: ${Object.keys(data).join(',')}`);
-            return jsonify({ list: [] });
-        }
-
-        log(`[${context}] 找到 ${data.items.length} 项`);
-        
-        const cards = data.items.map(item => ({
-            vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
-            vod_name: item.title || '未知',
-            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
-            vod_remarks: item.release_date || (item.vote_average ? `${item.vote_average.toFixed(1)}分` : ''),
-        }));
-
-        log(`[${context}] 成功返回 ${cards.length} 个卡片`);
-        return jsonify({ list: cards });
-
-    } catch (e) {
-        log(`[${context}] 异常: ${e.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-// --- 生成调试卡片 ---
+// 生成调试卡片列表
 function getDebugCards() {
     log('[Debug] 生成调试卡片');
     const cards = [];
     
-    // 添加测试按钮
     cards.push({
         vod_id: 'test_category',
         vod_name: '📋 测试：加载分类数据',
@@ -99,7 +45,6 @@ function getDebugCards() {
         vod_remarks: '点击测试',
     });
     
-    // 添加日志
     debugLogs.forEach((logMsg, index) => {
         cards.push({
             vod_id: `debug_${index}`,
@@ -112,134 +57,143 @@ function getDebugCards() {
     return jsonify({ list: cards });
 }
 
-// --- APP 插件入口函数 ---
+// 内部函数：获取卡片列表（被 category 和 search 调用）
+async function getCards(params) {
+    let requestUrl;
+    let context;
 
-async function getConfig() {
-    log("[getConfig] 被调用");
-    
-    const tabs = [];
-    for (let id in CATEGORY_MAP) {
-        tabs.push({
-            name: CATEGORY_MAP[id].name,
-            ext: { listId: CATEGORY_MAP[id].listId, debug: CATEGORY_MAP[id].debug }
-        });
+    if (params.listId) {
+        context = 'Category';
+        requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
+    } else if (params.keyword) {
+        context = 'Search';
+        requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}`;
+    } else {
+        log('[getCards] 参数错误');
+        return jsonify({ list: [] });
     }
+
+    log(`[${context}] 请求: ${requestUrl}`);
+    try {
+        const response = await $fetch.get(requestUrl);
+        log(`[${context}] 响应类型: ${typeof response}, keys: ${Object.keys(response).join(',')}`);
+        
+        // 关键修复：处理response的不同结构
+        let data;
+        if (response.data && response.data.items) {
+            data = response.data;
+            log(`[${context}] 使用 response.data`);
+        } else if (response.items) {
+            data = response;
+            log(`[${context}] 使用 response 本身`);
+        } else {
+            log(`[${context}] ❌ 找不到items, 完整响应: ${JSON.stringify(response).substring(0, 300)}`);
+            return jsonify({ list: [] });
+        }
+        
+        if (!Array.isArray(data.items)) {
+            log(`[${context}] ❌ items不是数组: ${typeof data.items}`);
+            return jsonify({ list: [] });
+        }
+
+        log(`[${context}] 找到 ${data.items.length} 条数据`);
+
+        const cards = data.items.map(item => ({
+            vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
+            vod_name: item.title,
+            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
+            vod_remarks: item.release_date || item.vote_average?.toFixed(1) || '',
+        }));
+
+        log(`[${context}] ✓ 返回 ${cards.length} 个卡片`);
+        return jsonify({ list: cards });
+
+    } catch (e) {
+        log(`[${context}] ❌ 异常: ${e.message}`);
+        log(`[${context}] ❌ Stack: ${e.stack}`);
+        return jsonify({ list: [] });
+    }
+}
+
+// --- APP 插件入口函数 (严格遵循规范) ---
+
+// 规范函数1: getConfig (用于初始化)
+async function getConfig() {
+    log("==== getConfig 被调用 ====");
+    // 分类在这里写死
+    const CATEGORIES = [
+        { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
+        { name: 'IMDb-热门剧集', ext: { listId: 2143362 } },
+        { name: 'IMDb-高分电影', ext: { listId: 2142753 } },
+        { name: 'IMDb-高分剧集', ext: { listId: 2143363 } },
+        { name: '🐛调试日志', ext: { debug: true } }
+    ];
     
-    log(`[getConfig] 返回 ${tabs.length} 个标签`);
+    log(`getConfig 返回 ${CATEGORIES.length} 个分类`);
     
     return jsonify({
         ver: PLUGIN_VERSION,
-        title: `影视聚合(调试v${PLUGIN_VERSION})`,
+        title: `影视聚合v${PLUGIN_VERSION}`,
         site: MY_BACKEND_URL,
-        tabs: tabs
+        tabs: CATEGORIES,
     });
 }
 
-async function init(cfg) {
-    log(`[init] ========== 插件初始化 v${PLUGIN_VERSION} ==========`);
-    return getConfig();
+// 规范函数2: home (APP调用以获取分类)
+async function home() {
+    log("==== home 被调用 ====");
+    const c = await getConfig();
+    const config = JSON.parse(c);
+    return jsonify({ class: config.tabs, filters: {} });
 }
 
-async function home(filter) {
-    log("[home] 被调用");
+// 规范函数3: category (APP调用以获取分类下的内容)
+async function category(tid, pg) {
+    log(`[category] tid=${JSON.stringify(tid)}, pg=${pg}`);
     
-    const classes = [];
-    for (let id in CATEGORY_MAP) {
-        classes.push({
-            type_id: id,
-            type_name: CATEGORY_MAP[id].name
-        });
-    }
+    // tid 就是 getConfig 中定义的 ext 对象
+    const ext = argsify(tid);
     
-    log(`[home] 返回 ${classes.length} 个分类: ${classes.map(c => c.type_name).join(', ')}`);
-    
-    return jsonify({ 
-        class: classes,
-        filters: {} 
-    });
-}
-
-async function category(tid, pg, filter, extend) {
-    log(`[category] 被调用 - tid="${tid}", pg="${pg}"`);
-    
-    const catInfo = CATEGORY_MAP[String(tid)];
-    
-    if (!catInfo) {
-        log(`[category] 未找到分类: ${tid}`);
-        return jsonify({ list: [] });
-    }
-    
-    log(`[category] 分类: ${catInfo.name}`);
-    
-    // 特殊处理：调试分类
-    if (catInfo.debug) {
+    // 调试分类
+    if (ext.debug) {
+        log('[category] 返回调试日志');
         return getDebugCards();
     }
     
-    // 特殊处理：测试按钮（从详情页点进来的）
-    if (tid === 'test_category_action') {
-        log('[Test] 执行测试分类请求');
-        await getCards({ listId: 2142788, page: 1 });
-        return getDebugCards();
-    }
-    
-    log(`[category] listId=${catInfo.listId}, page=${pg || 1}`);
-    return getCards({ listId: catInfo.listId, page: pg || 1 });
+    const listId = ext.listId;
+    log(`[category] listId: ${listId}, page: ${pg || 1}`);
+    return getCards({ listId: listId, page: pg || 1 });
 }
 
-async function search(wd, quick, pg) {
-    log(`[search] 被调用`);
-    log(`[search] 参数wd类型="${typeof wd}", 值="${String(wd).substring(0, 100)}"`);
-    log(`[search] 参数quick="${quick}", pg="${pg}"`);
+// 规范函数4: search (APP调用以获取搜索结果)
+async function search(ext) {
+    log(`[search] 收到参数: ${JSON.stringify(ext)}`);
     
-    let keyword = '';
-    let page = 1;
-    
-    // 多种参数解析方式
-    if (typeof wd === 'string' && wd && wd !== 'undefined') {
-        try {
-            const parsed = JSON.parse(wd);
-            keyword = parsed.wd || parsed.text || parsed.keyword || '';
-            page = parseInt(parsed.pg || parsed.page || 1, 10);
-            log(`[search] JSON解析成功: keyword="${keyword}"`);
-        } catch (e) {
-            keyword = wd;
-            page = parseInt(pg || 1, 10);
-            log(`[search] 直接使用字符串: keyword="${keyword}"`);
-        }
-    } else if (typeof wd === 'object' && wd) {
-        keyword = wd.wd || wd.text || wd.keyword || '';
-        page = parseInt(wd.pg || wd.page || 1, 10);
-        log(`[search] 对象解析: keyword="${keyword}"`);
-    }
-    
+    ext = argsify(ext);
+    const searchText = ext.text || '';
+    const page = parseInt(ext.page || 1, 10);
+
+    // nullbr 的搜索API似乎不支持分页，只响应第一页
     if (page > 1) {
-        log(`[search] 页码>1，返回空列表`);
+        log(`[search] 页码 > 1，返回空列表以停止。`);
         return jsonify({ list: [] });
     }
-    
-    if (!keyword) {
-        log(`[search] 关键词为空！`);
-        return jsonify({ list: [] });
-    }
+    if (!searchText) return jsonify({ list: [] });
 
-    log(`[search] 开始搜索: "${keyword}"`);
-    return getCards({ keyword: keyword });
+    log(`[search] 搜索关键词: "${searchText}"`);
+    return getCards({ keyword: searchText });
 }
 
+// 规范函数5: detail (APP调用以获取详情和播放列表)
 async function detail(id) {
-    log(`[detail] 被调用 - id="${id}"`);
+    log(`[detail] vod_id: ${id}`);
     
-    // 特殊处理：测试按钮
+    // 处理测试按钮
     if (id === 'test_category') {
         log('[Test] 执行分类测试');
         await getCards({ listId: 2142788, page: 1 });
-        // 返回一个假的详情，让用户点返回后去看调试日志
         return jsonify({
-            list: [{
-                vod_play_from: '测试完成',
-                vod_play_url: '返回查看调试日志$https://example.com'
-            }]
+            list: [{ title: '测试完成，返回查看调试日志', tracks: [] }]
         });
     }
     
@@ -247,66 +201,54 @@ async function detail(id) {
         log('[Test] 执行搜索测试');
         await getCards({ keyword: '黄飞鸿' });
         return jsonify({
-            list: [{
-                vod_play_from: '测试完成',
-                vod_play_url: '返回查看调试日志$https://example.com'
-            }]
+            list: [{ title: '测试完成，返回查看调试日志', tracks: [] }]
         });
     }
     
-    // 调试日志条目
+    // 处理调试日志条目
     if (String(id).startsWith('debug_')) {
         return jsonify({
-            list: [{
-                vod_play_from: '调试信息',
-                vod_play_url: '这是日志记录$https://example.com'
-            }]
+            list: [{ title: '调试信息', tracks: [] }]
         });
     }
     
     try {
         const { tmdbid, type } = JSON.parse(id);
-        
-        if (!tmdbid || !type) {
-            log(`[detail] vod_id格式错误`);
-            return jsonify({ list: [] });
-        }
+        if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
 
         const requestUrl = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
-        log(`[detail] 请求资源: ${requestUrl}`);
+        log(`[detail] 正在请求后端: ${requestUrl}`);
         
-        const response = await $fetch.get(requestUrl);
-        const data = response.data || response;
-        
+        const { data } = await $fetch.get(requestUrl);
         if (!data['115'] || !Array.isArray(data['115'])) {
-            log(`[detail] 无115资源`);
-            return jsonify({ list: [] });
+            throw new Error("后端未返回有效的115资源列表");
         }
 
         const tracks = data['115'].map(item => ({
             name: `[115] ${item.title} (${item.size})`,
             pan: item.share_link,
+            ext: {}
         }));
 
-        log(`[detail] 找到 ${tracks.length} 个资源`);
-        
+        log(`[detail] ✓ 成功解析出 ${tracks.length} 个115网盘链接`);
         return jsonify({
-            list: [{
-                vod_play_from: '115网盘',
-                vod_play_url: tracks.map(t => `${t.name}$${t.pan}`).join('#')
-            }]
+            list: [{ title: '115网盘资源', tracks: tracks }]
         });
 
     } catch (e) {
-        log(`[detail] 异常: ${e.message}`);
+        log(`[detail] ❌ 获取详情时发生异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-async function play(flag, id, flags) {
-    log(`[play] 被调用 - url="${id}"`);
-    return jsonify({ 
-        parse: 0,
-        url: id 
-    });
+// 规范函数6: play (APP调用以播放)
+async function play(flag, id) {
+    log(`[play] URL: ${id}`);
+    return jsonify({ url: id });
+}
+
+// 规范函数7: init (兼容旧版APP的初始化入口)
+async function init() {
+    log(`========== 插件初始化 v${PLUGIN_VERSION} ==========`);
+    return getConfig();
 }
