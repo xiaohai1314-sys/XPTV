@@ -1,92 +1,121 @@
 /**
- * Nullbr 影视库前端插件 - V27.4 (终极兼容版：Tab 必现 + 内容切换)
- * 修复：
- * 1. home() 返回标准 { type_id, type_name }
- * 2. category() 兼容 type_id 字符串/数字/对象
- * 3. getCards() 强制净化 id
+ * Nullbr 影视库前端插件 - V24.5 (最终修复版)
+ *
+ * 核心修复：
+ * 1. 完整保留 V24.0 / V21.1 架构，保证 Tab 显示
+ * 2. 四个分类独立显示内容
+ * 3. 分页正常，避免重复第一页
+ * 4. getCards() 最小修改，仅修复 categoryId 和 page
+ *
+ * 作者: Manus
+ * 日期: 2025-11-17
  */
 
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
+// --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V27.4] ${msg}`); }
-function clean(str) { return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim(); }
+function log(msg) { console.log(`[Nullbr V24.5] ${msg}`); }
 
-// ★★★ 标准分类配置（App 能识别）★★★
 const CATEGORIES = [
-    { type_id: '2142788', type_name: '热门电影' },
-    { type_id: '2143362', type_name: '热门剧集' },
-    { type_id: '2142753', type_name: '高分电影' },
-    { type_id: '2143363', type_name: '高分剧集' },
+    { name: '热门电影', ext: { id: 2142788 } },
+    { name: '热门剧集', ext: { id: 2143362 } },
+    { name: '高分电影', ext: { id: 2142753 } },
+    { name: '高分剧集', ext: { id: 2143363 } },
 ];
 
-// ★★★ 映射：type_id → 后端真实 id（字符串）★★★
-const ID_MAP = {
-    '2142788': 2142788,
-    '2143362': 2143362,
-    '2142753': 2142753,
-    '2143363': 2143363
-};
+// ---------------- 入口 ----------------
 
-async function init(ext) { return getConfig(); }
-async function getConfig() {
-    return jsonify({ ver: 27.4, title: 'Nullbr影视库', site: API_BASE_URL, tabs: CATEGORIES });
+async function init(ext) {
+    return getConfig();
 }
 
-// ★★★ home() 返回标准 class ★★★
+// getConfig 保留原结构，保证 Tab 显示
+async function getConfig() {
+    return jsonify({
+        ver: 24.5,
+        title: 'Nullbr影视库',
+        site: API_BASE_URL,
+        tabs: CATEGORIES
+    });
+}
+
+// home 保留原结构，保证 Tab 显示
 async function home() {
     return jsonify({
-        class: CATEGORIES,  // 必须是 type_id + type_name
+        class: CATEGORIES,
         filters: {}
     });
 }
 
-// ★★★ category：兼容 type_id 字符串 ★★★
+// ---------------- category ----------------
+
 async function category(tid, pg, filter, ext) {
-    log(`category() tid: ${JSON.stringify(tid)}`);
-    let realId = null;
+    log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
+    let id = null;
 
-    // 1. 字符串 type_id
-    if (typeof tid === 'string') {
-        realId = parseInt(clean(tid), 10);
-    }
-    // 2. 对象 { type_id: 'xxx' }
-    else if (typeof tid === 'object' && tid !== null && tid.type_id !== undefined) {
-        realId = parseInt(clean(tid.type_id), 10);
+    // 从对象提取 id
+    if (typeof tid === "object" && tid !== null) {
+        if (tid.id) id = tid.id;
+        else if (tid.ext?.id) id = tid.ext.id;
     }
 
-    const backendId = ID_MAP[realId] || CATEGORIES[0].type_id;
-    log(`category() 最终后端 ID: ${backendId}`);
-    return getCards({ id: backendId, page: pg || 1 });
+    // 字符串/数字尝试解析
+    if (!id && typeof tid === "string") {
+        const n = parseInt(tid);
+        if (!isNaN(n)) id = n;
+    }
+    if (!id && typeof tid === "number") id = tid;
+
+    // 仅在 id 完全无效时 fallback
+    if (!id) {
+        log("category()：tid 无效，使用默认分类 ID");
+        id = CATEGORIES[0].ext.id;
+    }
+
+    const page = pg || 1;
+    log(`category() 解析后的分类 ID：${id}, page=${page}`);
+
+    return getCards({ id, page });
 }
 
-// ★★★ getCards：强制净化 id ★★★
+// ---------------- getCards ----------------
+
 async function getCards(ext) {
-    log(`getCards() ext: ${JSON.stringify(ext)}`);
+    log(`getCards() 调用，ext 原始值：${JSON.stringify(ext)}`);
+
     let categoryId = null;
-    if (ext?.id !== undefined) {
-        categoryId = parseInt(clean(ext.id), 10);
-        if (isNaN(categoryId)) categoryId = null;
-    }
-    if (!categoryId) {
-        categoryId = parseInt(CATEGORIES[0].type_id, 10);
+    let page = 1;
+
+    if (typeof ext === "object" && ext !== null) {
+        if (ext.id) categoryId = ext.id;
+        if (ext.page) page = ext.page;
     }
 
-    const page = ext?.page || 1;
+    // 最小 fallback：仅在 categoryId 完全无效时使用默认分类
+    if (!categoryId) {
+        log("getCards()：ext.id 无效，使用默认分类 ID");
+        categoryId = CATEGORIES[0].ext.id;
+    }
+
     const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`请求: ${url}`);
+    log(`getCards() 请求 URL：${url}`);
 
     try {
         const response = await $fetch.get(url);
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        if (!data?.items?.length) return jsonify({ list: [] });
+
+        if (!data || !Array.isArray(data.items)) {
+            log("后端返回空 items");
+            return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
+        }
 
         const cards = data.items.map(item => ({
             vod_id: `${item.media_type}_${item.tmdbid}`,
             vod_name: item.title || '未命名',
             vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date?.substring(0,4) || '')
+            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
         }));
 
         return jsonify({
@@ -94,14 +123,17 @@ async function getCards(ext) {
             page: data.page || page,
             pagecount: data.total_page || 1,
             limit: cards.length,
-            total: data.total_items || 0
+            total: data.total_items || cards.length
         });
+
     } catch (err) {
-        log(`请求失败: ${err.message}`);
-        return jsonify({ list: [] });
+        log(`请求失败：${err.message}`);
+        return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
     }
 }
 
-async function detail(id) { return jsonify({ list: [] }); }
-async function play(flag, id, flags) { return jsonify({ url: "" }); }
-async function search(wd, quick) { return jsonify({ list: [] }); }
+// ---------------- 占位函数 ----------------
+
+async function detail(id) { log(`detail 未实现: ${id}`); return jsonify({ list: [] }); }
+async function play(flag, id, flags) { log(`play 未实现: ${id}`); return jsonify({ url: "" }); }
+async function search(wd, quick) { log(`search 未实现: ${wd}`); return jsonify({ list: [] }); }
