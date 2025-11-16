@@ -1,28 +1,24 @@
 /**
- * Nullbr 影视库前端插件 - V33.0 (Toast 终极调试版)
- *
- * 变更日志:
- * - V33.0 (2025-11-17):
- *   - [终极调试策略] 既然 return 任何数据都无效，我们怀疑 category 的返回值被忽略。
- *   - 现在的目标是确认 category 函数是否被成功执行。
- *   - 我们将尝试调用多种常见的、由App注入的 Toast 函数 (showToast, toast, print)。
- *   - 只要其中一个成功，屏幕上就会出现一个短暂的提示，证明函数被调用。
- *
- * 使用方法:
- * 1. 替换插件代码为此版本。
- * 2. 重新加载插件。
- * 3. 点击任意一个分类Tab。
- * 4. **仔细观察屏幕**，看是否有一闪而过的提示文字，比如 "Toast OK!"。
- *
- * 作者: Manus
- * 日期: 2025-11-17
+ * Nullbr 影视库前端插件 - V29.1 (终极诊断+修复版：强制暴露 tid + 自动切换)
+ * 关键：getCards() 打印 ext.tid + ext.id + 所有字段
+ *       保留 home() 原结构，保证 Tab 显示
+ *       0 回退，问题必暴露
  */
 
-// --- 常量和辅助函数 (保持不变) ---
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V33.0-Debug] ${msg}`); }
+
+// ★★★ 强制红色 Toast 日志 ★★★
+function log(msg) {
+    const text = `[V29.1 诊断] ${msg}`;
+    console.log(text);
+    try { $utils.toastError(text, 8000); } catch (_) { try { $utils.toast(text, 8000); } catch (_) { alert?.(text); } }
+}
+
+function clean(str) { return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim(); }
+
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
@@ -30,61 +26,78 @@ const CATEGORIES = [
     { name: '高分剧集', ext: { id: 2143363 } },
 ];
 
-// --- 入口函数 (保持不变) ---
-async function init(ext) { return getConfig(); }
-async function getConfig() { return jsonify({ ver: 33.0, title: 'Nullbr影视库 (调试版)', site: API_BASE_URL, tabs: CATEGORIES }); }
-async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
+async function init(ext) { log(`init ext: ${JSON.stringify(ext)}`); return getConfig(); }
+async function getConfig() { return jsonify({ ver: 29.1, title: 'Nullbr影视库', site: API_BASE_URL, tabs: CATEGORIES }); }
 
-// -------------------- category (调试核心) --------------------
-
-async function category(tid, pg, filter, ext) {
-    // ★★★ 调试核心：广撒网尝试调用各种可能的 Toast 函数 ★★★
-
-    const tid_type = typeof tid;
-    const tid_string = JSON.stringify(tid);
-    const debug_message = `[V33] 类型: <LaTex>${tid_type}, 内容: $</LaTex>{tid_string}`;
-
-    // 1. 尝试调用 showToast()
-    try {
-        if (typeof showToast === 'function') {
-            showToast("showToast OK! " + debug_message);
-            log("成功调用 showToast()");
-        }
-    } catch (e) { log("showToast 不存在或调用失败"); }
-
-    // 2. 尝试调用 toast()
-    try {
-        if (typeof toast === 'function') {
-            toast("toast OK! " + debug_message);
-            log("成功调用 toast()");
-        }
-    } catch (e) { log("toast 不存在或调用失败"); }
-
-    // 3. 尝试调用 print() (在某些环境中 print 就是 toast)
-    try {
-        if (typeof print === 'function') {
-            print("print OK! " + debug_message);
-            log("成功调用 print()");
-        }
-    } catch (e) { log("print 不存在或调用失败"); }
-
-    // 4. 尝试调用一个不存在的函数，看看App的错误处理机制
-    try {
-        // 这可能会触发一个你能看到的错误日志
-        log("准备调用一个不存在的函数来触发错误日志...");
-        nonExistentFunctionForDebug();
-    } catch(e) {
-        log(`调用不存在的函数失败，错误: ${e.message}`);
-    }
-    
-    // 在这个版本中，我们不关心返回值，因为之前的测试表明它可能被忽略了。
-    // 我们只关心上面的尝试是否能在屏幕上产生任何可见的反馈。
-    return jsonify({ list: [] });
+// ★★★ home() 不变，保证 Tab 显示 ★★★
+async function home() {
+    log("home() 返回 class");
+    return jsonify({ class: CATEGORIES, filters: {} });
 }
 
+// ★★★ getCards：强制诊断 ext.tid ★★★
+async function getCards(ext) {
+    ext = ext || {};
+    log(`===== getCards() 诊断 START =====`);
+    log(`ext 完整对象: ${JSON.stringify(ext)}`);
+    log(`ext.tid: ${JSON.stringify(ext.tid)} (类型: ${typeof ext.tid})`);
+    log(`ext.id: ${JSON.stringify(ext.id)} (类型: ${typeof ext.id})`);
+    log(`ext.page: ${ext.page}`);
 
-// ----------------- 其他函数 (保持占位) -----------------
-async function getCards(ext) { return jsonify({ list: [] }); }
+    let categoryId = null;
+
+    // 1. 优先 ext.tid
+    if (ext.tid !== undefined) {
+        const cleaned = clean(ext.tid);
+        categoryId = parseInt(cleaned, 10);
+        if (!isNaN(categoryId)) {
+            log(`[成功] 从 ext.tid 解析 → ID ${categoryId}`);
+        } else {
+            log(`[失败] ext.tid 转数字失败: "${ext.tid}" → "${cleaned}"`);
+        }
+    }
+    // 2. 再 ext.id
+    else if (ext.id !== undefined) {
+        const cleaned = clean(ext.id);
+        categoryId = parseInt(cleaned, 10);
+        if (!isNaN(categoryId)) {
+            log(`[成功] 从 ext.id 解析 → ID ${categoryId}`);
+        } else {
+            log(`[失败] ext.id 转数字失败: "${ext.id}" → "${cleaned}"`);
+        }
+    }
+
+    // 3. 0 回退
+    if (!categoryId || isNaN(categoryId)) {
+        log(`[致命错误] 无法获取有效 ID！请求失败`);
+        log(`===== getCards() END (失败) =====`);
+        return jsonify({ list: [] });
+    }
+
+    const page = ext.page || 1;
+    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
+    log(`[成功] 请求 URL: ${url}`);
+    log(`===== getCards() END =====`);
+
+    try {
+        const response = await $fetch.get(url);
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        if (!data?.items?.length) return jsonify({ list: [] });
+
+        const cards = data.items.map(item => ({
+            vod_id: `${item.media_type}_${item.tmdbid}`,
+            vod_name: item.title || '未命名',
+            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
+            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date?.substring(0,4) || '')
+        }));
+
+        return jsonify({ list: cards, page, pagecount: data.total_page || 1, limit: cards.length, total: data.total_items || 0 });
+    } catch (err) {
+        log(`请求异常: ${err.message}`);
+        return jsonify({ list: [] });
+    }
+}
+
 async function detail(id) { return jsonify({ list: [] }); }
 async function play(flag, id, flags) { return jsonify({ url: "" }); }
 async function search(wd, quick) { return jsonify({ list: [] }); }
