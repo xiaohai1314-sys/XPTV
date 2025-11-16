@@ -1,22 +1,18 @@
 /**
- * Nullbr 影视库前端插件 - V24.4 (最小修复版)
- *
- * 核心修复：
- * 1. 分类 tab 完整显示，严格保持 V24.0 架构
- * 2. 四个分类独立内容
- * 3. 正确分页，避免无限重复第一页
- * 4. 不随意 fallback categoryId，仅在绝对无效时使用默认分类
- *
- * 作者: Manus
- * 日期: 2025-11-17
+ * Nullbr 影视库前端插件 - V27.0 (修复版：解决“内容始终一样”)
+ * 仅修复：tid 对象处理 + 彻底清理字符串 + ext.id 强制净化
  */
 
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-// --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V24.4] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V27.0] ${msg}`); }
+
+// 新增：彻底清理字符串（移除零宽字符）
+function clean(str) {
+    return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim();
+}
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -25,116 +21,104 @@ const CATEGORIES = [
     { name: '高分剧集', ext: { id: 2143363 } },
 ];
 
-// ---------------- 入口：init / getConfig / home ----------------
-
-async function init(ext) {
-    return getConfig();
-}
-
-// 返回 tabs，保证前端渲染顶部 tab
+async function init(ext) { return getConfig(); }
 async function getConfig() {
     return jsonify({
-        ver: 24.4,
+        ver: 27.0,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: CATEGORIES
     });
 }
 
-// 首页分类 class，用于前端渲染 tab
+// home() 不变 —— 能正常显示 Tab
 async function home() {
     return jsonify({
-        class: CATEGORIES,
+        class: CATEGORIES, 
         filters: {}
     });
 }
 
-// -------------------- category --------------------
-
+// ----------------- category：修复 tid 解析 -----------------
 async function category(tid, pg, filter, ext) {
     log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
     let id = null;
 
-    // 从对象提取 id
+    // 1. 对象处理（新增）
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
         else if (tid.ext?.id) id = tid.ext.id;
+        else if (tid.name) {
+            const found = CATEGORIES.find(c => clean(c.name) === clean(tid.name));
+            if (found) id = found.ext.id;
+        }
     }
 
-    // 字符串 / 数字尝试解析
+    // 2. 字符串处理（增强版）
     if (!id && typeof tid === "string") {
-        const n = parseInt(tid);
-        if (!isNaN(n)) id = n;
+        const cleaned = clean(tid); // 彻底清理
+        const n = parseInt(cleaned, 10);
+        if (!isNaN(n)) {
+            id = n;
+        } else {
+            const found = CATEGORIES.find(c => clean(c.name) === cleaned);
+            if (found) id = found.ext.id;
+        }
     }
-    if (!id && typeof tid === "number") id = tid;
 
-    // 仅在 id 完全无效时 fallback
+    // 3. 回退
     if (!id) {
-        log("category()：tid 无效，使用默认分类 ID");
+        log("category()：解析失败，回退默认");
         id = CATEGORIES[0].ext.id;
     }
 
-    const page = pg || 1;
-    log(`category() 解析后的分类 ID：${id}, page=${page}`);
-
-    // 传递 page，保证分页
-    return getCards({ id, page });
+    log(`category() 最终 ID: ${id}`);
+    return getCards({ id, page: pg || 1 });
 }
 
-// -------------------- getCards --------------------
-
+// ----------------- getCards：修复 ext.id 污染 -----------------
 async function getCards(ext) {
-    log(`getCards() 调用，ext 原始值：${JSON.stringify(ext)}`);
-
+    log(`getCards() 调用，ext: ${JSON.stringify(ext)}`);
+    
     let categoryId = null;
-    let page = 1;
-
-    if (typeof ext === "object" && ext !== null) {
-        if (ext.id) categoryId = ext.id;
-        if (ext.page) page = ext.page;
+    if (ext && typeof ext === "object" && ext.id !== undefined) {
+        categoryId = parseInt(clean(ext.id), 10); // 强制清理 + 转数字
+        if (isNaN(categoryId)) categoryId = null;
     }
-
-    // 仅在 categoryId 完全无效时 fallback
+    
     if (!categoryId) {
-        log("getCards()：ext.id 无效，使用默认分类 ID");
+        log("getCards()：id 无效，使用默认");
         categoryId = CATEGORIES[0].ext.id;
     }
 
+    const page = ext?.page || 1;
     const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`getCards() 请求 URL：${url}`);
+    log(`请求: ${url}`);
 
     try {
         const response = await $fetch.get(url);
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-
         if (!data || !Array.isArray(data.items)) {
-            log("后端返回空 items");
-            return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
+            return jsonify({ list: [] });
         }
-
         const cards = data.items.map(item => ({
             vod_id: `${item.media_type}_${item.tmdbid}`,
             vod_name: item.title || '未命名',
             vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
+            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date?.substring(0,4) || '')
         }));
-
-        // 返回 page/pagecount/total，保证前端分页逻辑正常
         return jsonify({
             list: cards,
             page: data.page || page,
             pagecount: data.total_page || 1,
             limit: cards.length,
-            total: data.total_items || cards.length
+            total: data.total_items || 0
         });
-
     } catch (err) {
         log(`请求失败：${err.message}`);
-        return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
+        return jsonify({ list: [] });
     }
 }
-
-// ----------------- 占位函数 -----------------
 
 async function detail(id) { log(`detail 未实现: ${id}`); return jsonify({ list: [] }); }
 async function play(flag, id, flags) { log(`play 未实现: ${id}`); return jsonify({ url: "" }); }
