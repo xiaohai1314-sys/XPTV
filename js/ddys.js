@@ -1,83 +1,72 @@
 /**
- * Nullbr 影视库前端插件 - V9.2 (终极兼容版)
- * 
- * 版本说明:
- * - 目标: 解决在特定 App 环境下分类标签不显示的顽固问题。
- * - 策略 1 (三路并进): 同时在 init(), getConfig() 和 home() 中提供分类数据，
- *   以应对 App 可能存在的不同加载逻辑。无论 App 调用哪个函数，都能获取到分类。
- * - 策略 2 (格式洁癖修复): 将分类 ID 从数字类型改为字符串类型，防止部分 App 解析失败。
- * - 策略 3 (日志增强): 在所有入口函数添加明确日志，便于问题追踪。
+ * Nullbr 影视库前端插件 - V4.0 (最终正确版)
  *
- * 作者: Manus / AI
+ * 最终架构:
+ * 1. home() 的职责：返回【分类(class)】和【一个空的列表(list)】。
+ *    - 返回 class 是为了让 App 渲染 Tab。
+ *    - 返回空的 list 是为了满足 App 对 home() 返回值的结构要求。
+ *    - home() 绝不进行任何网络请求。
+ * 2. category() 的职责：根据 App 传递的 tid 获取真实的影视列表。
+ *    - App 在渲染完 Tab 后，会立即自动调用 category() 来填充首页列表。
+ *    - 用户点击 Tab 或翻页时，也会调用 category()。
+ *
+ * 作者: Manus
  * 日期: 2025-11-16
  */
 
 // --- 核心配置区 ---
-const API_BASE_URL = 'http://192.168.1.7:3003';
+const API_BASE_URL = 'http://192.168.1.7:3003'; // 【重要】请再次确认此 IP
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
-function jsonify(data) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V9.2] ${message}`); }
+function jsonify(data ) { return JSON.stringify(data); }
+function log(message) { console.log(`[Nullbr插件 V4.0] ${message}`); }
 
-// ★★★★★【核心：分类数据 - ID 已字符串化】★★★★★
+// --- 分类定义 (V3.0 的正确格式) ---
 const CATEGORIES = [
-    { name: '热门电影', ext: { id: "2142788" } },
-    { name: '热门剧集', ext: { id: "2143362" } },
-    { name: '高分电影', ext: { id: "2142753" } },
-    { name: '高分剧集', ext: { id: "2143363" } },
+    { name: '热门电影', ext: { id: 2142788 } },
+    { name: '热门剧集', ext: { id: 2143362 } },
+    { name: '高分电影', ext: { id: 2142753 } },
+    { name: '高分剧集', ext: { id: 2143363 } },
 ];
 
 // --- App 插件入口函数 ---
 
-// ★★★★★【V9.2 增强 - 策略 1: 强化 init()】★★★★★
-async function init(ext) {
-    log("init() 被调用，尝试提前返回完整配置...");
-    // 无论如何，先在初始化时就把所有配置和分类给 App
-    return jsonify({ 
-        ver: 9.2, 
-        title: 'Nullbr影视库', 
-        site: API_BASE_URL,
-        tabs: CATEGORIES
-    });
-}
+async function init(ext) { return jsonify({}); }
+async function getConfig() { return jsonify({ ver: 4.0, title: 'Nullbr影视库', site: API_BASE_URL, tabs: CATEGORIES }); }
 
-// ★★★★★【V9.2 增强 - 策略 1: 标准 getConfig()】★★★★★
-async function getConfig() { 
-    log("getConfig() 被调用，返回标准配置和分类...");
-    return jsonify({ 
-        ver: 9.2, 
-        title: 'Nullbr影视库', 
-        site: API_BASE_URL,
-        tabs: CATEGORIES // <-- 兼容新版 App
-    }); 
-}
-
-// ★★★★★【V9.2 增强 - 策略 1: 兼容 home()】★★★★★
+// ★★★★★【最终修正的 home() 函数】★★★★★
 async function home() {
-    log("home() 被调用，返回旧版分类格式...");
-    // 严格遵守旧版 App 的实现，同时返回 'class' 和 'list: []'
+    log("home() 被调用，返回分类和一个空列表...");
+    
+    // 1. 准备分类数据 (使用 App 需要的正确结构)
+    const classData = CATEGORIES.map(c => ({
+        "cate_id": c.ext.id.toString(),
+        "cate_name": c.name
+    }));
+
+    // 2. 返回 class 和一个空的 list
     return jsonify({
-        'class': CATEGORIES, // <-- 兼容旧版 App
-        'list': [],
+        'class': classData,
+        'list': [], // 返回一个空列表！
         'filters': {}
     });
 }
 
-// ★★★★★【category() 函数 - 保持稳定】★★★★★
-async function category(tid, pg) {
-    log(`category() 被调用: tid=<LaTex>${tid}, pg=$</LaTex>{pg}`);
+// ★★★★★【最终修正的 category() 函数】★★★★★
+async function category(tid, pg, filter, ext) {
+    log(`category() 被调用: tid=${tid}, pg=${pg}`);
     
-    // 确保 tid 是一个对象，如果是简单值则使用默认
-    const categoryId = typeof tid === 'object' ? tid.id : tid || CATEGORIES[0].ext.id;
+    // App 首次加载列表时，会自动用第一个分类的 ID 调用此函数
+    const categoryId = tid;
     const page = pg || 1;
 
     if (!categoryId) {
-        log("错误: categoryId 为空。");
+        log("警告: category() 收到的 tid 为空，这不应该发生在 V4.0 架构中。返回空列表。");
         return jsonify({ list: [] });
     }
 
-    const requestUrl = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{categoryId}&page=${page}`;
+    const requestUrl = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
     log(`正在请求后端: ${requestUrl}`);
 
     try {
@@ -89,11 +78,11 @@ async function category(tid, pg) {
         }
 
         const cards = data.items.map(item => {
-            const vod_id = `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`;
+            const vod_id = `${item.media_type}_${item.tmdbid}`;
             return {
                 vod_id: vod_id,
                 vod_name: item.title,
-                vod_pic: `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}`,
+                vod_pic: `${TMDB_IMAGE_BASE_URL}${item.poster}`,
                 vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '未知'),
             };
         });
@@ -110,9 +99,7 @@ async function category(tid, pg) {
     }
 }
 
-// --- 未实现的功能 (保持不变) ---
+// --- 未实现的功能 ---
 async function detail(id) { log(`[待实现] 详情页: ${id}`); return jsonify({ list: [] }); }
 async function play(flag, id, flags) { log(`[待实现] 播放: ${id}`); return jsonify({ url: '' }); }
 async function search(wd, quick) { log(`[待实现] 搜索: ${wd}`); return jsonify({ list: [] }); }
-
-log("Nullbr 插件 V9.2 (终极兼容版) 加载完成。
