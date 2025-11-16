@@ -1,18 +1,18 @@
 /**
- * Nullbr 影视库前端插件 - V32.0 (列表显示调试版)
+ * Nullbr 影视库前端插件 - V33.0 (Toast 终极调试版)
  *
  * 变更日志:
- * - V32.0 (2025-11-17):
- *   - [全新调试策略] 放弃 throw Error()，因为它不会产生弹窗。
- *   - 改造 category() 函数，使其直接返回一个包含调试信息的“假”列表。
- *   - 将 tid 的类型和内容，分别显示在第一个列表项的标题和备注中。
- *   - 这样，只要列表能显示，我们就能在屏幕上看到 tid 的原始信息。
+ * - V33.0 (2025-11-17):
+ *   - [终极调试策略] 既然 return 任何数据都无效，我们怀疑 category 的返回值被忽略。
+ *   - 现在的目标是确认 category 函数是否被成功执行。
+ *   - 我们将尝试调用多种常见的、由App注入的 Toast 函数 (showToast, toast, print)。
+ *   - 只要其中一个成功，屏幕上就会出现一个短暂的提示，证明函数被调用。
  *
  * 使用方法:
  * 1. 替换插件代码为此版本。
  * 2. 重新加载插件。
  * 3. 点击任意一个分类Tab。
- * 4. 查看屏幕上显示的第一个“电影”卡片，它的标题和简介就是我们要的调试信息。
+ * 4. **仔细观察屏幕**，看是否有一闪而过的提示文字，比如 "Toast OK!"。
  *
  * 作者: Manus
  * 日期: 2025-11-17
@@ -22,7 +22,7 @@
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V32.0-Debug] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V33.0-Debug] ${msg}`); }
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
@@ -32,59 +32,59 @@ const CATEGORIES = [
 
 // --- 入口函数 (保持不变) ---
 async function init(ext) { return getConfig(); }
-async function getConfig() { return jsonify({ ver: 32.0, title: 'Nullbr影视库 (调试版)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 33.0, title: 'Nullbr影视库 (调试版)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
 // -------------------- category (调试核心) --------------------
 
 async function category(tid, pg, filter, ext) {
-    // ★★★ 调试核心：构造一个假的列表项来显示 tid 信息 ★★★
+    // ★★★ 调试核心：广撒网尝试调用各种可能的 Toast 函数 ★★★
 
     const tid_type = typeof tid;
-    let tid_string;
+    const tid_string = JSON.stringify(tid);
+    const debug_message = `[V33] 类型: <LaTex>${tid_type}, 内容: $</LaTex>{tid_string}`;
+
+    // 1. 尝试调用 showToast()
     try {
-        tid_string = JSON.stringify(tid);
-    } catch (e) {
-        tid_string = "无法JSON序列化";
+        if (typeof showToast === 'function') {
+            showToast("showToast OK! " + debug_message);
+            log("成功调用 showToast()");
+        }
+    } catch (e) { log("showToast 不存在或调用失败"); }
+
+    // 2. 尝试调用 toast()
+    try {
+        if (typeof toast === 'function') {
+            toast("toast OK! " + debug_message);
+            log("成功调用 toast()");
+        }
+    } catch (e) { log("toast 不存在或调用失败"); }
+
+    // 3. 尝试调用 print() (在某些环境中 print 就是 toast)
+    try {
+        if (typeof print === 'function') {
+            print("print OK! " + debug_message);
+            log("成功调用 print()");
+        }
+    } catch (e) { log("print 不存在或调用失败"); }
+
+    // 4. 尝试调用一个不存在的函数，看看App的错误处理机制
+    try {
+        // 这可能会触发一个你能看到的错误日志
+        log("准备调用一个不存在的函数来触发错误日志...");
+        nonExistentFunctionForDebug();
+    } catch(e) {
+        log(`调用不存在的函数失败，错误: ${e.message}`);
     }
-
-    // 构造一个假的“电影”卡片
-    const debugCard = {
-        // 标题显示 tid 的类型
-        vod_name: `[调试] tid 类型: ${tid_type}`,
-        
-        // 备注/简介显示 tid 的内容
-        vod_remarks: `内容: ${tid_string}`,
-        
-        // 给一个占位ID和图片，确保卡片能显示
-        vod_id: 'debug_info_001',
-        vod_pic: 'https://img.zcool.cn/community/01a3815ab95212a8012060c839df75.png@1280w_1l_2o_100sh.png' // 一个放大镜图标
-    };
-
-    // 构造一个完整的列表返回给App
-    const debugList = {
-        list: [
-            debugCard,
-            // 你也可以在这里加一些正常的卡片，如果需要的话
-            { vod_name: '--- 以上是调试信息 ---', vod_id: 'sep_1' }
-        ],
-        page: 1,
-        pagecount: 1,
-        limit: 1,
-        total: 1
-    };
-
-    // 直接返回这个包含调试信息的假列表
-    return jsonify(debugList);
+    
+    // 在这个版本中，我们不关心返回值，因为之前的测试表明它可能被忽略了。
+    // 我们只关心上面的尝试是否能在屏幕上产生任何可见的反馈。
+    return jsonify({ list: [] });
 }
 
 
 // ----------------- 其他函数 (保持占位) -----------------
-
-async function getCards(ext) { 
-    // 在这个调试版本中，getCards 不会被调用，但我们还是保留它
-    return jsonify({ list: [] }); 
-}
+async function getCards(ext) { return jsonify({ list: [] }); }
 async function detail(id) { return jsonify({ list: [] }); }
 async function play(flag, id, flags) { return jsonify({ url: "" }); }
 async function search(wd, quick) { return jsonify({ list: [] }); }
