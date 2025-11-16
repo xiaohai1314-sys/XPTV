@@ -1,103 +1,62 @@
 /**
- * Nullbr 影视库前端插件 - V29.1 (终极诊断+修复版：强制暴露 tid + 自动切换)
- * 关键：getCards() 打印 ext.tid + ext.id + 所有字段
- *       保留 home() 原结构，保证 Tab 显示
- *       0 回退，问题必暴露
+ * Nullbr 影视库前端插件 - V34.0 (接口终极测试版)
+ *
+ * 目标:
+ * - 测试 category 函数是否能被 App 最基本地调用并返回一个硬编码的列表。
+ * - 这是验证插件接口规范的最后一步。
+ *
+ * 使用方法:
+ * 1. 替换插件代码为此版本。
+ * 2. 重新加载插件。
+ * 3. 点击任意一个分类Tab。
+ * 4. 如果能看到一个标题为 "Category函数被调用了！" 的列表项，说明接口是对的。
+ * 5. 如果仍然是空列表或没反应，说明 category 这个函数名或整个接口规范是错误的。
  */
 
-const API_BASE_URL = 'http://192.168.1.7:3003';
-const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-
-function jsonify(data) { return JSON.stringify(data); }
-
-// ★★★ 强制红色 Toast 日志 ★★★
-function log(msg) {
-    const text = `[V29.1 诊断] ${msg}`;
-    console.log(text);
-    try { $utils.toastError(text, 8000); } catch (_) { try { $utils.toast(text, 8000); } catch (_) { alert?.(text); } }
-}
-
-function clean(str) { return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim(); }
-
+// 定义分类，确保 home() 能工作
 const CATEGORIES = [
-    { name: '热门电影', ext: { id: 2142788 } },
-    { name: '热门剧集', ext: { id: 2143362 } },
-    { name: '高分电影', ext: { id: 2142753 } },
-    { name: '高分剧集', ext: { id: 2143363 } },
+    { name: '测试分类1', ext: { id: 'test1' } },
+    { name: '测试分类2', ext: { id: 'test2' } },
 ];
 
-async function init(ext) { log(`init ext: ${JSON.stringify(ext)}`); return getConfig(); }
-async function getConfig() { return jsonify({ ver: 29.1, title: 'Nullbr影视库', site: API_BASE_URL, tabs: CATEGORIES }); }
-
-// ★★★ home() 不变，保证 Tab 显示 ★★★
+// home 函数，提供分类数据
 async function home() {
-    log("home() 返回 class");
-    return jsonify({ class: CATEGORIES, filters: {} });
+    return JSON.stringify({
+        class: CATEGORIES,
+        filters: {}
+    });
 }
 
-// ★★★ getCards：强制诊断 ext.tid ★★★
-async function getCards(ext) {
-    ext = ext || {};
-    log(`===== getCards() 诊断 START =====`);
-    log(`ext 完整对象: ${JSON.stringify(ext)}`);
-    log(`ext.tid: ${JSON.stringify(ext.tid)} (类型: ${typeof ext.tid})`);
-    log(`ext.id: ${JSON.stringify(ext.id)} (类型: ${typeof ext.id})`);
-    log(`ext.page: ${ext.page}`);
-
-    let categoryId = null;
-
-    // 1. 优先 ext.tid
-    if (ext.tid !== undefined) {
-        const cleaned = clean(ext.tid);
-        categoryId = parseInt(cleaned, 10);
-        if (!isNaN(categoryId)) {
-            log(`[成功] 从 ext.tid 解析 → ID ${categoryId}`);
-        } else {
-            log(`[失败] ext.tid 转数字失败: "${ext.tid}" → "${cleaned}"`);
-        }
-    }
-    // 2. 再 ext.id
-    else if (ext.id !== undefined) {
-        const cleaned = clean(ext.id);
-        categoryId = parseInt(cleaned, 10);
-        if (!isNaN(categoryId)) {
-            log(`[成功] 从 ext.id 解析 → ID ${categoryId}`);
-        } else {
-            log(`[失败] ext.id 转数字失败: "${ext.id}" → "${cleaned}"`);
-        }
-    }
-
-    // 3. 0 回退
-    if (!categoryId || isNaN(categoryId)) {
-        log(`[致命错误] 无法获取有效 ID！请求失败`);
-        log(`===== getCards() END (失败) =====`);
-        return jsonify({ list: [] });
-    }
-
-    const page = ext.page || 1;
-    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`[成功] 请求 URL: ${url}`);
-    log(`===== getCards() END =====`);
-
-    try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        if (!data?.items?.length) return jsonify({ list: [] });
-
-        const cards = data.items.map(item => ({
-            vod_id: `${item.media_type}_${item.tmdbid}`,
-            vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date?.substring(0,4) || '')
-        }));
-
-        return jsonify({ list: cards, page, pagecount: data.total_page || 1, limit: cards.length, total: data.total_items || 0 });
-    } catch (err) {
-        log(`请求异常: ${err.message}`);
-        return jsonify({ list: [] });
-    }
+// category 函数，返回一个写死的、绝对简单的列表
+async function category(tid, pg, filter, ext) {
+    const successCard = {
+        vod_name: 'Category函数被调用了！',
+        vod_remarks: `接收到的tid是: ${JSON.stringify(tid)}`,
+        vod_id: 'success_id',
+        vod_pic: 'https://img.zcool.cn/community/01a3815ab95212a8012060c839df75.png@1280w_1l_2o_100sh.png'
+    };
+    
+    return JSON.stringify({
+        list: [successCard]
+    });
 }
 
-async function detail(id) { return jsonify({ list: [] }); }
-async function play(flag, id, flags) { return jsonify({ url: "" }); }
-async function search(wd, quick) { return jsonify({ list: [] }); }
+// 其他所有函数都暂时移除，保持最简化
+async function init(ext) { return "{}"; }
+async function detail(id) { return "{}"; }
+async function play(flag, id, flags) { return "{}"; }
+async function search(wd, quick) { return "{}"; }
+
+// 尝试使用 module.exports 导出函数，这是很多JS环境的要求
+try {
+    module.exports = {
+        init,
+        home,
+        category,
+        detail,
+        play,
+        search,
+    };
+} catch(e) {
+    // 如果环境不支持 module.exports，会报错，但没关系
+}
