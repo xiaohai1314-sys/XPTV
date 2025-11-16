@@ -1,9 +1,9 @@
 /**
- * Nullbr 影视库前端插件 - V271.0 (兼容性修复 + Toast 诊断版)
+ * Nullbr 影视库前端插件 - V27.0 (兼容性修复 + 网络注入诊断版)
  *
  * 目标:
- * 1. 【兼容性修复】保留所有 ES5 语法，确保在最古老的环境下运行。
- * 2. 【Toast 诊断】在 category() 函数的 ID 解析成功或失败时，通过 Toast 消息输出结果。
+ * 1. 【兼容性修复】保留所有 ES5 语法。
+ * 2. 【最终诊断】将原始 tid 值注入到后端 URL 参数中。
  * 3. 保留回退机制，确保 App 不会崩溃。
  *
  * 作者: Manus (由 Gemini 最终修正)
@@ -15,19 +15,8 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
+// log函数静默保留，因为它在您的环境中无效
 function log(msg) { console.log("[Nullbr V27.0] " + msg); } 
-
-// --- Toast 诊断工具 ---
-function showToast(msg, isError) {
-    // 检查全局 $toast 对象是否存在
-    if (typeof $toast !== 'undefined' && $toast.show) {
-        // 假设 $toast.show 支持第二个参数来控制红色/错误样式
-        $toast.show(msg, isError);
-    } else {
-        // 如果 $toast 不存在，则静默失败，不影响主逻辑
-        log("[Toast-Fallback] " + msg);
-    }
-}
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -58,11 +47,11 @@ async function home() {
     });
 }
 
-// -------------------- category（Toast 诊断注入） --------------------
+// -------------------- category（网络注入诊断） --------------------
 
 async function category(tid, pg, filter, ext) {
     let id = null;
-    var diagnosticInfo = null;
+    var diagnosticInfo = null; // 用于存储诊断信息
     
     // 1. 尝试解析 Object 或 Number 
     if (typeof tid === "object" && tid !== null) {
@@ -83,7 +72,6 @@ async function category(tid, pg, filter, ext) {
         if (!isNaN(n)) {
             id = n;
         } else {
-            // ES5兼容的find函数写法
             var foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; }); 
             if (foundCategory) {
                 id = foundCategory.ext.id;
@@ -91,33 +79,28 @@ async function category(tid, pg, filter, ext) {
         }
     }
 
-    // 3. 最终回退（及 Toast 诊断）
-    if (id) {
-        // ★★★ 解析成功：显示绿色或默认 Toast ★★★
-        showToast("✅ SUCCESS: ID找到: " + id, false);
-    } else {
-        // ★★★ 解析失败：显示红色 Toast ★★★
-        
-        // Final-Safe 诊断：避免 JSON.stringify 崩溃
-        diagnosticInfo = "TYPE_" + (typeof tid);
-        if (typeof tid === "object" && tid !== null) {
-            if (tid.name) diagnosticInfo += "_HAS_NAME";
-            if (tid.type_id) diagnosticInfo += "_HAS_TYPEID"; 
-            if (tid.key) diagnosticInfo += "_HAS_KEY";
-        } else if (typeof tid === "string") {
-            diagnosticInfo = "RAW_STRING_" + tid.substring(0, 10);
+    // 3. 最终回退（及诊断注入）
+    if (!id) {
+        // ★★★ 诊断注入：将原始 tid 转化为字符串，如果失败则提供错误类型 ★★★
+        try {
+            diagnosticInfo = JSON.stringify(tid);
+        } catch (e) {
+            diagnosticInfo = "Serialization_Error:" + (typeof tid); 
         }
-
-        showToast("❌ FAILED: 原始数据类型为: " + diagnosticInfo, true);
-
-        // ★★★ 强制回退到第一个 ID（重要！防止App崩溃）★★★
+        
+        // 强制回退到第一个 ID（重要！防止App崩溃）
         id = CATEGORIES[0].ext.id; 
     }
     
-    return getCards({ id: id, page: pg || 1 });
+    var cardsParams = { id: id, page: pg || 1 };
+    if (diagnosticInfo) {
+        cardsParams.diagnostic = diagnosticInfo; // 将诊断信息传入 getCards
+    }
+    
+    return getCards(cardsParams);
 }
 
-// -------------------- getCards（非诊断版 - 确保不崩溃） --------------------
+// -------------------- getCards（将诊断信息注入到 URL） --------------------
 
 async function getCards(ext) {
     let categoryId = null;
@@ -125,8 +108,6 @@ async function getCards(ext) {
         categoryId = ext.id;
     }
     
-    // 正常 API 请求流程 (非诊断逻辑)
-
     if (!categoryId) {
         categoryId = CATEGORIES[0].ext.id;
     }
@@ -134,6 +115,12 @@ async function getCards(ext) {
     var page = (ext && ext.page) ? ext.page : 1;
     // ES5 字符串拼接
     var url = API_BASE_URL + "/api/list?id=" + categoryId + "&page=" + page;
+    
+    // ★★★ 核心诊断逻辑：将诊断信息作为 tid_raw 参数添加到 URL 中 ★★★
+    if (ext.diagnostic) {
+        // 使用 encodeURIComponent 确保特殊字符不会破坏 URL
+        url += "&tid_raw=" + encodeURIComponent(ext.diagnostic);
+    }
     
     try {
         var response = await $fetch.get(url);
