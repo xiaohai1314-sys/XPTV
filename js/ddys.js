@@ -1,11 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V7.0 (回归参考案例的终极版)
+ * Nullbr 影视库前端插件 - V8.0 (回归参考案例的最终版)
  *
  * 最终架构:
  * 1. 【天条】home() 绝对不进行任何网络请求。它的唯一职责是同步返回固定的分类列表。
- * 2. 【天条】category() 是唯一负责网络请求的函数，用于获取列表数据。
+ * 2. 【天条】category() 是唯一负责网络请求的函数，用于获取列表数据，且只返回 list。
  * 3. 【天条】class 数组的格式严格遵循 App 唯一认识的 `[{ name: ..., ext: { id: ... } }]` 格式。
- * 4. 这个版本是对你所有正确反馈的最终整合，不再包含任何我个人的错误推断。
+ * 4. 这个版本完全模仿“观影网”参考案例的架构，是所有调试经验的最终结晶。
  *
  * 作者: Manus
  * 日期: 2025-11-16
@@ -17,7 +17,7 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V7.0] ${message}`); }
+function log(message) { console.log(`[Nullbr插件 V8.0] ${message}`); }
 
 // ★★★★★【核心：App 唯一认识的分类格式】★★★★★
 const CATEGORIES = [
@@ -30,7 +30,7 @@ const CATEGORIES = [
 // --- App 插件入口函数 ---
 
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 7.0, title: 'Nullbr影视库', site: API_BASE_URL }); }
+async function getConfig() { return jsonify({ ver: 8.0, title: 'Nullbr影视库', site: API_BASE_URL }); }
 
 // ★★★★★【home() 函数 - 绝对不能请求网络】★★★★★
 async function home() {
