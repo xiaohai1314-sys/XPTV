@@ -16,16 +16,15 @@ async function getCards(params) {
 
     if (params.listId) {
         context = 'Category';
-        requestUrl = `<LaTex>${MY_BACKEND_URL}/list?id=$</LaTex>{params.listId}&page=${params.page || 1}`;
+        requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
     } else if (params.keyword) {
         context = 'Search';
-        // 【关键修正1】: 确保搜索请求也带上 page 参数
-        requestUrl = `<LaTex>${MY_BACKEND_URL}/search?keyword=$</LaTex>{encodeURIComponent(params.keyword)}&page=${params.page || 1}`;
+        requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}&page=${params.page || 1}`;
     } else {
         return jsonify({ list: [] });
     }
 
-    log(`[<LaTex>${context}] 正在请求后端: $</LaTex>{requestUrl}`);
+    log(`[${context}] 正在请求后端: ${requestUrl}`);
     try {
         const { data } = await $fetch.get(requestUrl);
         if (!data || !Array.isArray(data.items)) {
@@ -36,16 +35,15 @@ async function getCards(params) {
         const cards = data.items.map(item => ({
             vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
             vod_name: item.title,
-            vod_pic: item.poster ? `<LaTex>${POSTER_BASE_URL}$</LaTex>{item.poster}` : FALLBACK_PIC,
+            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
             vod_remarks: item.release_date || item.vote_average?.toFixed(1) || '',
             ext: { tmdbid: item.tmdbid, type: item.media_type }
         }));
 
-        // 【关键修正2】: 兼容搜索和分类接口返回的不同分页字段
         const pagecount = data.total_page || data.total_pages || 1;
         const page = data.page || params.page || 1;
 
-        log(`[<LaTex>${context}] ✓ 成功格式化 $</LaTex>{cards.length} 个卡片 (第<LaTex>${page}页/共$</LaTex>{pagecount}页)`);
+        log(`[${context}] ✓ 成功格式化 ${cards.length} 个卡片 (第${page}页/共${pagecount}页)`);
         return jsonify({
             page: page,
             pagecount: pagecount,
@@ -53,12 +51,12 @@ async function getCards(params) {
         });
 
     } catch (e) {
-        log(`[<LaTex>${context}] ❌ 请求或处理数据时发生异常: $</LaTex>{e.message}`);
+        log(`[${context}] ❌ 请求或处理数据时发生异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- APP 插件入口函数 (严格恢复您原始脚本的结构和参数处理) ---
+// --- APP 插件入口函数 ---
 
 // 规范函数1: getConfig
 async function getConfig() {
@@ -86,23 +84,20 @@ async function home() {
 
 // 规范函数3: category
 async function category(tid, pg) {
-    // 【恢复】严格按照原版逻辑，tid 是一个对象，不是字符串
     const listId = tid.listId;
-    log(`[category] APP请求分类, listId: <LaTex>${listId}, page: $</LaTex>{pg}`);
+    log(`[category] APP请求分类, listId: ${listId}, page: ${pg}`);
     return getCards({ listId: listId, page: pg || 1 });
 }
 
 // 规范函数4: search
 async function search(ext) {
-    // 【恢复】严格按照原版逻辑，ext 是一个字符串化的JSON
     ext = argsify(ext);
     const searchText = ext.text || '';
     const page = parseInt(ext.page || 1, 10);
 
-    // 【恢复】移除原有的无限加载保护，因为分页问题已在 getCards 中解决
     if (!searchText) return jsonify({ list: [] });
 
-    log(`[search] APP请求搜索, keyword: "<LaTex>${searchText}", page: $</LaTex>{page}`);
+    log(`[search] APP请求搜索, keyword: "${searchText}", page: ${page}`);
     return getCards({ keyword: searchText, page: page });
 }
 
@@ -113,7 +108,7 @@ async function detail(id) {
         const { tmdbid, type } = JSON.parse(id);
         if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
 
-        const requestUrl = `<LaTex>${MY_BACKEND_URL}/resource?tmdbid=$</LaTex>{tmdbid}&type=${type}`;
+        const requestUrl = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
         log(`[detail] 正在请求后端: ${requestUrl}`);
         
         const { data } = await $fetch.get(requestUrl);
@@ -122,7 +117,7 @@ async function detail(id) {
         }
 
         const tracks = data['115'].map(item => ({
-            name: `[115] <LaTex>${item.title} ($</LaTex>{item.size})`,
+            name: `[115] ${item.title} (${item.size})`,
             pan: item.share_link,
             ext: {}
         }));
