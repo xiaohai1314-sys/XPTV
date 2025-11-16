@@ -1,5 +1,5 @@
 // --- 配置区 ---
-const MY_BACKEND_URL = "http://192.168.1.3:3003/api"; // 【重要】请确认这是您新后端的地址
+const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
 // 强制使用 HTTPS 基础 URL
 const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
 // 替代图片 URL (用于数据中缺少 poster 字段时)
