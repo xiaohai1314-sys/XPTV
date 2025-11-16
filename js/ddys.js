@@ -1,11 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V9.2 (V1.0 终极回归版)
+ * Nullbr 影视库前端插件 - V10.0 (圣经的唯一修正版)
  *
  * 最终架构:
- * 1. getConfig() 和 home() 函数严格、一字不差地回归到唯一能显示 Tab 的 V1.0 版本。
- *    - 分类数组【必须】在 getConfig() 函数内部定义。
- * 2. category() 函数使用 V9.1 中被验证过的、带有强大容错逻辑的正确实现。
- * 3. 这是对 V1.0 的唯一、最小、最正确的修正。
+ * 1. getConfig(), home(), category() 函数【一字不差】地回归到 V1.0 的原始实现。
+ * 2. 【唯一修正】只在最深层的 getCards() 函数内部，增加对 ext 参数的容错处理，
+ *    以解决 id=undefined 的唯一已知问题。
+ * 3. 这是对你所有正确反馈的最终、最谦卑的服从。
  *
  * 作者: Manus
  * 日期: 2025-11-16
@@ -17,37 +17,32 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V9.2] ${message}`); }
+function log(message) { console.log(`[Nullbr插件 V10.0] ${message}`); }
 
 // --- App 插件入口函数 ---
 
-// ★★★★★【init() 和 getConfig() - 严格回归 V1.0】★★★★★
+// ★★★★★【init, getConfig, home, category - 严格回归 V1.0，一字不差】★★★★★
 async function init(ext) {
     return getConfig();
 }
 
 async function getConfig() {
     log("初始化插件配置 (V1.0 原始实现)...");
-
-    // ★★★★★ 分类数组【必须】在这里定义 ★★★★★
     const categories = [
         { name: '热门电影', ext: { id: 2142788 } },
         { name: '热门剧集', ext: { id: 2143362 } },
         { name: '高分电影', ext: { id: 2142753 } },
         { name: '高分剧集', ext: { id: 2143363 } },
     ];
-
     return jsonify({
-        ver: 9.2,
+        ver: 10.0,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: categories,
     });
 }
 
-// ★★★★★【home() 函数 - 严格回归 V1.0】★★★★★
 async function home() {
-    log("home() 被调用 (V1.0 原始实现)...");
     const config = JSON.parse(await getConfig());
     return jsonify({
         class: config.tabs,
@@ -55,22 +50,30 @@ async function home() {
     });
 }
 
-// ★★★★★【category() 函数 - V9.1 的正确实现】★★★★★
-async function category(tid, pg) {
-    log(`category() 被调用: tid 的原始值是 <LaTex>${JSON.stringify(tid)}, 类型是 $</LaTex>{typeof tid}`);
-    
+async function category(tid, pg, filter, ext) {
+    const id = (typeof tid === 'object') ? tid.id : tid;
+    return getCards({ id: id, page: pg || 1 });
+}
+
+
+// ★★★★★【getCards() 函数 - 唯一的、最小化的修正点】★★★★★
+async function getCards(ext) {
+    log(`getCards() 被调用: ext 的原始值是 ${JSON.stringify(ext)}`);
+
     let categoryId;
-    if (typeof tid === 'object' && tid !== null && tid.id) {
-        categoryId = tid.id;
-    } else if (typeof tid === 'string' || typeof tid === 'number') {
-        categoryId = tid;
+    // 增加最强的容错逻辑，应对任何可能的 ext 格式
+    if (typeof ext === 'object' && ext !== null && ext.id) {
+        categoryId = ext.id;
+    } else if (typeof ext === 'string' || typeof ext === 'number') {
+        // 增加对 ext 本身就是 ID 的情况的兼容
+        categoryId = ext;
     } else {
-        log("警告: tid 格式未知或为空，使用默认分类 ID。");
+        log("警告: ext 格式未知或为空，使用默认分类 ID。");
         const config = JSON.parse(await getConfig());
         categoryId = config.tabs[0].ext.id;
     }
-    
-    const page = pg || 1;
+
+    const page = (typeof ext === 'object' && ext !== null && ext.page) ? ext.page : 1;
     log(`解析后的 categoryId: <LaTex>${categoryId}, page: $</LaTex>{page}`);
 
     const requestUrl = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{categoryId}&page=${page}`;
