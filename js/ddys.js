@@ -70,7 +70,7 @@ async function getConfig() {
         { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
     ];
     return jsonify({
-        ver: 6.0,
+        ver: 7.0,
         title: '影视聚合(API)',
         site: MY_BACKEND_URL,
         tabs: CATEGORIES,
