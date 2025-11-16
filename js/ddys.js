@@ -1,12 +1,9 @@
 /**
- * Nullbr 影视库前端插件 - V9.0 (终极组合版)
+ * Nullbr 影视库前端插件 - V9.1 (修复分类 Tab 版)
  *
- * 最终架构:
- * 1. home() 函数严格、一字不差地回归到唯一能显示 Tab 的 V4.0 版本。
- *    - 绝对不请求网络。
- *    - 返回值必须同时包含 `class` 和一个空的 `list: []`。
- * 2. category() 函数使用 V8.1 中被验证过的、只返回 list 的正确实现。
- * 3. 这是对你所有正确反馈的最终组合，不再包含任何我个人的错误推断。
+ * 修复说明:
+ * 1. 将分类信息从 home() 迁移到 getConfig() 的 tabs 字段，以兼容新版 App 插件架构。
+ * 2. 保持 home() 函数的 class 字段返回，以兼容旧版 App 插件架构。
  *
  * 作者: Manus
  * 日期: 2025-11-16
@@ -17,11 +14,11 @@ const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
-function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V9.0] ${message}`); }
+function jsonify(data  ) { return JSON.stringify(data); }
+function log(message) { console.log(`[Nullbr插件 V9.1] ${message}`); }
 
-// ★★★★★【核心：App 唯一认识的分类格式】★★★★★
-const CATEGORIES = [
+// ★★★★★【核心：App 唯一认识的分类格式 - 重命名为 TABS】★★★★★
+const TABS = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
     { name: '高分电影', ext: { id: 2142753 } },
@@ -31,14 +28,24 @@ const CATEGORIES = [
 // --- App 插件入口函数 ---
 
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 9.0, title: 'Nullbr影视库', site: API_BASE_URL }); }
 
-// ★★★★★【home() 函数 - 严格回归 V4.0】★★★★★
+// ★★★★★【getConfig() 函数 - 修复分类 Tab 的关键】★★★★★
+async function getConfig() {
+    // 增加 tabs 字段，这是新版 App 识别分类 Tab 的关键
+    return jsonify({ 
+        ver: 9.1, 
+        title: 'Nullbr影视库', 
+        site: API_BASE_URL,
+        tabs: TABS, // <--- 关键修改点
+    });
+}
+
+// ★★★★★【home() 函数 - 保持兼容旧版】★★★★★
 async function home() {
     log("home() 被调用，返回分类和空列表...");
-    // 严格遵守 V4.0 的实现，这是唯一能显示 Tab 的方式
+    // 保持 V4.0 的实现，以兼容可能存在的旧版 App 插件架构
     return jsonify({
-        'class': CATEGORIES,
+        'class': TABS, // <--- 使用 TABS 数组
         'list': [],
         'filters': {}
     });
@@ -48,7 +55,8 @@ async function home() {
 async function category(tid, pg) {
     log(`category() 被调用: tid=${tid}, pg=${pg}`);
     
-    const categoryId = tid || CATEGORIES[0].ext.id;
+    // 使用 TABS 数组
+    const categoryId = tid || TABS[0].ext.id;
     const page = pg || 1;
 
     if (!categoryId) {
