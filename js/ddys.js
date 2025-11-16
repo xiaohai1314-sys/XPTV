@@ -1,220 +1,152 @@
-// --- 低端影视 ddys.la ---
-// 基于 girigirilove 播放逻辑重构版，带调试输出
-// 改进: 适配 ddys.la 的播放器 iframe 解析逻辑
+// --- 配置区 ---
+const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
+const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
+const FALLBACK_PIC = 'https://img.tukuppt.com/png_preview/00/42/01/P5kFr2sEwJ.jpg';
+const DEBUG = true;
 
-const cheerio = createCheerio()
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-const headers = {
-  'Referer': 'https://ddys.la/',
-  'Origin': 'https://ddys.la',
-  'User-Agent': UA,
+// --- 辅助函数 ---
+function log(msg) { if (DEBUG) console.log(`[插件V6.0] ${msg}`); }
+function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
+function jsonify(data) { return JSON.stringify(data); }
+
+// --- 核心数据获取与格式化函数 ---
+
+// 内部函数：获取卡片列表（被 category 和 search 调用）
+async function getCards(params) {
+    let requestUrl;
+    let context; // 用于日志
+
+    if (params.listId) { // 分类模式
+        context = 'Category';
+        requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
+    } else if (params.keyword) { // 搜索模式
+        context = 'Search';
+        requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}`;
+    } else {
+        return jsonify({ list: [] });
+    }
+
+    log(`[${context}] 正在请求后端: ${requestUrl}`);
+    try {
+        const { data } = await $fetch.get(requestUrl);
+        if (!data.items || !Array.isArray(data.items)) {
+            throw new Error("后端返回的数据中缺少 items 数组");
+        }
+
+        const cards = data.items.map(item => ({
+            // vod_id 必须是字符串，我们将关键信息打包成JSON字符串
+            vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
+            vod_name: item.title,
+            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
+            vod_remarks: item.release_date || item.vote_average?.toFixed(1) || '',
+            // ext 也存储一份，方便某些APP直接读取
+            ext: { tmdbid: item.tmdbid, type: item.media_type }
+        }));
+
+        log(`[${context}] ✓ 成功格式化 ${cards.length} 个卡片`);
+        return jsonify({ list: cards });
+
+    } catch (e) {
+        log(`[${context}] ❌ 请求或处理数据时发生异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
 }
 
-const appConfig = {
-  ver: 21, // 版本号更新
-  title: "低端影视",
-  site: "https://ddys.la",
-  tabs: [
-    { name: '首页', ext: { url: '/' } },
-    { name: '电影', ext: { url: '/category/dianying.html' } },
-    { name: '剧集', ext: { url: '/category/juji.html' } },
-    { name: '动漫', ext: { url: '/category/dongman.html' } },
-    { name: '综艺', ext: { url: '/category/zongyi.html' } },
-  ]
-}
+// --- APP 插件入口函数 (严格遵循规范) ---
 
+// 规范函数1: getConfig (用于初始化)
 async function getConfig() {
-  return jsonify(appConfig)
+    log("==== 插件初始化 V6.0 (遵循APP规范) ====");
+    // 分类在这里写死
+    const CATEGORIES = [
+        { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
+        { name: 'IMDb-热门剧集', ext: { listId: 2143362 } },
+        { name: 'IMDb-高分电影', ext: { listId: 2142753 } },
+        { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
+    ];
+    return jsonify({
+        ver: 6.0,
+        title: '影视聚合(API)',
+        site: MY_BACKEND_URL,
+        tabs: CATEGORIES,
+    });
 }
 
-async function getCards(ext) {
-  ext = argsify(ext)
-  let url = appConfig.site + ext.url
-  const page = ext.page || 1
-
-  if (page > 1) {
-    if (ext.url === '/') url = `${appConfig.site}/page/${page}`
-    else url = url.replace('.html', `-${page}.html`)
-  }
-
-  const { data } = await $fetch.get(url, { headers })
-  const $ = cheerio.load(data)
-  const list = []
-
-  $('ul.stui-vodlist > li').each((_, each) => {
-    const a = $(each).find('a.stui-vodlist__thumb')
-    const title = a.attr('title')
-    const href = a.attr('href')
-    const pic = a.attr('data-original')
-    const remarks = a.find('.pic-text').text().trim()
-
-    if (href && title) {
-      list.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: pic,
-        vod_remarks: remarks,
-        ext: { url: href }
-      })
-    }
-  })
-
-  return jsonify({ list })
+// 规范函数2: home (APP调用以获取分类)
+async function home() {
+    const c = await getConfig();
+    const config = JSON.parse(c);
+    // 严格返回 { class: ..., filters: ... } 结构
+    return jsonify({ class: config.tabs, filters: {} });
 }
 
+// 规范函数3: category (APP调用以获取分类下的内容)
+async function category(tid, pg) {
+    // tid 就是 getConfig 中定义的 ext 对象: { listId: 2142788 }
+    const listId = tid.listId;
+    log(`[category] APP请求分类, listId: ${listId}, page: ${pg}`);
+    return getCards({ listId: listId, page: pg || 1 });
+}
+
+// 规范函数4: search (APP调用以获取搜索结果)
 async function search(ext) {
-  ext = argsify(ext)
-  const text = encodeURIComponent(ext.text)
-  const page = ext.page || 1
-  const url = `${appConfig.site}/search/${text}----------${page}---.html`
+    ext = argsify(ext);
+    const searchText = ext.text || '';
+    const page = parseInt(ext.page || 1, 10);
 
-  const { data } = await $fetch.get(url, { headers })
-  const $ = cheerio.load(data)
-  const list = []
-
-  $('ul.stui-vodlist > li').each((_, each) => {
-    const a = $(each).find('a.stui-vodlist__thumb')
-    const title = a.attr('title')
-    const href = a.attr('href')
-    const pic = a.attr('data-original')
-    const remarks = a.find('.pic-text').text().trim()
-
-    if (href && title) {
-      list.push({
-        vod_id: href,
-        vod_name: title,
-        vod_pic: pic,
-        vod_remarks: remarks,
-        ext: { url: href }
-      })
+    // nullbr 的搜索API似乎不支持分页，或分页逻辑未知，为避免无限加载，只响应第一页
+    if (page > 1) {
+        log(`[search] 页码 > 1，返回空列表以停止。`);
+        return jsonify({ list: [] });
     }
-  })
+    if (!searchText) return jsonify({ list: [] });
 
-  return jsonify({ list })
+    log(`[search] APP请求搜索, keyword: "${searchText}"`);
+    return getCards({ keyword: searchText });
 }
 
-async function getTracks(ext) {
-  ext = argsify(ext)
-  const url = appConfig.site + ext.url
-  const { data } = await $fetch.get(url, { headers })
-  const $ = cheerio.load(data)
-  const groups = []
+// 规范函数5: detail (APP调用以获取详情和播放列表)
+async function detail(id) {
+    // id 是 vod_id, 即 '{"tmdbid":123,"type":"movie"}'
+    log(`[detail] APP请求详情, vod_id: ${id}`);
+    try {
+        const { tmdbid, type } = JSON.parse(id);
+        if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
 
-  $('.stui-vodlist__head').each((_, head) => {
-    const title = $(head).find('h3').text().trim()
-    const list = $(head).next('ul.stui-content__playlist')
+        const requestUrl = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
+        log(`[detail] 正在请求后端: ${requestUrl}`);
+        
+        const { data } = await $fetch.get(requestUrl);
+        if (!data['115'] || !Array.isArray(data['115'])) {
+            throw new Error("后端未返回有效的115资源列表");
+        }
 
-    if (title.includes('猜你喜欢') || list.length === 0) return
+        const tracks = data['115'].map(item => ({
+            name: `[115] ${item.title} (${item.size})`,
+            pan: item.share_link, // 这是最终的网盘链接
+            ext: {}
+        }));
 
-    const tracks = []
-    list.find('li a').each((_, a) => {
-      const name = $(a).text().trim()
-      const href = $(a).attr('href')
-      if (href) tracks.push({ name, ext: { play_url: href } })
-    })
+        log(`[detail] ✓ 成功解析出 ${tracks.length} 个115网盘链接`);
+        // 严格返回 { list: [{ title: ..., tracks: [...] }] } 结构
+        return jsonify({
+            list: [{ title: '115网盘资源', tracks: tracks }]
+        });
 
-    if (tracks.length > 0) groups.push({ title, tracks })
-  })
-
-  if (groups.length === 0) groups.push({ title: '暂无播放资源', tracks: [] })
-  return jsonify({ list: groups })
+    } catch (e) {
+        log(`[detail] ❌ 获取详情时发生异常: ${e.message}`);
+        return jsonify({ list: [] });
+    }
 }
 
-/**
- * 改进后的 getPlayinfo 函数
- * 逻辑：
- * 1. 访问播放页面 (ext.play_url)，获取 iframe 的 src (即解析器 URL)。
- * 2. 访问解析器 URL (ddcloud/index.php?url=...)。
- * 3. 从解析器页面的 HTML 中提取出最终的视频地址。
- */
-async function getPlayinfo(ext) {
-  ext = argsify(ext)
-  const playerPageUrl = appConfig.site + ext.play_url
-  let debug = `🧩 播放调试信息\n[playerPageUrl] ${playerPageUrl}\n`
-
-  try {
-    // 1. 访问播放页面，获取 iframe 的 src (解析器 URL)
-    const { data: playerPageData } = await $fetch.get(playerPageUrl, { headers })
-    const $ = cheerio.load(playerPageData)
-    
-    // 尝试从 iframe 标签中提取 src
-    const iframeSrc = $('iframe').attr('src')
-    if (!iframeSrc) {
-      debug += "❌ 未找到播放器 iframe 标签\n"
-      return jsonify({ urls: [], desc: debug })
-    }
-
-    const parserUrl = iframeSrc.startsWith('http') ? iframeSrc : appConfig.site + iframeSrc
-    debug += `[parserUrl] ${parserUrl}\n`
-
-    // 2. 访问解析器 URL，获取最终视频地址
-    // 注意：这里需要确保 Referer 是播放页面，以防解析器检查来源
-    const parserHeaders = {
-        ...headers,
-        'Referer': playerPageUrl
-    }
-    const { data: parserData } = await $fetch.get(parserUrl, { headers: parserHeaders })
-    
-    // 3. 从解析器页面的 HTML 中提取最终的视频地址
-    // 目标是匹配 var data = JSON.parse('...') 中的 JSON 字符串
-    const match = parserData.match(/var data = JSON\.parse\('(.*?)'\);/)
-    if (!match || match.length < 2) {
-      debug += "❌ 未在解析器页面中匹配到 JSON 数据\n"
-      return jsonify({ urls: [], desc: debug })
-    }
-
-    // match[1] 是被转义的 JSON 字符串，需要先进行反转义
-    const escapedJson = match[1]
-    // 替换掉转义的斜杠，使其成为有效的 JSON 字符串
-    const jsonString = escapedJson.replace(/\\(.)/g, '$1') 
-    
-    debug += `[jsonString] ${jsonString.substring(0, 100)}...\n`
-
-    const obj = JSON.parse(jsonString)
-    const finalUrl = obj.url || ''
-    
-    debug += `[finalUrl] ${finalUrl.substring(0, 100)}...\n`
-
-    if (finalUrl.startsWith('http') && finalUrl.includes('.m3u8')) {
-      debug += `✅ 获取成功\n`
-      // 返回最终的 M3U8 地址
-      return jsonify({ urls: [finalUrl], ui: 1, desc: debug })
-    }
-
-    debug += `❌ 最终 URL 格式不正确: ${finalUrl}`
-    return jsonify({ urls: [], desc: debug })
-
-  } catch (e) {
-    debug += `💥 异常: ${e.message}`
-    return jsonify({ urls: [], desc: debug })
-  }
+// 规范函数6: play (APP调用以播放)
+async function play(flag, id) {
+    // 在我们的设计中，id 就是网盘链接
+    log(`[play] APP请求播放, URL: ${id}`);
+    return jsonify({ url: id });
 }
 
-// 保留原有的 base64decode 函数，尽管在新逻辑中不再需要，以防其他地方调用
-function base64decode(str) {
-  const base64DecodeChars = new Array(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1)
-  let c1, c2, c3, c4
-  let i = 0, len = str.length, out = ""
-  while (i < len) {
-    do { c1 = base64DecodeChars[str.charCodeAt(i++) & 0xff] } while (i < len && c1 == -1)
-    if (c1 == -1) break
-    do { c2 = base64DecodeChars[str.charCodeAt(i++) & 0xff] } while (i < len && c2 == -1)
-    if (c2 == -1) break
-    out += String.fromCharCode((c1 << 2) | ((c2 & 0x30) >> 4))
-    do {
-      c3 = str.charCodeAt(i++) & 0xff
-      if (c3 == 61) return out
-      c3 = base64DecodeChars[c3]
-    } while (i < len && c3 == -1)
-    if (c3 == -1) break
-    out += String.fromCharCode(((c2 & 0XF) << 4) | ((c3 & 0x3C) >> 2))
-    do {
-      c4 = str.charCodeAt(i++) & 0xff
-      if (c4 == 61) return out
-      c4 = base64DecodeChars[c4]
-      } while (i < len && c4 == -1)
-    if (c4 == -1) break
-    out += String.fromCharCode(((c3 & 0x03) << 6) | c4)
-  }
-  return out
+// 规范函数7: init (兼容旧版APP的初始化入口)
+async function init() {
+    return getConfig();
 }
