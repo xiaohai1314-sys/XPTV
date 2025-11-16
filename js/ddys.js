@@ -1,16 +1,15 @@
 // --- 配置区 ---
-const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; 
+const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
 const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
 const FALLBACK_PIC = 'https://img.tukuppt.com/png_preview/00/42/01/P5kFr2sEwJ.jpg';
 const DEBUG = true;
 
-// --- 辅助函数 ---
-function log(msg) { if (DEBUG) console.log(`[插件V7.2] ${msg}`); }
+// --- 辅助函数 (与您原版一致) ---
+function log(msg) { if (DEBUG) console.log(`[插件V7.0-最终修正版] ${msg}`); }
 function argsify(ext) { return (typeof ext === 'string') ? JSON.parse(ext) : (ext || {}); }
 function jsonify(data) { return JSON.stringify(data); }
 
-
-// ========== 核心列表获取 ==========
+// --- 核心数据获取与格式化函数 ---
 async function getCards(params) {
     let requestUrl;
     let context;
@@ -25,13 +24,11 @@ async function getCards(params) {
         return jsonify({ list: [] });
     }
 
-    log(`[${context}] 请求后端: ${requestUrl}`);
-
+    log(`[${context}] 正在请求后端: ${requestUrl}`);
     try {
         const { data } = await $fetch.get(requestUrl);
-
         if (!data || !Array.isArray(data.items)) {
-            log(`⚠️ 后端返回异常`);
+            log(`[${context}] ⚠️ 后端返回数据格式不正确，返回空列表。`);
             return jsonify({ list: [] });
         }
 
@@ -43,108 +40,106 @@ async function getCards(params) {
             ext: { tmdbid: item.tmdbid, type: item.media_type }
         }));
 
+        const pagecount = data.total_page || data.total_pages || 1;
+        const page = data.page || params.page || 1;
+
+        log(`[${context}] ✓ 成功格式化 ${cards.length} 个卡片 (第${page}页/共${pagecount}页)`);
         return jsonify({
-            page: data.page || params.page || 1,
-            pagecount: data.total_pages || data.total_page || 1,
+            page: page,
+            pagecount: pagecount,
             list: cards
         });
 
     } catch (e) {
-        log(`❌ getCards 异常: ${e.message}`);
+        log(`[${context}] ❌ 请求或处理数据时发生异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
+// --- APP 插件入口函数 ---
 
-// ========== APP 必需函数 ==========
-
-// ① getConfig
+// 规范函数1: getConfig
 async function getConfig() {
-    log("初始化 V7.2");
-
+    log("==== 插件初始化 V7.0 ====");
     const CATEGORIES = [
         { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
         { name: 'IMDb-热门剧集', ext: { listId: 2143362 } },
         { name: 'IMDb-高分电影', ext: { listId: 2142753 } },
         { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
     ];
-
     return jsonify({
-        ver: 7.2,
+        ver: 7.0,
         title: '影视聚合(API)',
         site: MY_BACKEND_URL,
-        tabs: CATEGORIES
+        tabs: CATEGORIES,
     });
 }
 
-// ② home
+// 规范函数2: home
 async function home() {
-    const cfg = JSON.parse(await getConfig());
-    return jsonify({ class: cfg.tabs, filters: {} });
+    const c = await getConfig();
+    const config = JSON.parse(c);
+    return jsonify({ class: config.tabs, filters: {} });
 }
 
-// ③ category（核心修复点）
-//    tid.ext.listId 才是正确的
+// 规范函数3: category
 async function category(tid, pg) {
-    const listId = tid?.ext?.listId;  // ✅ 正确读取位置
-    const page = pg || 1;
-
-    log(`[category] listId=${listId} page=${page}`);
-    if (!listId) return jsonify({ list: [] });
-
-    return getCards({ listId, page });
+    const listId = tid.listId;
+    log(`[category] APP请求分类, listId: ${listId}, page: ${pg}`);
+    return getCards({ listId: listId, page: pg || 1 });
 }
 
-// ④ search
+// 规范函数4: search
 async function search(ext) {
     ext = argsify(ext);
-    const text = ext.text || "";
-    const page = ext.page || 1;
+    const searchText = ext.text || '';
+    const page = parseInt(ext.page || 1, 10);
 
-    if (!text) return jsonify({ list: [] });
+    if (!searchText) return jsonify({ list: [] });
 
-    log(`[search] keyword="${text}" page=${page}`);
-    return getCards({ keyword: text, page });
+    log(`[search] APP请求搜索, keyword: "${searchText}", page: ${page}`);
+    return getCards({ keyword: searchText, page: page });
 }
 
-// ⑤ detail
+// 规范函数5: detail
 async function detail(id) {
-    log(`[detail] id=${id}`);
-
+    log(`[detail] APP请求详情, vod_id: ${id}`);
     try {
         const { tmdbid, type } = JSON.parse(id);
+        if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
 
-        const url = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
-        const { data } = await $fetch.get(url);
-
+        const requestUrl = `${MY_BACKEND_URL}/resource?tmdbid=${tmdbid}&type=${type}`;
+        log(`[detail] 正在请求后端: ${requestUrl}`);
+        
+        const { data } = await $fetch.get(requestUrl);
         if (!data || !Array.isArray(data['115'])) {
-            return jsonify({ list: [] });
+            throw new Error("后端未返回有效的115资源列表");
         }
 
         const tracks = data['115'].map(item => ({
             name: `[115] ${item.title} (${item.size})`,
-            pan: item.share_link
+            pan: item.share_link,
+            ext: {}
         }));
 
+        log(`[detail] ✓ 成功解析出 ${tracks.length} 个115网盘链接`);
         return jsonify({
-            list: [{
-                title: "115网盘资源",
-                tracks
-            }]
+            list: [{ title: '115网盘资源', tracks: tracks }]
         });
 
     } catch (e) {
-        log(`❌ detail error: ${e.message}`);
+        log(`[detail] ❌ 获取详情时发生异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ⑥ play
+// 规范函数6: play
 async function play(flag, id) {
+    log(`[play] APP请求播放, URL: ${id}`);
     return jsonify({ url: id });
 }
 
-// ⑦ init
+// 规范函数7: init
 async function init() {
     return getConfig();
 }
