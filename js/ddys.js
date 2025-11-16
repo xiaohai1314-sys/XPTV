@@ -1,11 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V20.0 (最终的回归)
+ * Nullbr 影视库前端插件 - V21.0 (最终的回归与补完)
  *
  * 最终架构:
- * 1. 严格、一字不差地回归 V1.0 的完美架构，确保 Tab 显示。
+ * 1. 严格、一字不差地回归 V1.0 的完美架构和网络请求语法，确保能与后端通信。
  * 2. 【最终修正】只在 category() 函数内部，增加一个最简单的 undefined 判断，
  *    确保在 App 首次调用时，即使 tid 为 undefined，也能获取到默认分类 ID。
- *    这解决了“没通信”和“空列表”的根本问题。
+ *    这解决了“错误通信”(id=undefined)和“空列表”的根本问题。
  * 3. 这是对你所有正确反馈的最终、最谦卑的服从。
  *
  * 作者: Manus
@@ -18,7 +18,7 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V20.0] ${message}`); }
+function log(message) { console.log(`[Nullbr插件 V21.0] ${message}`); }
 
 // --- App 插件入口函数 ---
 
@@ -36,7 +36,7 @@ async function getConfig() {
         { name: '高分剧集', ext: { id: 2143363 } },
     ];
     return jsonify({
-        ver: 20.0,
+        ver: 21.0,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: categories,
@@ -72,7 +72,7 @@ async function category(tid, pg, filter, ext) {
 }
 
 
-// ★★★★★【getCards() 函数 - 严格回归 V1.0，只修正网络请求语法】★★★★★
+// ★★★★★【getCards() 函数 - 严格回归 V1.0 的所有语法】★★★★★
 async function getCards(ext) {
     const categoryId = ext.id;
     const page = ext.page || 1;
@@ -86,9 +86,9 @@ async function getCards(ext) {
     log(`正在请求后端: ${requestUrl}`);
 
     try {
-        // 使用我们最终确认的、最稳妥的网络请求语法
-        const { data: responseData } = await $fetch.get(requestUrl);
-        const data = JSON.parse(responseData);
+        // ★★★★★ 严格、一字不差地回归 V1.0 的网络请求语法 ★★★★★
+        const response = await $fetch.get(requestUrl);
+        const data = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
 
         if (!data || !Array.isArray(data.items)) {
             throw new Error("后端返回数据格式不正确");
