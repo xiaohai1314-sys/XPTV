@@ -1,38 +1,28 @@
 /**
- * Nullbr 影视库前端插件 - V27.7 (诊断专用完整版：强制 Toast 所有关键参数 + 保留 Tab + 精准定位 tid)
+ * Nullbr 影视库前端插件 - V32.0 (列表显示调试版)
  *
- * 目的：让你看到 App 到底传了什么给 category() 和 getCards()
- * 修复：无（仅诊断）
- * 保留：原 V27.0 结构 + 4 个 Tab
- * 完整代码：100% 可直接复制运行
+ * 变更日志:
+ * - V32.0 (2025-11-17):
+ *   - [全新调试策略] 放弃 throw Error()，因为它不会产生弹窗。
+ *   - 改造 category() 函数，使其直接返回一个包含调试信息的“假”列表。
+ *   - 将 tid 的类型和内容，分别显示在第一个列表项的标题和备注中。
+ *   - 这样，只要列表能显示，我们就能在屏幕上看到 tid 的原始信息。
+ *
+ * 使用方法:
+ * 1. 替换插件代码为此版本。
+ * 2. 重新加载插件。
+ * 3. 点击任意一个分类Tab。
+ * 4. 查看屏幕上显示的第一个“电影”卡片，它的标题和简介就是我们要的调试信息。
+ *
+ * 作者: Manus
+ * 日期: 2025-11-17
  */
 
+// --- 常量和辅助函数 (保持不变) ---
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-
-// --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-
-// ★★★ 超强 Toast 日志（红色 + 5秒 + 强制弹）★★★
-function log(msg) {
-    const text = `[诊断 V27.7] ${msg}`;
-    console.log(text);
-    try {
-        if ($utils && $utils.toastError) {
-            $utils.toastError(text, 5000);
-        } else if ($utils && $utils.toast) {
-            $utils.toast(text, 5000);
-        } else if (typeof alert !== 'undefined') {
-            alert(text);
-        }
-    } catch (e) {}
-}
-
-// ★★★ 彻底清理字符串（移除零宽字符、空格、换行等）★★★
-function clean(str) {
-    return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim();
-}
-
+function log(msg) { console.log(`[Nullbr V32.0-Debug] ${msg}`); }
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
@@ -40,155 +30,61 @@ const CATEGORIES = [
     { name: '高分剧集', ext: { id: 2143363 } },
 ];
 
-// ---------------- 入口函数 ----------------
+// --- 入口函数 (保持不变) ---
+async function init(ext) { return getConfig(); }
+async function getConfig() { return jsonify({ ver: 32.0, title: 'Nullbr影视库 (调试版)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
-async function init(ext) {
-    log(`init() 被调用，ext: ${JSON.stringify(ext)}`);
-    return getConfig();
-}
+// -------------------- category (调试核心) --------------------
 
-async function getConfig() {
-    log("getConfig() 被调用");
-    return jsonify({
-        ver: 27.7,
-        title: 'Nullbr影视库',
-        site: API_BASE_URL,
-        tabs: CATEGORIES
-    });
-}
-
-// ★★★ home() 不变，保证分类 Tab 显示 ★★★
-async function home() {
-    log("home() 被调用，返回 class");
-    return jsonify({
-        class: CATEGORIES,
-        filters: {}
-    });
-}
-
-// -------------------- category：强制打印所有参数 --------------------
 async function category(tid, pg, filter, ext) {
-    log(`===== category() 被调用 =====`);
-    log(`tid 原始值: ${JSON.stringify(tid)}`);
-    log(`tid 类型: ${typeof tid}`);
-    log(`pg: ${pg}`);
-    log(`filter: ${JSON.stringify(filter)}`);
-    log(`ext: ${JSON.stringify(ext)}`);
+    // ★★★ 调试核心：构造一个假的列表项来显示 tid 信息 ★★★
 
-    let id = null;
-
-    // 1. 字符串处理
-    if (typeof tid === "string") {
-        const cleaned = clean(tid);
-        const n = parseInt(cleaned, 10);
-        if (!isNaN(n)) {
-            id = n;
-            log(`category()：字符串解析成功 → ID ${id}`);
-        } else {
-            log(`category()：字符串解析失败，清理后: "${cleaned}"`);
-        }
-    }
-
-    // 2. 对象处理
-    if (!id && typeof tid === "object" && tid !== null) {
-        if (tid.id !== undefined) {
-            id = tid.id;
-            log(`category()：从 tid.id 取到 ${id}`);
-        } else if (tid.ext?.id !== undefined) {
-            id = tid.ext.id;
-            log(`category()：从 tid.ext.id 取到 ${id}`);
-        } else if (tid.name) {
-            const found = CATEGORIES.find(c => clean(c.name) === clean(tid.name));
-            if (found) {
-                id = found.ext.id;
-                log(`category()：通过 name 匹配 → ID ${id}`);
-            }
-        }
-    }
-
-    // 3. 回退默认
-    if (!id) {
-        log("category()：所有解析失败，使用默认 ID 2142788");
-        id = CATEGORIES[0].ext.id;
-    }
-
-    log(`category() 最终返回 ID: ${id}`);
-    log(`===== category() 结束 =====`);
-
-    return getCards({ id, page: pg || 1 });
-}
-
-// -------------------- getCards：强制打印 ext --------------------
-async function getCards(ext) {
-    log(`===== getCards() 被调用 =====`);
-    log(`ext 完整值: ${JSON.stringify(ext)}`);
-
-    let categoryId = null;
-    if (ext && ext.id !== undefined) {
-        const cleaned = clean(ext.id);
-        categoryId = parseInt(cleaned, 10);
-        if (isNaN(categoryId)) {
-            log(`getCards()：id 转数字失败，原始: "${ext.id}"`);
-        } else {
-            log(`getCards()：成功解析 id → ${categoryId}`);
-        }
-    }
-
-    if (!categoryId) {
-        log("getCards()：id 无效，使用默认 2142788");
-        categoryId = CATEGORIES[0].ext.id;
-    }
-
-    const page = ext?.page || 1;
-    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`最终请求 URL: ${url}`);
-    log(`===== getCards() 结束 =====`);
-
+    const tid_type = typeof tid;
+    let tid_string;
     try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-
-        if (!data || !Array.isArray(data.items) || data.items.length === 0) {
-            log("后端返回空 items");
-            return jsonify({ list: [] });
-        }
-
-        const cards = data.items.map(item => ({
-            vod_id: `${item.media_type}_${item.tmdbid}`,
-            vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 
-                ? `⭐ ${item.vote_average.toFixed(1)}` 
-                : (item.release_date ? item.release_date.substring(0, 4) : '')
-        }));
-
-        return jsonify({
-            list: cards,
-            page: data.page || page,
-            pagecount: data.total_page || 1,
-            limit: cards.length,
-            total: data.total_items || 0
-        });
-
-    } catch (err) {
-        log(`请求失败: ${err.message}`);
-        return jsonify({ list: [] });
+        tid_string = JSON.stringify(tid);
+    } catch (e) {
+        tid_string = "无法JSON序列化";
     }
+
+    // 构造一个假的“电影”卡片
+    const debugCard = {
+        // 标题显示 tid 的类型
+        vod_name: `[调试] tid 类型: ${tid_type}`,
+        
+        // 备注/简介显示 tid 的内容
+        vod_remarks: `内容: ${tid_string}`,
+        
+        // 给一个占位ID和图片，确保卡片能显示
+        vod_id: 'debug_info_001',
+        vod_pic: 'https://img.zcool.cn/community/01a3815ab95212a8012060c839df75.png@1280w_1l_2o_100sh.png' // 一个放大镜图标
+    };
+
+    // 构造一个完整的列表返回给App
+    const debugList = {
+        list: [
+            debugCard,
+            // 你也可以在这里加一些正常的卡片，如果需要的话
+            { vod_name: '--- 以上是调试信息 ---', vod_id: 'sep_1' }
+        ],
+        page: 1,
+        pagecount: 1,
+        limit: 1,
+        total: 1
+    };
+
+    // 直接返回这个包含调试信息的假列表
+    return jsonify(debugList);
 }
 
-// ----------------- 占位函数 -----------------
 
-async function detail(id) {
-    log(`detail() 被调用，id: ${id}`);
-    return jsonify({ list: [] });
-}
+// ----------------- 其他函数 (保持占位) -----------------
 
-async function play(flag, id, flags) {
-    log(`play() 被调用，flag: ${flag}, id: ${id}`);
-    return jsonify({ url: "" });
+async function getCards(ext) { 
+    // 在这个调试版本中，getCards 不会被调用，但我们还是保留它
+    return jsonify({ list: [] }); 
 }
-
-async function search(wd, quick) {
-    log(`search() 被调用，wd: ${wd}, quick: ${quick}`);
-    return jsonify({ list: [] });
-}
+async function detail(id) { return jsonify({ list: [] }); }
+async function play(flag, id, flags) { return jsonify({ url: "" }); }
+async function search(wd, quick) { return jsonify({ list: [] }); }
