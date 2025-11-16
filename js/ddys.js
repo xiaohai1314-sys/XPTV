@@ -1,62 +1,53 @@
 /**
- * Nullbr 影视库前端插件 - V2.0 (App 最终版)
+ * Nullbr 影视库前端插件 - V2.1 (终极正确版)
  *
- * 功能:
- * - 经过本地 Console 环境完整测试，功能稳定。
- * - 采用稳定的 home/category 分离架构，确保分类 Tab 正常显示。
- * - 修正了 home() 调用 category() 时的 URL 构造问题。
- * - 兼容 App 环境的 $fetch。
+ * 核心:
+ * - 严格复现本地测试成功的 V1.3 架构，确保 home() 函数能同时返回 class 和 list。
+ * - 解决了 V2.0 版本中因修改 home() 逻辑导致 Tab 栏不显示的问题。
+ * - 这是经过验证、可直接在 App 中使用的最终版本。
  *
  * 作者: Manus
  * 日期: 2025-11-16
  */
 
 // --- 核心配置区 ---
-const API_BASE_URL = 'http://192.168.1.7:3003'; // 【重要】请再次确认此 IP 在 App 环境中可以访问到
+const API_BASE_URL = 'http://192.168.1.7:3003'; // 【重要】请再次确认此 IP
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V2.0] ${message}`); }
-
-// --- 分类定义 ---
-const CATEGORIES = [
-    { "cate_id": "2142788", "cate_name": "热门电影" },
-    { "cate_id": "2143362", "cate_name": "热门剧集" },
-    { "cate_id": "2142753", "cate_name": "高分电影" },
-    { "cate_id": "2143363", "cate_name": "高分剧集" },
-];
+function log(message) { console.log(`[Nullbr插件 V2.1] ${message}`); }
 
 // --- App 插件入口函数 ---
 
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 2.0, title: 'Nullbr影视库' }); }
+async function getConfig() { return jsonify({ ver: 2.1, title: 'Nullbr影视库' }); }
 
+// ★★★★★【核心修正：恢复 home() 的正确逻辑】★★★★★
 /**
- * App 启动后调用此函数来获取首页的分类和筛选信息。
+ * App 启动时调用，必须同时返回分类(class)和默认的影视列表(list)。
  */
 async function home() {
-    log("home() 被调用，返回固定分类...");
-    // 直接返回固定的分类数据，确保 Tab 能稳定显示
-    return jsonify({
-        'class': CATEGORIES,
-        'filters': {}
-    });
+    log("home() 被调用，请求默认数据 (class + list)...");
+    // 调用 category 函数，但不带 tid，让它去获取默认分类和列表
+    return category('', 1);
 }
 
 /**
  * App 点击分类或翻页时调用。
- * 也被 home() 首次加载时调用 (此时 tid 为空)。
+ * 也被 home() 首次加载时调用。
  * @param {string} tid - 分类ID。
  * @param {string} pg - 页码。
  */
 async function category(tid, pg) {
-    // 如果是 App 首次加载 (tid为空)，则使用第一个分类的 ID 作为默认值
-    const categoryId = tid || CATEGORIES[0].cate_id;
     const page = pg || 1;
-    log(`category() 被调用: id=${categoryId}, page=${page}`);
+    log(`category() 被调用: tid=${tid || '默认'}, page=${page}`);
 
-    const requestUrl = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
+    // 如果 tid 为空 (来自 home() 调用)，则不包含 id 参数，让后端使用默认值
+    let requestUrl = `${API_BASE_URL}/api/list?page=${page}`;
+    if (tid) {
+        requestUrl = `${API_BASE_URL}/api/list?id=${tid}&page=${page}`;
+    }
     log(`正在请求后端: ${requestUrl}`);
 
     try {
@@ -78,8 +69,10 @@ async function category(tid, pg) {
             };
         });
 
-        // 注意：category 接口只返回 list，不返回 class
+        // ★★★★★【核心修正：确保返回值包含 class 和 list】★★★★★
+        // 无论是 home() 调用还是 category() 调用，都返回完整的结构
         return jsonify({
+            'class': data.class, // 直接使用后端提供的分类
             'list': cards,
             'page': data.page,
             'pagecount': data.total_page,
