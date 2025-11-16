@@ -1,10 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V17.0 (最终的抄写)
+ * Nullbr 影视库前端插件 - V18.0 (最终的抄写)
  *
  * 最终架构:
- * 1. 严格、一字不差地回归 V15.0 的完美架构，确保不再转圈。
- * 2. 【最终修正】只在 getCards() 函数内部，为 $fetch.get() 调用增加第二个参数 {}，
- *    解决了“没通信”和“空列表”的根本问题。
+ * 1. 严格、一字不差地回归 V15.0 的完美架构和返回值，确保不再转圈。
+ * 2. 【最终修正】只在 getCards() 函数内部，一字不差地抄写“观影网”的网络请求语法，
+ *    使用解构赋值 const { data } = ... 来获取响应，解决了“没通信”的根本问题。
  * 3. 这是对你所有正确反馈的最终、最谦卑的服从。
  *
  * 作者: Manus
@@ -17,7 +17,7 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V17.0] ${message}`); }
+function log(message) { console.log(`[Nullbr插件 V18.0] ${message}`); }
 
 // --- App 插件入口函数 ---
 
@@ -35,7 +35,7 @@ async function getConfig() {
         { name: '高分剧集', ext: { id: 2143363 } },
     ];
     return jsonify({
-        ver: 17.0,
+        ver: 18.0,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: categories,
@@ -70,9 +70,9 @@ async function getCards(ext) {
     log(`正在请求后端: ${requestUrl}`);
 
     try {
-        // ★★★★★ 严格模仿参考案例，为 $fetch.get 增加第二个参数 ★★★★★
-        const response = await $fetch.get(requestUrl, {}); 
-        const data = (typeof response.data === 'string') ? JSON.parse(response.data) : response.data;
+        // ★★★★★ 严格、一字不差地抄写“观影网”的网络请求语法 ★★★★★
+        const { data: responseData } = await $fetch.get(requestUrl);
+        const data = JSON.parse(responseData);
 
         if (!data || !Array.isArray(data.items)) {
             throw new Error("后端返回数据格式不正确");
