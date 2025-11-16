@@ -1,9 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (兼容性修复 + Toast 诊断版)
+ * Nullbr 影视库前端插件 - V271.0 (兼容性修复 + Toast 诊断版)
  *
  * 目标:
  * 1. 【兼容性修复】保留所有 ES5 语法，确保在最古老的环境下运行。
  * 2. 【Toast 诊断】在 category() 函数的 ID 解析成功或失败时，通过 Toast 消息输出结果。
+ * 3. 保留回退机制，确保 App 不会崩溃。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -23,6 +24,7 @@ function showToast(msg, isError) {
         // 假设 $toast.show 支持第二个参数来控制红色/错误样式
         $toast.show(msg, isError);
     } else {
+        // 如果 $toast 不存在，则静默失败，不影响主逻辑
         log("[Toast-Fallback] " + msg);
     }
 }
@@ -60,12 +62,12 @@ async function home() {
 
 async function category(tid, pg, filter, ext) {
     let id = null;
-    var diagnosticInfo = null; // 用于存储诊断信息
+    var diagnosticInfo = null;
     
     // 1. 尝试解析 Object 或 Number 
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
-        else if (tid.ext && tid.ext.id) {
+        else if (tid.ext && tid.ext.id) { // ES5兼容性修复
             id = tid.ext.id;
         }
         
@@ -81,7 +83,8 @@ async function category(tid, pg, filter, ext) {
         if (!isNaN(n)) {
             id = n;
         } else {
-            var foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; });
+            // ES5兼容的find函数写法
+            var foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; }); 
             if (foundCategory) {
                 id = foundCategory.ext.id;
             }
@@ -95,7 +98,7 @@ async function category(tid, pg, filter, ext) {
     } else {
         // ★★★ 解析失败：显示红色 Toast ★★★
         
-        // Final-Safe 诊断：只诊断类型和最可能属性，避免 JSON.stringify 崩溃
+        // Final-Safe 诊断：避免 JSON.stringify 崩溃
         diagnosticInfo = "TYPE_" + (typeof tid);
         if (typeof tid === "object" && tid !== null) {
             if (tid.name) diagnosticInfo += "_HAS_NAME";
@@ -107,7 +110,7 @@ async function category(tid, pg, filter, ext) {
 
         showToast("❌ FAILED: 原始数据类型为: " + diagnosticInfo, true);
 
-        // 强制回退到第一个 ID，确保 App 继续加载内容
+        // ★★★ 强制回退到第一个 ID（重要！防止App崩溃）★★★
         id = CATEGORIES[0].ext.id; 
     }
     
@@ -129,6 +132,7 @@ async function getCards(ext) {
     }
 
     var page = (ext && ext.page) ? ext.page : 1;
+    // ES5 字符串拼接
     var url = API_BASE_URL + "/api/list?id=" + categoryId + "&page=" + page;
     
     try {
