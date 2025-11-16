@@ -1,10 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V6.0 (回归所有真理的最终版)
+ * Nullbr 影视库前端插件 - V7.0 (回归参考案例的终极版)
  *
  * 最终架构:
- * 1. 严格回归 V3.0 架构：home() 必须进行网络请求，并一次性返回 class 和 list。
- * 2. 【最终修正】class 数组的格式被严格修正为 App 唯一认识的 `[{ name: ..., ext: { id: ... } }]` 格式。
- * 3. 这是对你所有正确反馈的最终整合，不再包含任何我个人的错误推断。
+ * 1. 【天条】home() 绝对不进行任何网络请求。它的唯一职责是同步返回固定的分类列表。
+ * 2. 【天条】category() 是唯一负责网络请求的函数，用于获取列表数据。
+ * 3. 【天条】class 数组的格式严格遵循 App 唯一认识的 `[{ name: ..., ext: { id: ... } }]` 格式。
+ * 4. 这个版本是对你所有正确反馈的最终整合，不再包含任何我个人的错误推断。
  *
  * 作者: Manus
  * 日期: 2025-11-16
@@ -16,9 +17,9 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V6.0] ${message}`); }
+function log(message) { console.log(`[Nullbr插件 V7.0] ${message}`); }
 
-// ★★★★★【核心修正：使用 App 唯一认识的分类格式】★★★★★
+// ★★★★★【核心：App 唯一认识的分类格式】★★★★★
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
@@ -29,26 +30,29 @@ const CATEGORIES = [
 // --- App 插件入口函数 ---
 
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 6.0, title: 'Nullbr影视库', site: API_BASE_URL }); }
+async function getConfig() { return jsonify({ ver: 7.0, title: 'Nullbr影视库', site: API_BASE_URL }); }
 
-// ★★★★★【home() 函数 - V3.0 架构 + 正确的 class 格式】★★★★★
+// ★★★★★【home() 函数 - 绝对不能请求网络】★★★★★
 async function home() {
-    log("home() 被调用，获取分类和默认列表...");
-    // App 启动时，直接调用 category() 并使用第一个分类的 ID
-    // 这确保了 home() 的返回值包含了 class 和 list
-    return category(CATEGORIES[0].ext.id, 1);
+    log("home() 被调用，同步返回分类...");
+    // 严格遵守规则：只返回 class 数组，不包含 list，不进行任何网络请求。
+    return jsonify({
+        'class': CATEGORIES,
+        'filters': {}
+    });
 }
 
-// ★★★★★【category() 函数 - 统一的数据处理中心】★★★★★
+// ★★★★★【category() 函数 - 唯一的数据获取中心】★★★★★
 async function category(tid, pg) {
     log(`category() 被调用: tid=${tid}, pg=${pg}`);
     
+    // App 在渲染完 Tab 后，会自动用第一个分类的 ID 调用此函数
     const categoryId = tid || CATEGORIES[0].ext.id;
     const page = pg || 1;
 
     if (!categoryId) {
         log("错误: categoryId 为空。");
-        return jsonify({ 'class': CATEGORIES, list: [] });
+        return jsonify({ list: [] }); // 只返回 list
     }
 
     const requestUrl = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
@@ -72,9 +76,8 @@ async function category(tid, pg) {
             };
         });
 
-        // 无论是 home() 调用还是 category() 调用，都返回包含正确格式 class 和 list 的完整数据
+        // 严格遵守规则：只返回 list 和分页信息
         return jsonify({
-            'class': CATEGORIES,
             'list': cards,
             'page': data.page,
             'pagecount': data.total_page,
@@ -82,7 +85,7 @@ async function category(tid, pg) {
 
     } catch (e) {
         log(`请求数据失败: ${e.message}`);
-        return jsonify({ 'class': CATEGORIES, list: [] });
+        return jsonify({ list: [] });
     }
 }
 
