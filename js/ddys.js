@@ -1,13 +1,12 @@
 /**
- * Nullbr 影视库前端插件 - V24.2 (终极修复版)
+ * Nullbr 影视库前端插件 - V27.2 (终极防御版：彻底解决“所有分类内容相同”)
  *
- * 核心修复：
- * 1. 保留分类 tab，四个分类独立显示内容。
- * 2. 修复分页丢失，page 永远传递给后端。
- * 3. 避免无限重复加载第一页。
- * 4. 严格回归 V21.1 架构。
+ * 修复历史：
+ * V27.0 → 修复 category() tid 清理 + LaTeX 语法
+ * V27.1 → 增强 category() 对不可见字符 + 对象 name 的防御
+ * V27.2 → 终极修复 getCards()：强制 trim + parseInt 防止 ext.id 污染
  *
- * 作者: Manus
+ * 作者: Manus (由 Grok 3 终极修正)
  * 日期: 2025-11-17
  */
 
@@ -16,7 +15,12 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V24.2] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V27.2] ${msg}`); }
+
+// 彻底清理字符串（移除零宽字符、BOM、换行、空格等）
+function clean(str) {
+    return String(str || '').replace(/[\u200B-\u200D\uFEFF\r\n\t ]/g, '').trim();
+}
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -33,106 +37,53 @@ async function init(ext) {
 
 async function getConfig() {
     return jsonify({
-        ver: 24.2,
+        ver: 27.2,
         title: 'Nullbr影视库',
         site: API_BASE_URL,
         tabs: CATEGORIES
     });
 }
 
+// 保持 home() 不变，确保分类 Tab 正常显示
 async function home() {
     return jsonify({
-        class: CATEGORIES,
+        class: CATEGORIES, 
         filters: {}
     });
 }
 
-// -------------------- category --------------------
+// -------------------- category（终极防御解析 tid） --------------------
 
 async function category(tid, pg, filter, ext) {
     log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
     let id = null;
 
-    // 1️⃣ 尝试从对象提取
+    // --- 1. 对象类型处理 ---
     if (typeof tid === "object" && tid !== null) {
-        if (tid.id) id = tid.id;
-        else if (tid.ext?.id) id = tid.ext.id;
-    }
-
-    // 2️⃣ 尝试从字符串或数字提取
-    if (!id && typeof tid === "string") {
-        const n = parseInt(tid);
-        if (!isNaN(n)) id = n;
-    }
-    if (!id && typeof tid === "number") id = tid;
-
-    // 3️⃣ 绝对 fallback（只有完全无效时）
-    if (!id) {
-        log("category()：tid 无效，使用默认分类 ID");
-        id = CATEGORIES[0].ext.id;
-    }
-
-    const page = pg || 1;
-    log(`category() 解析后的分类 ID：${id}, page=${page}`);
-
-    // ✅ 传递 page，保证分页
-    return getCards({ id, page });
-}
-
-// -------------------- getCards --------------------
-
-async function getCards(ext) {
-    log(`getCards() 调用，ext 原始值：${JSON.stringify(ext)}`);
-
-    let categoryId = null;
-    let page = 1;
-
-    if (typeof ext === "object" && ext !== null) {
-        if (ext.id) categoryId = ext.id;
-        if (ext.page) page = ext.page;
-    }
-
-    // 仅在 categoryId 完全无效时 fallback
-    if (!categoryId) {
-        log("getCards()：ext.id 无效，使用默认分类 ID");
-        categoryId = CATEGORIES[0].ext.id;
-    }
-
-    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
-    log(`getCards() 请求 URL：${url}`);
-
-    try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-
-        if (!data || !Array.isArray(data.items)) {
-            log("后端返回空 items");
-            return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
+        if (tid.id !== undefined) {
+            id = parseInt(clean(tid.id), 10);
+            if (isNaN(id)) id = null;
+        } else if (tid.ext?.id !== undefined) {
+            id = parseInt(clean(tid.ext.id), 10);
+            if (isNaN(id)) id = null;
+        } else if (tid.name) {
+            const cleanedName = clean(tid.name);
+            const found = CATEGORIES.find(c => clean(c.name) === cleanedName);
+            if (found) {
+                id = found.ext.id;
+                log(`category()：通过对象 name 匹配成功 → ID ${id} ("${cleanedName}")`);
+            }
         }
-
-        const cards = data.items.map(item => ({
-            vod_id: `${item.media_type}_${item.tmdbid}`,
-            vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-        }));
-
-        return jsonify({
-            list: cards,
-            page: data.page || page,
-            pagecount: data.total_page || 1,
-            limit: cards.length,
-            total: data.total_items || cards.length
-        });
-
-    } catch (err) {
-        log(`请求失败：${err.message}`);
-        return jsonify({ list: [], page: page, pagecount: 1, limit: 0, total: 0 });
     }
-}
 
-// ----------------- 占位函数 -----------------
-
-async function detail(id) { log(`detail 未实现: ${id}`); return jsonify({ list: [] }); }
-async function play(flag, id, flags) { log(`play 未实现: ${id}`); return jsonify({ url: "" }); }
-async function search(wd, quick) { log(`search 未实现: ${wd}`); return jsonify({ list: [] }); }
+    // --- 2. 字符串类型处理 ---
+    if (!id && typeof tid === "string") {
+        const cleaned = clean(tid);
+        const n = parseInt(cleaned, 10);
+        if (!isNaN(n) && n > 0) {
+            id = n;
+            log(`category()：字符串解析为数字 ID ${id}`);
+        } else {
+            const found = CATEGORIES.find(c => clean(c.name) === cleaned);
+            if (found) {
+                id = found
