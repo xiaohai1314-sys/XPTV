@@ -1,12 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V9.2 (最终修复分类 Tab 版)
+ * Nullbr 影视库前端插件 - V9.1 (分类修复版)
+ * * 修正说明:
+ * - 核心修正: 修复了 getConfig() 函数中缺少 'tabs' 字段的问题。
+ * - 确保 getConfig() 同时返回 'tabs' 字段，以兼容 App 优先调用新接口获取分类的情况。
+ * - home() 函数保持 V9.0 的结构，作为旧版接口的兼容。
  *
- * 修复说明:
- * 1. 根本原因：App 插件加载器在加载时，会查找一个名为 'class' 的全局变量作为分类 Tab 的数据源。
- * 2. 解决方案：将分类数组重命名为全局变量 'class'。
- * 3. 移除 home() 函数返回值中的 'class' 字段，避免冗余和潜在冲突。
- *
- * 作者: Manus
+ * 作者: Manus / AI
  * 日期: 2025-11-16
  */
 
@@ -15,11 +14,11 @@ const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
-function jsonify(data  ) { return JSON.stringify(data); }
-function log(message) { console.log(`[Nullbr插件 V9.2] ${message}`); }
+function jsonify(data ) { return JSON.stringify(data); }
+function log(message) { console.log(`[Nullbr插件 V9.1] ${message}`); }
 
-// ★★★★★【核心：将分类数组重命名为全局变量 'class'】★★★★★
-const class = [ // <--- 关键修改点：重命名为 'class'
+// ★★★★★【核心：App 唯一认识的分类格式】★★★★★
+const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
     { name: '热门剧集', ext: { id: 2143362 } },
     { name: '高分电影', ext: { id: 2142753 } },
@@ -30,32 +29,34 @@ const class = [ // <--- 关键修改点：重命名为 'class'
 
 async function init(ext) { return jsonify({}); }
 
-// ★★★★★【getConfig() 函数 - 保持简洁】★★★★★
-async function getConfig() {
-    // App 会自动读取全局的 'class' 变量，无需在 getConfig 中重复定义 tabs
+// ★★★★★【V9.1 核心修复】★★★★★
+async function getConfig() { 
+    log("getConfig() 被调用，返回配置和分类数据...");
     return jsonify({ 
-        ver: 9.2, 
+        ver: 9.1, 
         title: 'Nullbr影视库', 
         site: API_BASE_URL,
-    });
+        tabs: CATEGORIES // <-- 确保分类数据在这里被返回
+    }); 
 }
 
-// ★★★★★【home() 函数 - 移除冗余的 'class' 字段】★★★★★
+// ★★★★★【home() 函数 - 兼容旧版】★★★★★
 async function home() {
-    log("home() 被调用，返回空列表...");
-    // 移除 'class' 字段，App 会自动使用全局的 'class' 变量
+    log("home() 被调用，返回分类和空列表...");
+    // 严格遵守旧版App的实现，同时返回 'class' 和 'list: []'
     return jsonify({
+        'class': CATEGORIES,
         'list': [],
         'filters': {}
     });
 }
 
-// ★★★★★【category() 函数 - 使用全局 'class' 变量】★★★★★
+// ★★★★★【category() 函数 - 保持 V9.0 的正确实现】★★★★★
 async function category(tid, pg) {
     log(`category() 被调用: tid=${tid}, pg=${pg}`);
     
-    // 使用全局 'class' 变量
-    const categoryId = tid || class[0].ext.id; // <--- 使用全局 'class'
+    // 确保 tid 是一个对象，如果是简单值则使用默认
+    const categoryId = typeof tid === 'object' ? tid.id : tid || CATEGORIES[0].ext.id;
     const page = pg || 1;
 
     if (!categoryId) {
@@ -84,7 +85,7 @@ async function category(tid, pg) {
             };
         });
 
-        // 严格遵守“观影网”的实现，只返回 list 和分页信息
+        // 严格遵守 App 接口，只返回 list 和分页信息
         return jsonify({
             'list': cards,
             'page': data.page,
