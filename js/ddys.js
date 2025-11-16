@@ -58,7 +58,7 @@ async function getConfig() {
     ];
 
     return jsonify({
-        ver: 7.1,
+        ver: 7.2,
         title: '影视聚合(API)',
         site: MY_BACKEND_URL,
         tabs: TABS    // ★ 不动你的结构
