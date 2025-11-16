@@ -1,17 +1,21 @@
 // --- 配置区 ---
 const MY_BACKEND_URL = "http://192.168.1.7:3003/api"; // 【重要】请确认这是您新后端的地址
+// 强制使用 HTTPS 基础 URL
 const POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500";
-const FALLBACK_PIC = 'https://img.tukuppt.com/png_preview/00/42/01/P5kFr2sEwJ.jpg';
+// 替代图片 URL (用于数据中缺少 poster 字段时)
+const FALLBACK_PIC = 'https://placehold.co/500x750/3498db/ffffff?text=No+Poster'; 
 const DEBUG = true;
 
 // --- 辅助函数 ---
-function log(msg) { if (DEBUG) console.log(`[插件V6.0] ${msg}`); }
-// 确保 argsify 能处理各种 ext 格式
+function log(msg) { if (DEBUG) console.log(`[插件V6.8] ${msg}`); }
+
+// 强化解析函数，处理字符串、对象或 null/undefined
 function argsify(ext) { 
-    if (typeof ext === 'string') {
+    if (typeof ext === 'string' && ext.trim().startsWith('{')) {
         try {
             return JSON.parse(ext) || {};
         } catch (e) {
+            log(`[argsify] ❌ JSON解析失败: ${e.message}`);
             return {};
         }
     }
@@ -24,12 +28,12 @@ function jsonify(data) { return JSON.stringify(data); }
 // 内部函数：获取卡片列表（被 category 和 search 调用）
 async function getCards(params) {
     let requestUrl;
-    let context; // 用于日志
+    let context; 
 
-    if (params.listId) { // 分类模式
+    if (params.listId) { 
         context = 'Category';
         requestUrl = `${MY_BACKEND_URL}/list?id=${params.listId}&page=${params.page || 1}`;
-    } else if (params.keyword) { // 搜索模式
+    } else if (params.keyword) { 
         context = 'Search';
         requestUrl = `${MY_BACKEND_URL}/search?keyword=${encodeURIComponent(params.keyword)}`;
     } else {
@@ -38,31 +42,54 @@ async function getCards(params) {
 
     log(`[${context}] 正在请求后端: ${requestUrl}`);
     try {
-        // 使用 $fetch.get 获取数据
         const response = await $fetch.get(requestUrl);
-        // 🚨 关键修正: 确保 response 是一个对象，并且其 data 属性存在
         const data = response.data || response; 
 
         if (!data.items || !Array.isArray(data.items)) {
-            // 后端返回成功，但数据结构不正确 (如果返回的是空列表，也应该是一个包含空 items 数组的对象)
             throw new Error(`后端返回的数据中缺少 items 数组或结构错误: ${JSON.stringify(data)}`);
         }
+        
+        log(`[${context}] ✅ 从后端接收到 ${data.items.length} 个项目`);
 
-        const cards = data.items.map(item => ({
-            // vod_id 必须是字符串，我们将关键信息打包成JSON字符串
-            vod_id: jsonify({ tmdbid: item.tmdbid, type: item.media_type }),
-            vod_name: item.title,
-            vod_pic: item.poster ? `${POSTER_BASE_URL}${item.poster}` : FALLBACK_PIC,
-            vod_remarks: item.release_date || item.vote_average?.toFixed(1) || '',
-            // ext 也存储一份，方便某些APP直接读取
-            ext: { tmdbid: item.tmdbid, type: item.media_type }
-        }));
+        const cards = data.items.map(item => {
+            // 1. 严格处理 ID
+            const tmdbid = String(item.tmdbid || ''); 
+            const media_type = item.media_type || 'movie'; 
+            
+            // 2. 严格处理 vod_remarks: 采用最安全的格式
+            let remarks = String(item.media_type || '类型');
+            if (item.vote_average && typeof item.vote_average === 'number') {
+                remarks = `⭐️ ${item.vote_average.toFixed(1)} / ${remarks}`;
+            }
 
-        log(`[${context}] ✓ 成功格式化 ${cards.length} 个卡片`);
+            // 3. 严格处理 vod_pic (海报)：保留图片拼接逻辑
+            const posterPath = item.poster || ''; 
+            
+            // 4. 严格处理 vod_name (标题)
+            const title = String(item.title || '未知标题').trim(); 
+            
+            // 只有当 tmdbid 有效时才返回卡片
+            if (!tmdbid) {
+                 return null;
+            } 
+            
+            const card = {
+                // vod_id: 必须是字符串，打包关键信息
+                vod_id: jsonify({ tmdbid: tmdbid, type: media_type }),
+                vod_name: title,
+                // 恢复图片拼接：使用 POSTER_BASE_URL
+                vod_pic: (posterPath && typeof posterPath === 'string') ? `${POSTER_BASE_URL}${posterPath}` : FALLBACK_PIC,
+                vod_remarks: remarks,
+                ext: { tmdbid: tmdbid, type: media_type }
+            };
+            return card;
+
+        }).filter(card => card !== null); // 过滤掉无效卡片
+
+        log(`[${context}] ✓ 最终向 APP 返回 ${cards.length} 个有效卡片`);
         return jsonify({ list: cards });
 
     } catch (e) {
-        // 改进的错误日志，尝试提取 HTTP 状态码和数据
         let errorMessage = e.message;
         if (e.response && e.response.status) {
             errorMessage = `HTTP 错误 ${e.response.status}. 响应内容: ${JSON.stringify(e.response.data)}`;
@@ -79,7 +106,7 @@ async function getCards(params) {
 
 // 规范函数1: getConfig (用于初始化)
 async function getConfig() {
-    log("==== 插件初始化 V6.0 (遵循APP规范) ====");
+    log("==== 插件初始化 V6.8 (终极兼容性修复 - 恢复图片) ====");
     // 分类在这里写死
     const CATEGORIES = [
         { name: 'IMDb-热门电影', ext: { listId: 2142788 } },
@@ -88,7 +115,7 @@ async function getConfig() {
         { name: 'IMDb-高分剧集', ext: { listId: 2143363 } }
     ];
     return jsonify({
-        ver: 6.0,
+        ver: 6.8,
         title: '影视聚合(API)',
         site: MY_BACKEND_URL,
         tabs: CATEGORIES,
@@ -99,15 +126,12 @@ async function getConfig() {
 async function home() {
     const c = await getConfig();
     const config = JSON.parse(c);
-    // 严格返回 { class: ..., filters: ... } 结构
     return jsonify({ class: config.tabs, filters: {} });
 }
 
 // 规范函数3: category (APP调用以获取分类下的内容)
 async function category(tid, pg) {
-    // 🚨 修复分类无通信连接问题: 确保 tid 被解析为对象
     const ext = argsify(tid);
-    
     const listId = ext.listId;
     
     if (!listId) {
@@ -125,7 +149,6 @@ async function search(ext) {
     const searchText = ext.text || '';
     const page = parseInt(ext.page || 1, 10);
 
-    // nullbr 的搜索API似乎不支持分页，或分页逻辑未知，为避免无限加载，只响应第一页
     if (page > 1) {
         log(`[search] 页码 > 1，返回空列表以停止。`);
         return jsonify({ list: [] });
@@ -138,10 +161,8 @@ async function search(ext) {
 
 // 规范函数5: detail (APP调用以获取详情和播放列表)
 async function detail(id) {
-    // id 是 vod_id, 即 '{"tmdbid":123,"type":"movie"}'
     log(`[detail] APP请求详情, vod_id: ${id}`);
     try {
-        // 严格解析 vod_id
         const { tmdbid, type } = JSON.parse(id);
         if (!tmdbid || !type) throw new Error("vod_id 格式不正确");
 
@@ -156,13 +177,12 @@ async function detail(id) {
         }
 
         const tracks = data['115'].map(item => ({
-            name: `[115] ${item.title} (${item.size})`,
-            pan: item.share_link, // 这是最终的网盘链接
+            name: `[115] ${item.title || '未知资源'} (${item.size || '未知大小'})`,
+            pan: item.share_link, 
             ext: {}
         }));
 
         log(`[detail] ✓ 成功解析出 ${tracks.length} 个115网盘链接`);
-        // 严格返回 { list: [{ title: ..., tracks: [...] }] } 结构
         return jsonify({
             list: [{ title: '115网盘资源', tracks: tracks }]
         });
@@ -181,7 +201,6 @@ async function detail(id) {
 
 // 规范函数6: play (APP调用以播放)
 async function play(flag, id) {
-    // 在我们的设计中，id 就是网盘链接
     log(`[play] APP请求播放, URL: ${id}`);
     return jsonify({ url: id });
 }
