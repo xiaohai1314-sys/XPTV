@@ -1,9 +1,9 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (兼容性修复 + App 界面诊断版)
+ * Nullbr 影视库前端插件 - V28.0 (兼容性修复 + Ultra-Safe 诊断版)
  *
  * 目标:
  * 1. 【兼容性修复】解决老旧 App 环境中 ID 解析失败的问题。
- * 2. 【诊断功能】在 ID 解析失败时，将原始 tid 值作为电影标题显示在 App 界面上。
+ * 2. 【最终诊断】使用最古老的 ES5 字符串拼接进行诊断，避免 App 崩溃。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -14,7 +14,7 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V27.0] ${msg}`); }
+function log(msg) { console.log("[Nullbr V27.0] " + msg); } // 也把 log 改成 ES5 兼容
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -45,16 +45,15 @@ async function home() {
     });
 }
 
-// -------------------- category（兼容性修复版 + 诊断注入） --------------------
+// -------------------- category（Ultra-Safe 诊断注入） --------------------
 
 async function category(tid, pg, filter, ext) {
     let id = null;
     
-    // 1. 尝试解析 Object 或 Number
+    // 1. 尝试解析 Object 或 Number (兼容性修复保留)
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
         
-        // ★★★ 兼容性修复：替换可选链操作符 ★★★
         else if (tid.ext && tid.ext.id) {
             id = tid.ext.id;
         }
@@ -63,7 +62,7 @@ async function category(tid, pg, filter, ext) {
         id = tid;
     }
     
-    // 2. 处理字符串（防御性清理）
+    // 2. 处理字符串（防御性清理保留）
     if (!id && typeof tid === "string") {
         const trimmedTid = tid.trim(); 
 
@@ -71,7 +70,7 @@ async function category(tid, pg, filter, ext) {
         if (!isNaN(n)) {
             id = n;
         } else {
-            const foundCategory = CATEGORIES.find(cat => cat.name === trimmedTid);
+            const foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; }); // 替换 find function 为兼容写法
             if (foundCategory) {
                 id = foundCategory.ext.id;
             }
@@ -85,16 +84,14 @@ async function category(tid, pg, filter, ext) {
             // 将原始 tid 转化为字符串
             diagnosticInfo = JSON.stringify(tid);
         } catch (e) {
-            // 防止循环引用导致崩溃
             diagnosticInfo = "Serialization_Error: " + typeof tid; 
         }
         
-        // ★★★ 诊断注入：将诊断信息作为 ID 返回，并添加前缀 ★★★
-        // 强制返回一个字符串 ID，让 getCards 函数识别并显示它
-        id = `DIAG_${diagnosticInfo}`; 
+        // ★★★ 诊断注入：使用 ES5 字符串拼接 ★★★
+        id = "DIAG_" + diagnosticInfo; 
     }
     
-    return getCards({ id, page: pg || 1 });
+    return getCards({ id: id, page: pg || 1 }); // 也使用 ES5 兼容的对象字面量
 }
 
 // -------------------- getCards（诊断信息显示到 App 界面） --------------------
@@ -109,11 +106,11 @@ async function getCards(ext) {
     if (typeof categoryId === 'string' && categoryId.startsWith('DIAG_')) {
         const rawTid = categoryId.substring(5); // 移除 "DIAG_"
         
-        // 返回一个假的列表，将原始 tid 作为标题显示
+        // 返回一个假的列表，使用 ES5 字符串拼接
         return jsonify({
             list: [{
                 vod_id: 'DIAG_001',
-                vod_name: `【请复制】原始 tid 值: ${rawTid}`,
+                vod_name: "【请复制】原始 tid 值: " + rawTid,
                 vod_pic: '', 
                 vod_remarks: '↑ 这是App传入的原始数据'
             },
@@ -138,20 +135,22 @@ async function getCards(ext) {
     }
 
     const page = (ext && ext.page) ? ext.page : 1;
-    const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
+    // ★★★ 正常请求 URL 也要替换为 ES5 拼接，以防万一 ★★★
+    const url = API_BASE_URL + "/api/list?id=" + categoryId + "&page=" + page;
     
     try {
         const response = await $fetch.get(url);
+        // ... (数据处理部分保持不变，因为 $fetch.get 和 JSON.parse 可能是环境内置的)
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         if (!data || !Array.isArray(data.items)) {
             return jsonify({ list: [] });
         }
-        const cards = data.items.map(item => {
+        const cards = data.items.map(function(item) { // 替换 map function 为兼容写法
             return {
-                vod_id: `${item.media_type}_${item.tmdbid}`,
+                vod_id: item.media_type + "_" + item.tmdbid, // ES5 拼接
                 vod_name: item.title || '未命名',
-                vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-                vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
+                vod_pic: item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "", // ES5 拼接
+                vod_remarks: item.vote_average > 0 ? "⭐ " + item.vote_average.toFixed(1) : (item.release_date ? item.release_date.substring(0, 4) : '') // ES5 拼接
             };
         });
         return jsonify({
