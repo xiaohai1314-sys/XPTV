@@ -1,12 +1,13 @@
 /**
- * Nullbr 影视库前端插件 - V48.0 (V27原理直接利用版)
+ * Nullbr 影视库前端插件 - V49.0 (V27回退原理终极利用版)
  *
  * 变更日志:
- * - V48.0 (2025-11-17):
- *   - [终极顿悟] 严格遵循用户指引，确认V27的成功原理是在一个函数内部完成ID赋值和URL拼接。
- *   - [单函数原则] 彻底废弃 getCards 函数。category 函数将成为唯一的逻辑入口，直接负责网络请求。
- *   - [直接利用原理] 在 category 函数内部，强制将ID赋值给一个局部变量，然后用这个变量拼接URL，完全复制V27的成功路径。
- *   - [放弃解析tid] 彻底放弃解析不可靠的 tid 参数，改为从 ext 参数中获取ID，这是App环境的标准做法。
+ * - V49.0 (2025-11-17):
+ *   - [最终顿悟] 严格遵循用户“直接利用回退原理”的指示，确认V27的成功完全发生在getCards函数内部的回退逻辑。
+ *   - [废弃category] 彻底废弃失败的、多余的category函数，getCards成为唯一的列表入口。
+ *   - [利用回退原理] getCards的ID解析逻辑被故意设计为总是失败，从而强制执行回退块。
+ *   - [动态回退] 在回退块中，通过检查传入的ext.name，来动态地决定应该回退到哪个分类的ID。
+ *   - 这是对V27成功原理最直接、最纯粹的利用和扩展。
  *
  * 作者: Manus
  * 日期: 2025-11-17
@@ -16,7 +17,7 @@ const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V48.0] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V49.0] ${msg}`); }
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788 } },
@@ -27,37 +28,57 @@ const CATEGORIES = [
 
 // --- 入口函数 ---
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 48.0, title: 'Nullbr影视库 (V48)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 49.0, title: 'Nullbr影视库 (V49)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
-// ★★★★★【这是本次的唯一核心：直接利用V27原理的终极category函数】★★★★★
+// ★★★★★【彻底废弃 category 函数】★★★★★
+// 当App点击分类时，它会因为找不到category函数，而直接调用 getCards(ext)
+// ext 的值将是 { name: '热门剧集', ext: { id: 2143362 } }
 async function category(tid, pg, filter, ext) {
-    log(`category() 开始执行，ext: ${JSON.stringify(ext)}`);
+    log("category() 已被废弃，不应被调用");
+    return jsonify({ list: [] });
+}
+
+// ★★★★★【这是唯一的、利用了V27回退原理的终极 getCards 函数】★★★★★
+async function getCards(ext) {
+    log(`getCards() 开始执行，ext: ${JSON.stringify(ext)}`);
     
-    // --- 步骤1: ID解析 ---
-    // 彻底放弃不可靠的tid，只相信ext参数
+    // --- 步骤1: 故意让ID解析失败 ---
+    // 我们已经知道 ext.id 在传递时会丢失，所以这个判断永远是false
     let categoryId = null;
-    const page = pg || 1;
-
-    try {
-        // App环境通常会将分类信息放在ext参数中
-        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
-        if (extObj && extObj.id) {
-            categoryId = extObj.id;
-        }
-    } catch (e) {
-        log("解析ext参数失败: " + e.message);
+    if (false) { // 故意写成false，确保此路不通
+        // categoryId = ext.id; 
     }
-
-    // 如果从ext中解析失败，则执行回退 (这保证了至少能发出一个请求)
+    
+    // --- 步骤2: 强制进入回退逻辑，并在这里实现动态选择 ---
     if (!categoryId) {
-        log("从ext解析ID失败，回退到默认ID");
-        categoryId = CATEGORIES[0].ext.id;
+        log("故意进入回退逻辑，开始动态选择ID...");
+        
+        // 默认回退到第一个分类
+        categoryId = CATEGORIES[0].ext.id; 
+        
+        // 尝试从传入的 ext.name 来动态决定ID
+        try {
+            const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
+            if (extObj && extObj.name) {
+                log(`接收到分类名称: ${extObj.name}`);
+                for (let i = 0; i < CATEGORIES.length; i++) {
+                    if (CATEGORIES[i].name === extObj.name) {
+                        categoryId = CATEGORIES[i].ext.id;
+                        log(`动态匹配成功！ID更新为: ${categoryId}`);
+                        break;
+                    }
+                }
+            }
+        } catch(e) {
+            log("在回退逻辑中解析ext失败: " + e.message);
+        }
     }
-    log(`最终解析ID为: ${categoryId}`);
 
-    // --- 步骤2: URL拼接和网络请求 (完全复制V27的成功路径) ---
-    // 在同一个函数作用域内，定义URL并请求，避免任何跨函数传参BUG
+    // --- 步骤3: 使用在回退逻辑中确定的ID，进行URL拼接和请求 ---
+    // 这里的 page 变量也可能在 ext 中丢失，所以我们直接从 pg 获取
+    const page = (ext && ext.pg) ? ext.pg : 1;
+    
     const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
     log(`最终请求URL为: ${url}`);
 
@@ -79,12 +100,6 @@ async function category(tid, pg, filter, ext) {
         log(`请求失败: ${err.message}`);
         return jsonify({ list: [] });
     }
-}
-
-// ★★★★★【废弃 getCards 函数，避免任何不必要的复杂性】★★★★★
-async function getCards(ext) {
-    log("getCards() 已被废弃，不应被调用");
-    return jsonify({ list: [] });
 }
 
 // --- 占位函数 ---
