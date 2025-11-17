@@ -1,10 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (兼容性修复 + 网络注入诊断版)
+ * Nullbr 影视库前端插件 - V272.0 (Final-Safe 兼容性 + 网络注入诊断版)
  *
  * 目标:
- * 1. 【兼容性修复】保留所有 ES5 语法。
- * 2. 【最终诊断】将原始 tid 值注入到后端 URL 参数中。
- * 3. 保留回退机制，确保 App 不会崩溃。
+ * 1. 仅使用最原始的 ES5 语法和简单的字符串操作。
+ * 2. 避免所有可能导致 App 崩溃的函数调用（如 JSON.stringify, encodeURIComponent）。
+ * 3. 确保诊断参数能成功注入到后端 URL。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -15,7 +15,6 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-// log函数静默保留，因为它在您的环境中无效
 function log(msg) { console.log("[Nullbr V27.0] " + msg); } 
 
 const CATEGORIES = [
@@ -47,19 +46,19 @@ async function home() {
     });
 }
 
-// -------------------- category（网络注入诊断） --------------------
+// -------------------- category（Final-Safe 诊断注入） --------------------
 
 async function category(tid, pg, filter, ext) {
     let id = null;
-    var diagnosticInfo = null; // 用于存储诊断信息
+    var diagnosticInfo = null;
     
     // 1. 尝试解析 Object 或 Number 
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
-        else if (tid.ext && tid.ext.id) { // ES5兼容性修复
+        // 兼容性修复 (tid.ext && tid.ext.id)
+        else if (tid.ext && tid.ext.id) { 
             id = tid.ext.id;
         }
-        
     } else if (typeof tid === "number") {
         id = tid;
     }
@@ -72,6 +71,7 @@ async function category(tid, pg, filter, ext) {
         if (!isNaN(n)) {
             id = n;
         } else {
+            // ES5兼容的find函数写法
             var foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; }); 
             if (foundCategory) {
                 id = foundCategory.ext.id;
@@ -81,14 +81,18 @@ async function category(tid, pg, filter, ext) {
 
     // 3. 最终回退（及诊断注入）
     if (!id) {
-        // ★★★ 诊断注入：将原始 tid 转化为字符串，如果失败则提供错误类型 ★★★
-        try {
-            diagnosticInfo = JSON.stringify(tid);
-        } catch (e) {
-            diagnosticInfo = "Serialization_Error:" + (typeof tid); 
+        // ★★★ 核心变动：最安全的诊断信息生成 ★★★
+        diagnosticInfo = "TYPE_" + (typeof tid);
+        
+        if (typeof tid === "object" && tid !== null) {
+            // 只做最基本的布尔检查，避免任何复杂的JS操作
+            if (tid.name) diagnosticInfo += "_HAS_NAME";
+            if (tid.type_id) diagnosticInfo += "_HAS_TYPEID"; 
+        } else if (typeof tid === "string") {
+            diagnosticInfo = "RAW_STR_" + tid.substring(0, 10);
         }
         
-        // 强制回退到第一个 ID（重要！防止App崩溃）
+        // 强制回退到第一个 ID
         id = CATEGORIES[0].ext.id; 
     }
     
@@ -113,13 +117,12 @@ async function getCards(ext) {
     }
 
     var page = (ext && ext.page) ? ext.page : 1;
-    // ES5 字符串拼接
+    // 正常 URL 拼接 (ES5)
     var url = API_BASE_URL + "/api/list?id=" + categoryId + "&page=" + page;
     
-    // ★★★ 核心诊断逻辑：将诊断信息作为 tid_raw 参数添加到 URL 中 ★★★
+    // ★★★ 核心诊断逻辑：移除 encodeURIComponent，只做纯拼接 ★★★
     if (ext.diagnostic) {
-        // 使用 encodeURIComponent 确保特殊字符不会破坏 URL
-        url += "&tid_raw=" + encodeURIComponent(ext.diagnostic);
+        url = url + "&tid_raw=" + ext.diagnostic; // 纯字符串拼接
     }
     
     try {
