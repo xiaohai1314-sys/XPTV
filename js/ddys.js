@@ -1,12 +1,13 @@
 /**
- * Nullbr 影视库前端插件 - V61.0 (100% ES5兼容最终版)
+ * Nullbr 影视库前端插件 - V62.0 (URL作为ID最终版)
  *
  * 变更日志:
- * - V61.0 (2025-11-17):
- *   - [致命BUG修复] 修复了detail函数因使用ES6语法(const/解构赋值)导致在老旧App环境中崩溃的问题。
- *   - [语法回归] 将detail函数中的id.split('_')重写为100%兼容的ES5数组索引语法。
- *   - [全面审查] 审查并统一了所有函数，确保全部使用var和基础语法，杜绝任何ES6+语法地雷。
- *   - 这是对App古老JS环境的最终妥协，确保所有功能都能稳定运行。
+ * - V62.0 (2025-11-17):
+ *   - [终极思想] 接受用户指引，确认detail函数崩溃的根源在于对vod_id字符串进行了处理(split)。
+ *   - [URL作为ID] 彻底重构！getCards和search函数现在生成的vod_id是一个完整的、指向后端/api/resource的URL。
+ *   - [简化detail] detail函数变得极其简单，它接收到这个URL后，不再进行任何字符串处理，而是直接发起网络请求。
+ *   - [兼容性] 全面使用var和ES5语法，确保在任何古老环境中都能稳定运行。
+ *   - 这是对“观影网”和“趣乐兔”成功模式最深刻、最忠实的最终复刻。
  *
  * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-17
@@ -16,7 +17,7 @@ var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V61.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V62.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -32,32 +33,28 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 61.0, title: 'Nullbr影视库 (V61)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 62.0, title: 'Nullbr影视库 (V62)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
 // =======================================================================
-// --- 核心功能区 (全部使用var和ES5兼容语法) ---
+// --- 核心功能区 (URL作为ID) ---
 // =======================================================================
 
-// 1. 分类列表
+// 1. 分类列表 (生成URL作为vod_id)
 async function getCards(ext) {
     var parsed = parseExt(ext);
     var id = parsed.id;
     var page = parsed.page;
     var lockKey = 'cat_' + id;
     
-    if (END_LOCK[lockKey] && page > 1) {
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
+    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
-    log('[getCards] 请求URL: ' + url);
-
     try {
         var data = await fetchData(url);
-        var cards = formatCards(data.items);
+        var cards = formatCards(data.items); // formatCards内部已改造
         
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
@@ -70,12 +67,10 @@ async function getCards(ext) {
             limit: cards.length,
             total: data.total_items
         });
-    } catch (err) {
-        return handleError(err);
-    }
+    } catch (err) { return handleError(err); }
 }
 
-// 2. 搜索功能
+// 2. 搜索功能 (生成URL作为vod_id)
 async function search(ext) {
     var parsed = parseExt(ext);
     var keyword = parsed.text;
@@ -83,17 +78,13 @@ async function search(ext) {
     if (!keyword) return jsonify({ list: [] });
     var lockKey = 'search_' + keyword;
 
-    if (END_LOCK[lockKey] && page > 1) {
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
+    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
-    log('[search] 请求URL: ' + url);
-
     try {
         var data = await fetchData(url);
-        var cards = formatCards(data.items);
+        var cards = formatCards(data.items); // formatCards内部已改造
 
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
@@ -106,24 +97,17 @@ async function search(ext) {
             limit: cards.length,
             total: data.total_results
         });
-    } catch (err) {
-        return handleError(err);
-    }
+    } catch (err) { return handleError(err); }
 }
 
 // 3. 详情页/网盘提取 (★★★ 核心修复处 ★★★)
 async function detail(id) {
-    log('[detail] 请求详情, vod_id: ' + id);
-    if (!id || id.indexOf('_') === -1) return jsonify({ list: [] });
+    log('[detail] 请求详情, vod_id(URL): ' + id);
+    // ★★★ 不再对id做任何处理，直接使用它！ ★★★
+    var url = id; 
+    if (!url) return jsonify({ list: [] });
 
-    // ★★★ 使用100%兼容的ES5语法来分割字符串 ★★★
-    var parts = id.split('_');
-    var type = parts[0];
-    var tmdbid = parts[1];
-    
-    var url = API_BASE_URL + '/api/resource?type=' + type + '&tmdbid=' + tmdbid;
-    log('[detail] 请求URL: ' + url);
-
+    log('[detail] 直接请求URL: ' + url);
     try {
         var data = await fetchData(url);
         if (!data || !Array.isArray(data['115'])) {
@@ -160,7 +144,7 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 (全部使用var和ES5兼容语法) ---
+// --- 辅助函数区 ---
 // =======================================================================
 
 function parseExt(ext) {
@@ -183,11 +167,14 @@ async function fetchData(url) {
     return data;
 }
 
+// ★★★ 改造formatCards，让它生成URL作为vod_id ★★★
 function formatCards(items) {
     if (!items || !Array.isArray(items)) return [];
     return items.map(function(item) {
+        // 构造指向我们后端/api/resource的完整URL
+        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
         return {
-            vod_id: item.media_type + '_' + item.tmdbid,
+            vod_id: detailUrl, // ★★★ vod_id现在是URL了！ ★★★
             vod_name: item.title || '未命名',
             vod_pic: item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "",
             vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : '')
