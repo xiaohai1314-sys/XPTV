@@ -1,12 +1,12 @@
 /**
- * Nullbr 影视库前端插件 - V52.0 (观影置换模式终极版)
+ * Nullbr 影视库前端插件 - V53.0 (绝对信任ext终极版)
  *
  * 变更日志:
- * - V52.0 (2025-11-17):
- *   - [终极顿悟] 严格遵循用户“像观影一样，然后置换”的指示，确认了“ID置换”模式是唯一解。
- *   - [占位符ID] 前端彻底放弃数字ID，改用无意义的业务字符串占位符（如'hot_movie'）。
- *   - [后端置换] 后端将负责接收这些占位符，并将其“置换”为真正的上游API数字ID。
- *   - 这是对“观影模式”精髓最忠实的模仿和实现。
+ * - V53.0 (2025-11-17):
+ *   - [终极顿悟] 接受用户反馈，确认V52的category函数ID解析依然失败。
+ *   - [放弃tid] 彻底放弃解析不可靠的tid参数，将所有希望寄托在App环境标准的ext参数上。
+ *   - [简化category] category函数的核心逻辑简化为只从ext参数中提取占位符ID。
+ *   - 这是我们能做的、最符合插件开发规范的、最后的、最合理的尝试。
  *
  * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-17
@@ -16,9 +16,8 @@ const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V52.0] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V53.0] ${msg}`); }
 
-// ★★★★★【这是本次修复的绝对核心：使用无意义的字符串占位符ID！】★★★★★
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
     { name: '热门剧集', ext: { id: 'hot_series' } },
@@ -28,45 +27,47 @@ const CATEGORIES = [
 
 // --- 入口函数 ---
 async function init(ext) { return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 52.0, title: 'Nullbr影视库 (V52)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 53.0, title: 'Nullbr影视库 (V53)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
-// ★★★ 使用V50的category函数，它现在将处理和传递字符串占位符ID ★★★
+// ★★★★★【这是本次修复的绝对核心：一个只信任ext参数的category函数】★★★★★
 async function category(tid, pg, filter, ext) {
-    log(`category() 调用，tid 原始值：${JSON.stringify(tid)}`);
+    log(`category() 调用，ext 原始值：${JSON.stringify(ext)}`);
     let id = null;
 
-    if (typeof tid === "object" && tid !== null) {
-        if (tid.ext?.id) { id = tid.ext.id; } 
-        else if (tid.id) { id = tid.id; }
+    // 核心逻辑：只相信 ext 参数，并从中解析ID
+    try {
+        // ext 可能是字符串，也可能是对象，做健壮性处理
+        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
+        
+        // App通常会把 { name: '...', ext: { id: '...' } } 整个对象作为ext传进来
+        if (extObj && extObj.ext && extObj.ext.id) {
+            id = extObj.ext.id;
+            log(`从 ext.ext.id 中成功解析出占位符ID: ${id}`);
+        } 
+        // 某些App可能只把 ext 字段的内容传进来
+        else if (extObj && extObj.id) {
+            id = extObj.id;
+            log(`从 ext.id 中成功解析出占位符ID: ${id}`);
+        }
+    } catch (e) {
+        log(`解析ext参数失败: ${e.message}`);
     }
 
-    if (!id && typeof tid === "string") {
-        const name = tid.trim();
-        const found = CATEGORIES.find(c => c.name === name);
-        if (found) { id = found.ext.id; }
+    // 如果从ext中解析失败，则执行回退
+    if (!id) {
+        id = CATEGORIES[0].ext.id;
+        log(`从ext解析ID失败，回退到默认占位符ID: ${id}`);
     }
 
-    if (!id) { id = CATEGORIES[0].ext.id; }
-
-    log(`category() 最终占位符ID=${id}`);
+    // 调用我们那个本身没有问题的getCards函数
     return getCards({ id, page: pg || 1 });
 }
 
-// ★★★ 使用V27的getCards函数，它现在将向后端传递字符串占位符ID ★★★
+// ★★★ getCards函数保持不变，它只负责接收一个占位符ID并发起请求 ★★★
 async function getCards(ext) {
-    log(`getCards() 调用，ext 原始值：${JSON.stringify(ext)}`);
-    
-    let categoryId = null;
-    if (typeof ext === "object" && ext !== null && ext.id) {
-        categoryId = ext.id; // categoryId 现在是 'hot_movie' 这样的字符串
-    }
-    
-    if (!categoryId) { categoryId = CATEGORIES[0].ext.id; }
-
+    let categoryId = (ext && ext.id) ? ext.id : CATEGORIES[0].ext.id;
     const page = (ext && ext.page) ? ext.page : 1;
-
-    // URL将变成 .../api/list?id=hot_movie&page=1
     const url = `${API_BASE_URL}/api/list?id=${categoryId}&page=${page}`;
     log(`getCards() 最终请求后端：${url}`);
 
