@@ -1,126 +1,96 @@
 /**
- * 观影网脚本 - v18.0 (架构升级版)
+ * Nullbr 影视库前端插件 - V55.0 (完美分页最终版)
  *
- * --- 核心思想 ---
- * 将所有数据抓取、Cookie维护、HTML解析等复杂任务全部交由后端服务器处理。
- * 前端脚本变得极度轻量，只负责调用后端API并展示数据，从而实现最佳性能和稳定性。
- * 前端不再需要关心目标网站的任何变化，维护工作集中在后端。
+ * 变更日志:
+ * - V55.0 (2025-11-17):
+ *   - [分页修复] 解决了App无限加载第一页的BUG。
+ *   - [信任pg参数] 彻底放弃从ext对象中解析页码，改为绝对信任函数签名中独立的`pg`参数，这是更标准的做法。
+ *   - [标准化返回] 确保每次返回给App的JSON中，都包含正确且标准的`page`, `pagecount`, `limit`, `total`字段。
+ *   - 这是在V54成功基础上，实现完整分页功能的最终版本。
+ *
+ * 作者: Manus (由用户最终修正)
+ * 日期: 2025-11-17
  */
 
-// ================== 配置区 ==================
-// ★ 后端不再需要cheerio
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
-// ★ 指向你的后端服务器地址
-const BACKEND_URL = 'http://192.168.10.105:5000'; 
+const API_BASE_URL = 'http://192.168.1.7:3003';
+const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-const appConfig = {
-    ver: 18.0,
-    title: '观影网 (后端版 )', // 标题变更以区分
-    site: 'https://www.gying.org/',
-    tabs: [
-        { name: '电影', ext: { id: 'mv?page=' } },
-        { name: '剧集', ext: { id: 'tv?page=' } },
-        { name: '动漫', ext: { id: 'ac?page=' } },
-    ],
-};
+function jsonify(data ) { return JSON.stringify(data); }
+function log(msg) { console.log(`[Nullbr V55.0] ${msg}`); }
 
-// ★★★★★【Cookie相关逻辑已全部移除】★★★★★
+const CATEGORIES = [
+    { name: '热门电影', ext: { id: 'hot_movie' } },
+    { name: '热门剧集', ext: { id: 'hot_series' } },
+    { name: '高分电影', ext: { id: 'top_movie' } },
+    { name: '高分剧集', ext: { id: 'top_series' } },
+];
 
-// ================== 核心函数 ==================
+// --- 入口函数 ---
+async function init(ext) { return jsonify({}); }
+async function getConfig() { return jsonify({ ver: 55.0, title: 'Nullbr影视库 (V55)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
-function log(msg ) { try { $log(`[观影网 V18.0] ${msg}`); } catch (_) { console.log(`[观影网 V18.0] ${msg}`); } }
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
-function jsonify(data) { return JSON.stringify(data); }
-
-// ★ 【Cookie 和 fetchWithCookie 已被移除】
-
-// --- init (与V17.0完全一致) ---
-async function init(ext) {
-    return jsonify({});
+// ★★★ 废弃的category函数，现在也把pg参数传递给getCards ★★★
+async function category(tid, pg, filter, ext) {
+    log("category() 已被废弃，将调用转发给 getCards...");
+    // 即使这个函数被意外调用，它也会把正确的页码传递下去
+    return getCards(ext, pg);
 }
 
-// --- getConfig (与V17.0完全一致) ---
-async function getConfig() {
-    return jsonify(appConfig);
-}
+// ★★★★★【这是唯一的、增加了完美分页逻辑的终极 getCards 函数】★★★★★
+// ★★★ 注意函数签名，我们现在正式使用第二个参数 pg ★★★
+async function getCards(ext, pg) {
+    log(`getCards() 作为唯一入口被调用，ext: ${JSON.stringify(ext)}, pg: ${pg}`);
+    
+    // --- 步骤1: ID解析 (保持V54的成功逻辑) ---
+    let placeholderId = null;
+    try {
+        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
+        const { id } = extObj.ext || extObj;
+        placeholderId = id || CATEGORIES[0].ext.id;
+    } catch (e) {
+        placeholderId = CATEGORIES[0].ext.id;
+    }
+    log(`占位符ID为: ${placeholderId}`);
 
-// =======================================================================
-// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼【核心逻辑 - 全面简化】▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-// =======================================================================
+    // --- 步骤2: 页码解析 (核心修复！) ---
+    // 绝对信任函数签名中独立的 pg 参数。如果它不存在或为0，则默认为1。
+    const page = pg > 0 ? pg : 1;
+    log(`最终请求页码为: ${page}`);
 
-// --- 【改造】getCards ---
-async function getCards(ext) {
-    ext = argsify(ext);
-    const { page = 1, id } = ext;
-    // ★ 直接请求后端 /getCards 接口
-    const url = `${BACKEND_URL}/getCards?id=${id}&page=${page}`;
-    log(`请求后端获取卡片列表: ${url}`);
+    // --- 步骤3: 拼接URL并请求 ---
+    const url = `${API_BASE_URL}/api/list?id=${placeholderId}&page=${page}`;
+    log(`最终请求URL为: ${url}`);
 
     try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
-        if (result.status !== "success") {
-            throw new Error(result.message || '后端返回错误');
-        }
-        log(`✅ 成功从后端获取到 ${result.list.length} 个项目。`);
-        return jsonify({ list: result.list });
-    } catch (e) {
-        log(`❌ 请求后端卡片列表异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
+        const response = await $fetch.get(url);
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        if (!data || !Array.isArray(data.items)) { return jsonify({ list: [] }); }
+        
+        const cards = data.items.map(item => ({
+            vod_id: `${item.media_type}_${item.tmdbid}`,
+            vod_name: item.title || '未命名',
+            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
+            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
+        }));
+
+        // --- 步骤4: 标准化分页返回 (核心修复！) ---
+        // 确保返回给App完整且正确的分页信息
+        return jsonify({
+            list: cards,
+            page: data.page,
+            pagecount: data.total_page,
+            limit: data.items.length,
+            total: data.total_items
+        });
+
+    } catch (err) {
+        log(`请求失败: ${err.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// --- 【改造】getTracks ---
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const detailUrl = ext.url; 
-    // ★ 直接请求后端 /getTracks 接口
-    const url = `${BACKEND_URL}/getTracks?url=${encodeURIComponent(detailUrl)}`;
-    log(`请求后端获取详情数据: ${url}`);
-    try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
-        if (result.status !== "success") {
-            throw new Error(result.message || '后端返回错误');
-        }
-        if (result.message) {
-            $utils.toastError(result.message, 4000);
-        }
-        return jsonify({ list: result.list });
-    } catch (e) {
-        log(`❌ 获取详情数据异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
-        return jsonify({ list: [] });
-    }
-}
-
-// --- 【改造】search ---
-async function search(ext) {
-    ext = argsify(ext);
-    const text = ext.text;
-    const page = ext.page || 1;
-    // ★ 直接请求后端 /search 接口
-    const url = `${BACKEND_URL}/search?text=${encodeURIComponent(text)}&page=${page}`;
-    log(`请求后端执行搜索: ${url}`);
-    try {
-        const { data } = await $fetch.get(url);
-        const result = JSON.parse(data);
-        if (result.status !== "success") {
-            throw new Error(result.message || '后端返回错误');
-        }
-        log(`✅ 成功从后端获取到 ${result.list.length} 个搜索结果。`);
-        return jsonify({ list: result.list });
-    } catch (e) {
-        log(`❌ 搜索异常: ${e.message}`);
-        $utils.toastError(`加载失败: ${e.message}`, 4000);
-        return jsonify({ list: [] });
-    }
-}
-
-// --- 【原封不动】getPlayinfo ---
-async function getPlayinfo(ext) {
-    ext = argsify(ext);
-    const panLink = ext.pan;
-    return jsonify({ urls: [panLink] });
-}
+// --- 占位函数 ---
+async function detail(id) { return jsonify({}); }
+async function play(flag, id, flags) { return jsonify({ url: "" }); }
+async function search(wd, quick) { return jsonify({ list: [] }); }
