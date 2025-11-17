@@ -1,10 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V272.0 (Final-Safe 兼容性 + 网络注入诊断版)
+ * Nullbr 影视库前端插件 - V27.0 (最终修复版：Ultra-Safe ES3 兼容 + type_id 检查)
  *
  * 目标:
- * 1. 仅使用最原始的 ES5 语法和简单的字符串操作。
- * 2. 避免所有可能导致 App 崩溃的函数调用（如 JSON.stringify, encodeURIComponent）。
- * 3. 确保诊断参数能成功注入到后端 URL。
+ * 1. 仅使用最原始的 ES3/ES5 兼容语法。
+ * 2. 修复 App 可能传入的非标准 type_id 键名。
+ * 3. 确保脚本在最老旧的环境中也能稳定运行。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -46,65 +46,54 @@ async function home() {
     });
 }
 
-// -------------------- category（Final-Safe 诊断注入） --------------------
+// -------------------- category（最终修复逻辑） --------------------
 
 async function category(tid, pg, filter, ext) {
     let id = null;
-    var diagnosticInfo = null;
     
-    // 1. 尝试解析 Object 或 Number 
+    // 1. 尝试解析 Object 或 Number (仅使用最安全的语法)
     if (typeof tid === "object" && tid !== null) {
         if (tid.id) id = tid.id;
-        // 兼容性修复 (tid.ext && tid.ext.id)
         else if (tid.ext && tid.ext.id) { 
             id = tid.ext.id;
         }
+        // ★★★ 最终修复：新增对非标准 type_id 的检查 ★★★
+        else if (tid.type_id) { 
+            id = tid.type_id;
+        }
+        
     } else if (typeof tid === "number") {
         id = tid;
     }
     
-    // 2. 处理字符串
+    // 2. 处理字符串 (替换 find 为 for 循环，移除 trim)
     if (!id && typeof tid === "string") {
-        var trimmedTid = tid.trim(); 
-
+        var trimmedTid = tid; // 移除 .trim()
         var n = parseInt(trimmedTid);
+
         if (!isNaN(n)) {
             id = n;
         } else {
-            // ES5兼容的find函数写法
-            var foundCategory = CATEGORIES.find(function(cat) { return cat.name === trimmedTid; }); 
-            if (foundCategory) {
-                id = foundCategory.ext.id;
+            // 使用最安全的 ES3 for 循环查找
+            for (var i = 0; i < CATEGORIES.length; i++) {
+                // 使用 == 而不是 === 增加兼容性
+                if (CATEGORIES[i].name == trimmedTid) {
+                    id = CATEGORIES[i].ext.id;
+                    break;
+                }
             }
         }
     }
 
-    // 3. 最终回退（及诊断注入）
+    // 3. 最终回退
     if (!id) {
-        // ★★★ 核心变动：最安全的诊断信息生成 ★★★
-        diagnosticInfo = "TYPE_" + (typeof tid);
-        
-        if (typeof tid === "object" && tid !== null) {
-            // 只做最基本的布尔检查，避免任何复杂的JS操作
-            if (tid.name) diagnosticInfo += "_HAS_NAME";
-            if (tid.type_id) diagnosticInfo += "_HAS_TYPEID"; 
-        } else if (typeof tid === "string") {
-            diagnosticInfo = "RAW_STR_" + tid.substring(0, 10);
-        }
-        
-        // 强制回退到第一个 ID
         id = CATEGORIES[0].ext.id; 
     }
     
-    var cardsParams = { id: id, page: pg || 1 };
-    if (diagnosticInfo) {
-        cardsParams.diagnostic = diagnosticInfo; // 将诊断信息传入 getCards
-    }
-    
-    return getCards(cardsParams);
+    return getCards({ id: id, page: pg || 1 });
 }
 
-// -------------------- getCards（将诊断信息注入到 URL） --------------------
+// -------------------- getCards（ES5 兼容版） --------------------
 
 async function getCards(ext) {
     let categoryId = null;
@@ -117,16 +106,12 @@ async function getCards(ext) {
     }
 
     var page = (ext && ext.page) ? ext.page : 1;
-    // 正常 URL 拼接 (ES5)
+    // 纯 ES5 字符串拼接
     var url = API_BASE_URL + "/api/list?id=" + categoryId + "&page=" + page;
-    
-    // ★★★ 核心诊断逻辑：移除 encodeURIComponent，只做纯拼接 ★★★
-    if (ext.diagnostic) {
-        url = url + "&tid_raw=" + ext.diagnostic; // 纯字符串拼接
-    }
     
     try {
         var response = await $fetch.get(url);
+        // 数据处理部分保持不变，因为 $fetch 和 JSON.parse 是 App 内部功能
         var data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         if (!data || !Array.isArray(data.items)) {
             return jsonify({ list: [] });
