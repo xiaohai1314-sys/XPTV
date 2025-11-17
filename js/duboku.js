@@ -1,22 +1,24 @@
 /**
- * Nullbr 影视库前端插件 - V41.0 (去Jsonify终极版)
+ * Nullbr 影视库前端插件 - V40.2 (终极集成 + 同步修正版)
  *
- * 变更日志:
- * - V41.0 (2025-11-17):
- *   - [致命错误修复] 接受用户反馈“分类标签没了”，定位到 jsonify() 是问题的根源。
- *   - [移除所有jsonify] 彻底移除所有函数中的 jsonify() 调用，直接返回原生JavaScript对象，以适应App环境的接口要求。
- *   - [保留V40.1优点] 继承了路径参数通信、ES3兼容语法、双重名称查找等所有健壮性设计。
- *   - 这应该是与你的App环境完全兼容的最终形态。
+ * 目标:
+ * 1. 【同步修正】将 init/getConfig/home 更改为同步函数 (function)，确保分类 Tab 正常显示。
+ * 2. 【通信修复】使用路径参数 /api/list/ID?page=... 结构 (配合后端V3.0)。
+ * 3. 【运行时修复】使用最原始的 ES3 语法，同时支持双重名称查找 (防止 category() 崩溃)。
  *
- * 作者: Manus
+ * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
  */
 
+// 仅使用 var
 var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-function log(msg) { console.log("[Nullbr V41.0] " + msg); } 
+// --- 辅助函数 ---
+function jsonify(data) { return JSON.stringify(data); }
+function log(msg) { console.log("[Nullbr V40.2] " + msg); } 
 
+// 双重名称查找支持
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 2142788, alt_name: 'IMDB：热门电影' } },
     { name: '热门剧集', ext: { id: 2143362, alt_name: 'IMDB：热门剧集' } },
@@ -24,32 +26,31 @@ var CATEGORIES = [
     { name: '高分剧集', ext: { id: 2143363, alt_name: 'IMDB：高分剧集' } },
 ];
 
-// ★★★★★【核心修正：所有函数直接返回对象，不再使用jsonify】★★★★★
+// ---------------- 入口：init / getConfig / home (已修正为同步) ----------------
 
-async function init(ext) {
-    return {}; // 直接返回空对象
-}
+function init(ext) { return getConfig(); } // 移除 async
 
-async function getConfig() {
-    return { // 直接返回配置对象
-        ver: 41.0,
-        title: 'Nullbr影视库 (V41)',
+function getConfig() { // 移除 async
+    return jsonify({
+        ver: 40.2,
+        title: 'Nullbr影视库 (V40.2)', // 标题更新
         site: API_BASE_URL,
         tabs: CATEGORIES
-    };
+    });
 }
 
-async function home() {
-    return { // 直接返回首页对象
-        "class": CATEGORIES, 
-        "filters": {} 
-    };
+function home() { // 移除 async
+    return jsonify({ "class": CATEGORIES, "filters": {} });
 }
 
+// -------------------- category（极端 ES3 防御性逻辑 + 双重查找） --------------------
+
+// category 和 getCards 必须保持 async，因为它们使用了 await $fetch.get()
 async function category(tid, pg, filter, ext) {
     var id = null;
     var i = 0; 
     
+    // 1. 尝试解析 Object 或 Number (最安全的属性访问)
     if (typeof tid == "object" && tid != null) { 
         if (tid.id) { id = tid.id; } 
         else if (tid.ext && tid.ext.id) { id = tid.ext.id; }
@@ -58,14 +59,18 @@ async function category(tid, pg, filter, ext) {
         id = tid;
     }
     
+    // 2. 处理字符串 
     if (!id && typeof tid == "string") {
         var n = parseInt(tid); 
         if (!isNaN(n)) {
             id = n;
         } else {
+            // 使用最原始的 for 循环查找，并匹配 name 和 alt_name
             for (i = 0; i < CATEGORIES.length; i++) {
                 var category = CATEGORIES[i];
                 var extData = category.ext;
+                
+                // 检查是否匹配 name 或 alt_name
                 if (category.name == tid || (extData && extData.alt_name == tid)) {
                     id = extData.id;
                     break;
@@ -74,12 +79,16 @@ async function category(tid, pg, filter, ext) {
         }
     }
 
+    // 3. 最终回退
     if (!id) {
+        log("category()：解析失败，回退到默认 ID");
         id = CATEGORIES[0].ext.id; 
     }
     
     return getCards({ id: id, page: pg || 1 });
 }
+
+// -------------------- getCards（路径参数 + ES3 兼容版） --------------------
 
 async function getCards(ext) {
     var categoryId = null;
@@ -92,23 +101,15 @@ async function getCards(ext) {
     }
 
     var page = (ext && ext.page) ? ext.page : 1;
+    // 核心修正：使用路径参数和 ES3 字符串拼接
     var url = API_BASE_URL + "/api/list/" + categoryId + "?page=" + page;
     log("getCards() 最终请求后端: " + url);
 
     try {
-        // $fetch.get 应该直接返回一个可用的对象或字符串
         var response = await $fetch.get(url);
-        
-        // 健壮地处理 response，无论它是字符串还是对象
-        var data;
-        if (typeof response === 'string') {
-            data = JSON.parse(response);
-        } else {
-            data = response; // 假设它已经是对象
-        }
-
+        var data = typeof response.data == 'string' ? JSON.parse(response.data) : response.data;
         if (!data || !Array.isArray(data.items)) {
-            return { list: [] }; // 直接返回对象
+            return jsonify({ list: [] });
         }
         var cards = data.items.map(function(item) {
             return {
@@ -118,20 +119,21 @@ async function getCards(ext) {
                 vod_remarks: item.vote_average > 0 ? "⭐ " + item.vote_average.toFixed(1) : (item.release_date ? item.release_date.substring(0, 4) : '')
             };
         });
-        return { // 直接返回最终的对象
+        return jsonify({
             list: cards,
             page: data.page,
             pagecount: data.total_page,
             limit: cards.length,
             total: data.total_items
-        };
+        });
     } catch (err) {
         log("请求失败: " + err.message);
-        return { list: [] }; // 直接返回对象
+        return jsonify({ list: [] });
     }
 }
 
-// --- 占位函数 ---
-async function detail(id) { return {}; }
-async function play(flag, id, flags) { return { url: "" }; }
-async function search(wd, quick) { return { list: [] }; }
+// ----------------- 占位函数 (保持 async) -----------------
+
+async function detail(id) { return jsonify({ list: [] }); }
+async function play(flag, id, flags) { return jsonify({ url: "" }); }
+async function search(wd, quick) { return jsonify({ list: [] }); }
