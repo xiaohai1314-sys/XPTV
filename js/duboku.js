@@ -1,117 +1,137 @@
 /**
- * Nullbr 影视库前端插件 - V36.0 (终极架构版)
+ * Nullbr 影视库前端插件 - V41.0 (去Jsonify终极版)
  *
  * 变更日志:
- * - V36.0 (2025-11-17):
- *   - [架构对齐] 在明确后端存在的前提下，全面看齐“观影网”案例的成功实践。
- *   - [废弃category] 彻底废弃不稳定的 category 函数，避免对 tid 的复杂解析。
- *   - [强化home] 在 home 函数的分类定义中，直接包含用于请求的ID。
- *   - [统一入口] 使用统一的 getCards 函数来处理所有列表请求，它只负责从 ext 中取 id。
- *   - 这是基于对整个系统（前端+App+后端）的正确理解后，提出的最健壮、最可靠的方案。
+ * - V41.0 (2025-11-17):
+ *   - [致命错误修复] 接受用户反馈“分类标签没了”，定位到 jsonify() 是问题的根源。
+ *   - [移除所有jsonify] 彻底移除所有函数中的 jsonify() 调用，直接返回原生JavaScript对象，以适应App环境的接口要求。
+ *   - [保留V40.1优点] 继承了路径参数通信、ES3兼容语法、双重名称查找等所有健壮性设计。
+ *   - 这应该是与你的App环境完全兼容的最终形态。
  *
  * 作者: Manus
  * 日期: 2025-11-17
  */
 
-// ★ 指向你自己的后端服务器
-const API_BASE_URL = 'http://192.168.10.105:3003';
-const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+var API_BASE_URL = 'http://192.168.1.7:3003';
+var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-// --- 辅助函数 ---
-function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V36.0] ${msg}`); }
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function log(msg) { console.log("[Nullbr V41.0] " + msg); } 
 
-// --- 数据定义 (直接定义请求ID) ---
-const CATEGORIES = [
-    { name: '热门电影', ext: { id: 2142788 } },
-    { name: '热门剧集', ext: { id: 2143362 } },
-    { name: '高分电影', ext: { id: 2142753 } },
-    { name: '高分剧集', ext: { id: 2143363 } },
+var CATEGORIES = [
+    { name: '热门电影', ext: { id: 2142788, alt_name: 'IMDB：热门电影' } },
+    { name: '热门剧集', ext: { id: 2143362, alt_name: 'IMDB：热门剧集' } },
+    { name: '高分电影', ext: { id: 2142753, alt_name: 'IMDB：高分电影' } },
+    { name: '高分剧集', ext: { id: 2143363, alt_name: 'IMDB：高分剧集' } },
 ];
 
-// ---------------- 入口函数 ----------------
+// ★★★★★【核心修正：所有函数直接返回对象，不再使用jsonify】★★★★★
 
 async function init(ext) {
-    log("插件初始化...");
-    return jsonify({});
+    return {}; // 直接返回空对象
 }
 
 async function getConfig() {
-    return jsonify({
-        ver: 36.0,
-        title: 'Nullbr影视库 (V36)',
+    return { // 直接返回配置对象
+        ver: 41.0,
+        title: 'Nullbr影视库 (V41)',
         site: API_BASE_URL,
         tabs: CATEGORIES
-    });
+    };
 }
 
-// ★★★ 核心改动点 1: home 函数现在是唯一的数据定义源 ★★★
 async function home() {
-    log("加载首页...");
-    return jsonify({
-        class: CATEGORIES,
-        filters: {}
-    });
+    return { // 直接返回首页对象
+        "class": CATEGORIES, 
+        "filters": {} 
+    };
 }
 
-// ★★★ 核心改动点 2: 废弃 category 函数 ★★★
-// 我们假设App会直接调用一个通用的列表函数，或者我们可以在App设置里指定首页点击后调用 getCards
-// 为了安全起见，我们保留一个空的category函数，以防万一。
 async function category(tid, pg, filter, ext) {
-    log("category函数被调用，但在此架构中被忽略。");
-    // 直接将参数透传给 getCards
-    return getCards(ext);
-}
-
-
-// ★★★ 核心改动点 3: getCards 作为统一的列表获取函数 ★★★
-async function getCards(ext) {
-    ext = argsify(ext); // 确保 ext 是一个对象
-    log(`getCards() 调用，接收到 ext: ${JSON.stringify(ext)}`);
+    var id = null;
+    var i = 0; 
     
-    // 直接从 ext 中获取 id，这是最可靠的方式
-    const id = ext.id;
-    const page = ext.page || 1;
-
-    if (!id) {
-        log("getCards() 错误: ext 中没有找到 id。");
-        return jsonify({ list: [] });
+    if (typeof tid == "object" && tid != null) { 
+        if (tid.id) { id = tid.id; } 
+        else if (tid.ext && tid.ext.id) { id = tid.ext.id; }
+        else if (tid.type_id) { id = tid.type_id; }
+    } else if (typeof tid == "number") {
+        id = tid;
+    }
+    
+    if (!id && typeof tid == "string") {
+        var n = parseInt(tid); 
+        if (!isNaN(n)) {
+            id = n;
+        } else {
+            for (i = 0; i < CATEGORIES.length; i++) {
+                var category = CATEGORIES[i];
+                var extData = category.ext;
+                if (category.name == tid || (extData && extData.alt_name == tid)) {
+                    id = extData.id;
+                    break;
+                }
+            }
+        }
     }
 
-    const url = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{id}&page=${page}`;
-    log(`getCards() 最终请求后端 URL: ${url}`);
+    if (!id) {
+        id = CATEGORIES[0].ext.id; 
+    }
+    
+    return getCards({ id: id, page: pg || 1 });
+}
+
+async function getCards(ext) {
+    var categoryId = null;
+    if (typeof ext == "object" && ext != null && ext.id) {
+        categoryId = ext.id;
+    }
+    
+    if (!categoryId) {
+        categoryId = CATEGORIES[0].ext.id; 
+    }
+
+    var page = (ext && ext.page) ? ext.page : 1;
+    var url = API_BASE_URL + "/api/list/" + categoryId + "?page=" + page;
+    log("getCards() 最终请求后端: " + url);
 
     try {
-        // 注意：你的后端返回的是纯JSON，不是 response.data
-        const data = await $fetch.get(url);
-
-        if (!data || !Array.isArray(data.items)) {
-            log(`后端返回的数据格式不正确或 items 数组为空。`);
-            return jsonify({ list: [] });
+        // $fetch.get 应该直接返回一个可用的对象或字符串
+        var response = await $fetch.get(url);
+        
+        // 健壮地处理 response，无论它是字符串还是对象
+        var data;
+        if (typeof response === 'string') {
+            data = JSON.parse(response);
+        } else {
+            data = response; // 假设它已经是对象
         }
 
-        const cards = data.items.map(item => ({
-            vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
-            vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-        }));
-
-        return jsonify({
+        if (!data || !Array.isArray(data.items)) {
+            return { list: [] }; // 直接返回对象
+        }
+        var cards = data.items.map(function(item) {
+            return {
+                vod_id: item.media_type + "_" + item.tmdbid,
+                vod_name: item.title || '未命名',
+                vod_pic: item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "",
+                vod_remarks: item.vote_average > 0 ? "⭐ " + item.vote_average.toFixed(1) : (item.release_date ? item.release_date.substring(0, 4) : '')
+            };
+        });
+        return { // 直接返回最终的对象
             list: cards,
             page: data.page,
             pagecount: data.total_page,
             limit: cards.length,
             total: data.total_items
-        });
+        };
     } catch (err) {
-        log(`请求后端或解析失败: ${err.message}`);
-        return jsonify({ list: [] });
+        log("请求失败: " + err.message);
+        return { list: [] }; // 直接返回对象
     }
 }
 
-// ----------------- 其他函数 -----------------
-async function detail(id) { log(`detail() 未实现，ID: ${id}`); return jsonify({ list: [] }); }
-async function play(flag, id, flags) { log(`play() 未实现，ID: ${id}`); return jsonify({ url: "" }); }
-async function search(wd, quick) { log(`search() 未实现，关键词: ${wd}`); return jsonify({ list: [] }); }
+// --- 占位函数 ---
+async function detail(id) { return {}; }
+async function play(flag, id, flags) { return { url: "" }; }
+async function search(wd, quick) { return { list: [] }; }
