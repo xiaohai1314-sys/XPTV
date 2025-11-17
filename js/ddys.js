@@ -1,10 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (最终修复版：Ultra-Safe ES3 兼容 + type_id 检查)
+ * Nullbr 影视库前端插件 - V27.0 (最终修复版：Ultra-Safe ES3 兼容 + type_id + 名称修正)
  *
  * 目标:
  * 1. 仅使用最原始的 ES3/ES5 兼容语法。
  * 2. 修复 App 可能传入的非标准 type_id 键名。
- * 3. 确保脚本在最老旧的环境中也能稳定运行。
+ * 3. 【核心修正】将所有分类名称添加 'IMDB：' 前缀，以匹配后端数据格式。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -17,11 +17,12 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 function jsonify(data) { return JSON.stringify(data); }
 function log(msg) { console.log("[Nullbr V27.0] " + msg); } 
 
+// ★★★ 核心修正：分类名称全部带有 'IMDB：' 前缀 ★★★
 const CATEGORIES = [
-    { name: '热门电影', ext: { id: 2142788 } },
-    { name: '热门剧集', ext: { id: 2143362 } },
-    { name: '高分电影', ext: { id: 2142753 } },
-    { name: '高分剧集', ext: { id: 2143363 } },
+    { name: 'IMDB：热门电影', ext: { id: 2142788 } },
+    { name: 'IMDB：热门剧集', ext: { id: 2143362 } },
+    { name: 'IMDB：高分电影', ext: { id: 2142753 } },
+    { name: 'IMDB：高分剧集', ext: { id: 2143363 } },
 ];
 
 // ---------------- 入口：init / getConfig / home ----------------
@@ -57,7 +58,7 @@ async function category(tid, pg, filter, ext) {
         else if (tid.ext && tid.ext.id) { 
             id = tid.ext.id;
         }
-        // ★★★ 最终修复：新增对非标准 type_id 的检查 ★★★
+        // 修复：新增对非标准 type_id 的检查
         else if (tid.type_id) { 
             id = tid.type_id;
         }
@@ -66,7 +67,7 @@ async function category(tid, pg, filter, ext) {
         id = tid;
     }
     
-    // 2. 处理字符串 (替换 find 为 for 循环，移除 trim)
+    // 2. 处理字符串 (使用 ES3 for 循环，移除 trim)
     if (!id && typeof tid === "string") {
         var trimmedTid = tid; // 移除 .trim()
         var n = parseInt(trimmedTid);
@@ -111,7 +112,7 @@ async function getCards(ext) {
     
     try {
         var response = await $fetch.get(url);
-        // 数据处理部分保持不变，因为 $fetch 和 JSON.parse 是 App 内部功能
+        // 数据处理部分保持不变
         var data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         if (!data || !Array.isArray(data.items)) {
             return jsonify({ list: [] });
