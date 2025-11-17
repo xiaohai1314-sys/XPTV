@@ -1,10 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (Zero-Tolerance ES3 最终版)
+ * Nullbr 影视库前端插件 - V27.0 (Zero-Tolerance ES3 + 双重名称查找)
  *
  * 目标:
- * 1. 移除所有 ES6+ 语法 (如 const/let, 模板字符串, 箭头函数)。
- * 2. 仅使用最原始的 ES3 兼容语法，确保在最古老的环境中运行。
- * 3. 修复非标准 type_id 键名和 IMDB 前缀分类名称。
+ * 1. 移除所有 ES6+ 语法，仅使用最原始的 ES3 兼容语法。
+ * 2. 修复非标准 type_id 键名。
+ * 3. 【核心修正】让脚本在 category() 函数中同时接受原始名称 ('热门电影') 和带前缀的名称 ('IMDB：热门电影')。
  *
  * 作者: Manus (由 Gemini 最终修正)
  * 日期: 2025-11-17
@@ -16,15 +16,15 @@ var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
 function jsonify(data) { return JSON.stringify(data); }
-// log 函数保持，但预期在古老环境中无效
 function log(msg) { console.log("[Nullbr V27.0] " + msg); } 
 
-// 分类名称全部带有 'IMDB：' 前缀，使用 var
+// ★★★ 核心修正：CATEGORIES 数组使用原始名称 (用于 App 兼容显示) ★★★
+// 并添加一个 alt_name 键，存储带前缀的名称，用于 category() 查找
 var CATEGORIES = [
-    { name: 'IMDB：热门电影', ext: { id: 2142788 } },
-    { name: 'IMDB：热门剧集', ext: { id: 2143362 } },
-    { name: 'IMDB：高分电影', ext: { id: 2142753 } },
-    { name: 'IMDB：高分剧集', ext: { id: 2143363 } },
+    { name: '热门电影', ext: { id: 2142788, alt_name: 'IMDB：热门电影' } },
+    { name: '热门剧集', ext: { id: 2143362, alt_name: 'IMDB：热门剧集' } },
+    { name: '高分电影', ext: { id: 2142753, alt_name: 'IMDB：高分电影' } },
+    { name: '高分剧集', ext: { id: 2143363, alt_name: 'IMDB：高分剧集' } },
 ];
 
 // ---------------- 入口：init / getConfig / home ----------------
@@ -49,22 +49,24 @@ async function home() {
     });
 }
 
-// -------------------- category（极端 ES3 防御性逻辑） --------------------
+// -------------------- category（极端 ES3 防御性逻辑 + 双重查找） --------------------
 
 async function category(tid, pg, filter, ext) {
-    // 仅使用 var
     var id = null;
     var i = 0; 
     
     // 1. 尝试解析 Object 或 Number (最安全的属性访问)
-    if (typeof tid == "object") { // 使用 == 增加兼容性
-        if (tid && tid.id) { // 必须先检查 tid 是否为 null
+    if (typeof tid == "object" && tid != null) { // 必须先检查 tid 是否为 null
+        // 检查 id
+        if (tid.id) { 
             id = tid.id;
-        } else if (tid && tid.ext && tid.ext.id) { // 必须逐级检查属性是否存在
+        } 
+        // 检查 ext.id
+        else if (tid.ext && tid.ext.id) { 
             id = tid.ext.id;
         }
         // 检查 type_id
-        else if (tid && tid.type_id) { 
+        else if (tid.type_id) { 
             id = tid.type_id;
         }
     } else if (typeof tid == "number") {
@@ -78,11 +80,20 @@ async function category(tid, pg, filter, ext) {
         if (!isNaN(n)) {
             id = n;
         } else {
-            // 使用最原始的 for 循环查找 (ES3 标准)
+            // ★★★ 核心修复：使用最原始的 for 循环查找，并匹配 name 和 alt_name ★★★
             for (i = 0; i < CATEGORIES.length; i++) {
-                // 使用 == 而不是 ===
-                if (CATEGORIES[i].name == tid) { 
-                    id = CATEGORIES[i].ext.id;
+                var category = CATEGORIES[i];
+                var extData = category.ext;
+                
+                // 检查是否匹配 CATEGORIES[i].name (例如 '热门电影')
+                if (category.name == tid) { 
+                    id = extData.id;
+                    break;
+                }
+                
+                // 检查是否匹配 CATEGORIES[i].ext.alt_name (例如 'IMDB：热门电影')
+                if (extData && extData.alt_name == tid) {
+                    id = extData.id;
                     break;
                 }
             }
@@ -94,7 +105,6 @@ async function category(tid, pg, filter, ext) {
         id = CATEGORIES[0].ext.id; 
     }
     
-    // 返回 getCards 
     return getCards({ id: id, page: pg || 1 });
 }
 
@@ -102,7 +112,6 @@ async function category(tid, pg, filter, ext) {
 
 async function getCards(ext) {
     var categoryId = null;
-    // 使用 var 和 if 检查
     if (typeof ext == "object" && ext != null && ext.id) {
         categoryId = ext.id;
     }
@@ -117,18 +126,15 @@ async function getCards(ext) {
     
     try {
         var response = await $fetch.get(url);
-        // 数据处理部分保持不变
         var data = typeof response.data == 'string' ? JSON.parse(response.data) : response.data;
         if (!data || !Array.isArray(data.items)) {
             return jsonify({ list: [] });
         }
-        // 使用 ES5 兼容的 map 和匿名函数
         var cards = data.items.map(function(item) {
             return {
                 vod_id: item.media_type + "_" + item.tmdbid,
                 vod_name: item.title || '未命名',
                 vod_pic: item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "",
-                // 纯字符串拼接
                 vod_remarks: item.vote_average > 0 ? "⭐ " + item.vote_average.toFixed(1) : (item.release_date ? item.release_date.substring(0, 4) : '')
             };
         });
