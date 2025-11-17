@@ -1,13 +1,15 @@
 /**
- * Nullbr 影视库前端插件 - V66.0 (ext传参最终版)
+ * Nullbr 影视库前端插件 - V71.0 (遵从指示最终版)
  *
  * 变更日志:
- * - V66.0 (2025-11-17):
- *   - [终极思想] 接受用户指引，通过分析“观影网”脚本，确认detail函数接收的参数是ext对象，而非id字符串。
- *   - [改造getCards/search] 在返回卡片时，在ext对象中增加一个detail_url字段，其值为完整的、指向后端/api/resource的URL。
- *   - [重写detail] 函数签名改为detail(ext)，逻辑改为直接从ext.detail_url中获取URL并发起请求，不再对任何ID进行处理。
- *   - [兼容性] 全面使用var和ES5语法，确保在任何古老环境中都能稳定运行。
- *   - 这是对“观-影网”成功模式最深刻、最忠实的最终复刻，是我们所有探索的终点。
+ * - V71.0 (2025-11-17):
+ *   - [终极思想] 彻底回归用户最初的指示，严格按照用户提供的两份JSON格式进行数据处理。
+ *   - [重写detail] detail函数严格按照“V70的正确结构 + V69的正确数据处理”模式：
+ *     1. 从ext透传的URL请求后端，获取原始网盘JSON。
+ *     2. 严格按照用户提供的网盘JSON格式，提取title/size/share_link。
+ *     3. 将提取的信息组装成vod_play_url字符串。
+ *     4. 将该字符串嵌入一个从ext透传过来的、完整的详情页UI结构中。
+ *   - 这是对我们所有探索的最终总结，是我们回归正确道路的唯一宣言。
  *
  * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-17
@@ -17,7 +19,7 @@ var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V66.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V71.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -33,15 +35,15 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 66.0, title: 'Nullbr影视库 (V66)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 71.0, title: 'Nullbr影视库 (V71)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); } // 彻底废弃
+async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
 // =======================================================================
-// --- 核心功能区 (ext传参模式) ---
+// --- 核心功能区 ---
 // =======================================================================
 
-// 1. 分类列表 (在ext中增加detail_url)
+// 1. 分类列表
 async function getCards(ext) {
     var parsed = parseExt(ext);
     var id = parsed.id;
@@ -54,7 +56,7 @@ async function getCards(ext) {
     var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
     try {
         var data = await fetchData(url);
-        var cards = formatCards(data.items); // formatCards内部已改造
+        var cards = formatCards(data.items);
         
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
@@ -70,7 +72,7 @@ async function getCards(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 2. 搜索功能 (在ext中增加detail_url)
+// 2. 搜索功能
 async function search(ext) {
     var parsed = parseExt(ext);
     var keyword = parsed.text;
@@ -84,7 +86,7 @@ async function search(ext) {
     var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
     try {
         var data = await fetchData(url);
-        var cards = formatCards(data.items); // formatCards内部已改造
+        var cards = formatCards(data.items);
 
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
@@ -100,43 +102,65 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 (★★★ 核心修复：函数签名改为detail(ext)，并从ext.detail_url取值 ★★★)
+// 3. 详情页 (★★★ 终极核心 ★★★)
 async function detail(ext) {
-    log('[detail] 收到请求, 原始ext: ' + JSON.stringify(ext));
+    log('[detail] 遵从指示最终版, 原始ext: ' + JSON.stringify(ext));
     
-    // 使用一个健壮的函数来解析ext
-    var parsedExt = parseDetailExt(ext);
-    var detailUrl = parsedExt.detail_url;
-
-    if (!detailUrl) {
-        log('[detail] 错误: 无法从ext中解析出detail_url');
-        return jsonify({ list: [] });
-    }
-
-    log('[detail] 解析出的请求URL: ' + detailUrl);
     try {
-        var data = await fetchData(detailUrl);
-        if (!data || !Array.isArray(data['115'])) {
-            return jsonify({ list: [] });
+        // 步骤1: 用最安全的方式解析ext，获取所有需要的信息
+        var parsedExt = parseDetailExt(ext);
+        var detailUrl = parsedExt.detail_url;
+        var vodName = parsedExt.vod_name || '加载中...';
+        var vodPic = parsedExt.vod_pic || '';
+        var vodContent = parsedExt.vod_content || '加载中...';
+
+        if (!detailUrl) {
+            throw new Error("无法从ext中解析出detail_url");
         }
 
-        var tracks = data['115'].map(function(item) {
-            return {
-                name: item.title + ' [' + (item.size || '未知大小') + ']',
-                url: item.share_link,
-                size: item.size
-            };
-        });
-
+        log('[detail] 解析出的请求URL: ' + detailUrl);
+        
+        // 步骤2: 请求后端，获取你提供的那个原始网盘JSON
+        var data = await fetchData(detailUrl);
+        
+        // 步骤3: 严格按照你提供的JSON格式，在前端组装播放列表字符串
+        var resources = data['115'];
+        var vod_play_url;
+        if (!resources || !Array.isArray(resources) || resources.length === 0) {
+            vod_play_url = "未找到115网盘链接";
+        } else {
+            var playUrlItems = [];
+            for (var i = 0; i < resources.length; i++) {
+                var item = resources[i];
+                var name = item.title + ' [' + (item.size || '未知大小') + ']';
+                var link = item.share_link;
+                playUrlItems.push(name + '$' + link);
+            }
+            vod_play_url = playUrlItems.join('#');
+        }
+        
+        // 步骤4: 返回一个完整的、结构正确的详情页对象
         return jsonify({
             list: [{
-                vod_name: "115网盘资源",
-                vod_play_from: "115",
-                vod_play_url: tracks.map(function(t) { return t.name + '$' + t.url; }).join('#')
+                vod_name: vodName,
+                vod_pic: vodPic,
+                vod_content: vodContent,
+                vod_play_from: "115网盘",
+                vod_play_url: vod_play_url
             }]
         });
+
     } catch (err) {
-        return handleError(err);
+        log('[detail] 发生致命错误: ' + err.message);
+        return jsonify({
+            list: [{
+                vod_name: "加载失败",
+                vod_pic: "",
+                vod_content: "错误信息: " + err.message,
+                vod_play_from: "错误",
+                vod_play_url: "加载失败$"
+            }]
+        });
     }
 }
 
@@ -150,7 +174,6 @@ async function play(flag, id, flags) {
 // --- 辅助函数区 ---
 // =======================================================================
 
-// 列表/搜索用的ext解析函数
 function parseExt(ext) {
     try {
         var extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
@@ -164,19 +187,13 @@ function parseExt(ext) {
     }
 }
 
-// ★★★ 新增：专门为detail函数准备的、更健壮的ext解析函数 ★★★
 function parseDetailExt(ext) {
     try {
         if (typeof ext === 'string') {
             ext = JSON.parse(ext);
         }
-        // 兼容多种可能的ext结构
-        if (ext && ext.ext && ext.ext.detail_url) {
-            return ext.ext;
-        }
-        if (ext && ext.detail_url) {
-            return ext;
-        }
+        if (ext && ext.ext) { return ext.ext; }
+        if (ext) { return ext; }
         return {};
     } catch (e) {
         return {};
@@ -190,19 +207,22 @@ async function fetchData(url) {
     return data;
 }
 
-// ★★★ 改造formatCards，让它在ext中增加detail_url ★★★
+// 在ext中透传所有详情页需要的信息
 function formatCards(items) {
     if (!items || !Array.isArray(items)) return [];
     return items.map(function(item) {
-        // 构造指向我们后端/api/resource的完整URL
         var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
+        var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
         return {
-            vod_id: item.media_type + '_' + item.tmdbid, // vod_id可以保留，作为备用
+            vod_id: item.media_type + '_' + item.tmdbid,
             vod_name: item.title || '未命名',
-            vod_pic: item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "",
+            vod_pic: picUrl,
             vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
-            ext: { // ★★★ 核心在这里 ★★★
-                detail_url: detailUrl
+            ext: {
+                detail_url: detailUrl,
+                vod_name: item.title || '未命名',
+                vod_pic: picUrl,
+                vod_content: item.overview || '暂无简介'
             }
         };
     });
