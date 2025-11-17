@@ -1,5 +1,5 @@
 /**
- * Nullbr 影视库前端插件 - V27.0 (最终修复版：Ultra-Safe ES3 兼容 + type_id + 名称修正)
+ * Nullbr 影视库前端插件 - V27.10 (最终修复版：Ultra-Safe ES3 兼容 + type_id + 名称修正)
  *
  * 目标:
  * 1. 仅使用最原始的 ES3/ES5 兼容语法。
@@ -10,7 +10,7 @@
  * 日期: 2025-11-17
  */
 
-const API_BASE_URL = 'http://192.168.1.7:3003';
+const API_BASE_URL = 'http://192.168.10.105:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 // --- 辅助函数 ---
