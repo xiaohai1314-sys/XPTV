@@ -1,9 +1,9 @@
 /**
- * 找盘资源前端插件 - V2.0.0 (仅保留天翼+115，确保搜索功能稳定)
+ * 找盘资源前端插件 - V1.7.1 (仅保留 115 + 天翼)
  * 变更内容：
- * - 移除 V1.7.0 的所有夸克筛选和优先级排序逻辑。
- * - 搜索结果严格只保留：天翼网盘、115网盘。
- * - 保持其他函数（如 getCards）与原始 V1.7.0 脚本完全一致，以确保稳定性。
+ *  - 删除夸克筛选与排序
+ *  - 删除夸克、百度、迅雷、阿里、UC等所有网盘
+ *  - 搜索结果仅保留 115 网盘 + 天翼网盘
  */
 
 // --- 配置区 ---
@@ -25,9 +25,10 @@ function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.start
 // --- 全局缓存 ---
 let cardsCache = {};
 
-// --- 插件入口函数 ---
+
+// ★★★★★【初始化】★★★★★
 async function getConfig() {
-    log("==== 插件初始化 V2.0.0 (仅保留天翼+115) ====");
+    log("==== 插件初始化 V1.7.1 (仅115+天翼) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -36,7 +37,9 @@ async function getConfig() {
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分页】(原始 V1.7.0 逻辑 - 未修改) ★★★★★
+
+
+// ★★★★★【首页分页 - 原样保留】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -52,10 +55,11 @@ async function getCards(ext) {
             allCards = [];
             const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
             if (categorySpan.length === 0) { log(`[getCards] ❌ 找不到分类:"${categoryName}"`); return jsonify({ list: [] }); }
-            log(`[getCards] ✓ 找到分类，提取卡片`);
+
             let rowDiv = categorySpan.closest('div.d-flex').parent().next('div.row');
             if (rowDiv.length === 0) { rowDiv = categorySpan.closest('div.d-flex').next('div.row'); }
             if (rowDiv.length === 0) { log(`[getCards] ❌ 找不到row容器`); return jsonify({ list: [] }); }
+
             rowDiv.find('a.col-4').each((_, item) => {
                 const linkElement = $(item);
                 const imgElement = linkElement.find('img.lozad');
@@ -67,33 +71,31 @@ async function getCards(ext) {
                     ext: { url: linkElement.attr('href') || "" }
                 });
             });
+
             cardsCache[cacheKey] = allCards;
-            log(`[getCards] ✓ 缓存${allCards.length}个卡片`);
         }
         const startIdx = (page - 1) * PAGE_SIZE;
         const endIdx = startIdx + PAGE_SIZE;
-        const pageCards = allCards.slice(startIdx, endIdx);
-        log(`[getCards] 总数=${allCards.length}, 返回=${pageCards.length}个 (页码${page})`);
-        return jsonify({ list: pageCards });
+        return jsonify({ list: allCards.slice(startIdx, endIdx) });
+
     } catch (e) {
         log(`[getCards] ❌ 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// ★★★★★【搜索 - 仅保留天翼和115】★★★★★
+
+
+// ★★★★★【搜索：只保留 115 + 天翼】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
     const page = ext.page || 1;
-    if (!text) {
-        log(`[search] 搜索词为空`);
-        return jsonify({ list: [] });
-    }
+    if (!text) return jsonify({ list: [] });
 
     log(`[search] 关键词="${text}", 页=${page}`);
-    const filter = 0;
-    const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
+
+    const url = `${SITE_URL}/s/${encodeURIComponent(text)}/0/${page}`;
     log(`[search] URL: ${url}`);
 
     try {
@@ -104,33 +106,30 @@ async function search(ext) {
 
         $("a.resource-item").each((idx, item) => {
             originalCount++;
-            const linkElement = $(item);
-            const resourceLink = linkElement.attr('href');
-            const title = linkElement.find('h2').text().trim();
-            const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
-            // --- 核心筛选逻辑：只保留天翼和115 ---
-            // 只要网盘类型包含 '天翼' 或 '115'，就保留
-            const isTargetPan = panType.includes('天翼') || panType.includes('115');
+            const link = $(item);
+            const resourceLink = link.attr('href');
+            const title = link.find('h2').text().trim();
+            const panType = link.find('span.text-success').text().trim() || '未知';
 
-            if (isTargetPan) {
-                if (resourceLink && title) {
-                    cards.push({
-                        vod_id: resourceLink,
-                        vod_name: title,
-                        vod_pic: FALLBACK_PIC,
-                        vod_remarks: `[${panType}]`,
-                        ext: { url: resourceLink }
-                    });
-                }
+            // ★★★ 只保留 115 和 天翼 ★★★
+            if (!panType.includes("115") && !panType.includes("天翼")) {
+                log(`[search] ❌ 过滤非115/天翼: ${panType} - ${title}`);
+                return;
             }
-            // 所有其他网盘（夸克、阿里、百度、迅雷等）将被跳过
-        });
-        
-        // 删除了原始的夸克排序逻辑
 
-        log(`[search] ✓ 第${page}页找到${originalCount}个原始结果, 过滤后保留${cards.length}个`);
-        return jsonify({ list: cards }); 
+            cards.push({
+                vod_id: resourceLink,
+                vod_name: title,
+                vod_pic: FALLBACK_PIC,
+                vod_remarks: `[${panType}]`,
+                ext: { url: resourceLink }
+            });
+        });
+
+        log(`[search] ✓ 原始=${originalCount}, 保留=${cards.length} (仅115/天翼)`);
+
+        return jsonify({ list: cards });
 
     } catch (e) {
         log(`[search] ❌ 异常: ${e.message}`);
@@ -138,46 +137,53 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】(V1.8.2 优化逻辑 - 保留) ★★★★★
+
+
+// ★★★★★【详情页】(保持不变)★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
-    if (!url) { log(`[getTracks] ❌ URL为空`); return jsonify({ list: [] }); }
+    if (!url) return jsonify({ list: [] });
     const middleUrl = getCorrectPicUrl(url);
-    log(`[getTracks] 将请求后端API解析: ${middleUrl}`);
+
     try {
         const apiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(middleUrl)}`;
         const response = await $fetch.get(apiUrl);
         const result = JSON.parse(response.data);
-        if (result.success && result.real_url) {
-            log(`[getTracks] ✓ 后端API成功返回真实链接: ${result.real_url}`);
-            
-            // 优化链接名称显示
-            let panName = '网盘链接';
-            const realUrl = result.real_url;
-            
-            if (realUrl.includes('189.cn') || realUrl.includes('cloud.189')) panName = '天翼云盘';
-            else if (realUrl.includes('115.com')) panName = '115网盘';
-            else if (realUrl.includes('quark')) panName = '夸克网盘';
-            else if (realUrl.includes('baidu')) panName = '百度网盘';
-            else if (realUrl.includes('aliyundrive')) panName = '阿里云盘';
 
-            return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: realUrl, ext: {} }] }] });
-        } else {
-            log(`[getTracks] ❌ 后端API返回错误: ${result.error || '未知错误'}`);
-            throw new Error(result.error || 'API did not return a real URL');
+        if (result.success && result.real_url) {
+            let panName = '网盘链接';
+            if (result.real_url.includes('115')) panName = '115 网盘';
+            if (result.real_url.includes('cloud.189.cn')) panName = '天翼云盘';
+
+            return jsonify({
+                list: [
+                    {
+                        title: '解析成功',
+                        tracks: [
+                            { name: panName, pan: result.real_url, ext: {} }
+                        ]
+                    }
+                ]
+            });
         }
+
     } catch (e) {
-        log(`[getTracks] ❌ 请求后端API时发生异常: ${e.message}`);
-        return jsonify({ list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }] });
+        return jsonify({
+            list: [
+                { title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }
+            ]
+        });
     }
 }
 
-// --- 兼容接口 (保持不变) ---
+
+
+// --- 兼容接口 ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
-async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
-async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
+async function detail(id) { return getTracks({ url: id }); }
+async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V2.0.0 ====');
+log('==== 插件加载完成 V1.7.1 (仅115+天翼) ====');
