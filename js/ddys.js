@@ -1,5 +1,5 @@
 /**
- * Nullbr 影视库前端插件 - V79.0 (纯粹115最终版)
+ * Nullbr 影视库前端插件 - V79.1 (纯粹115最终版)
  *
  * 变更日志:
  * - V79.0 (2025-11-17):
@@ -15,7 +15,7 @@
  * 日期: 2025-11-17
  */
 
-var API_BASE_URL = 'http://192.168.1.7:3003';
+var API_BASE_URL = 'http://192.168.10.105:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
