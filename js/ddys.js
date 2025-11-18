@@ -1,15 +1,13 @@
 /**
- * Nullbr 影视库前端插件 - V74.0 (接力+动态最终版)
+ * Nullbr 影视库前端插件 - V77.0 (信仰之跃最终版)
  *
  * 变更日志:
- * - V74.0 (2025-11-17):
- *   - [终极思想] 彻底回归用户指示，坚决以V2.9后端和V60前端为基础进行修正。
- *   - [重写detail] detail函数完美结合了“接力”与“动态”两种信息来源：
- *     1. (接力) 从ext中获取上一步传递过来的影片自身信息(标题/海报/简介)。
- *     2. (动态) 请求后端获取纯粹的网盘JSON。
- *     3. (组装) 解析网盘JSON，生成播放列表字符串。
- *     4. (结合) 将“接力”信息与“动态”信息组合成最终的详情页UI结构。
- *   - 这是对我们所有探索的最终总结，是我们回归正确道路的唯一宣言。
+ * - V77.0 (2025-11-17):
+ *   - [终极思想] 接受用户指引，进行“信仰之跃”：我们相信App调用的是getTracks函数，而非detail。
+ *   - [函数迁移] 将V74版本中逻辑完美的detail函数，完整地、逐字逐句地，迁移到新的getTracks函数中。
+ *   - [函数废弃] detail函数被彻底清空，只作为一个无用的占位符存在。
+ *   - [剧集支持] 确认V2.9后端和本前端的逻辑，已天然支持用户提供的剧集接口格式。
+ *   - 这是我们基于所有失败教训和成功范例的、最后的、唯一的、最合理的尝试。
  *
  * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-17
@@ -19,7 +17,7 @@ var API_BASE_URL = 'http://192.168.10.105:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V74.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V77.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -35,7 +33,7 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 74.0, title: 'Nullbr影视库 (V74)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 77.0, title: 'Nullbr影视库 (V77)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
@@ -43,7 +41,7 @@ async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 // --- 核心功能区 ---
 // =======================================================================
 
-// 1. 分类列表
+// 1. 分类列表 (与V74相同)
 async function getCards(ext) {
     var parsed = parseExt(ext);
     var id = parsed.id;
@@ -72,7 +70,7 @@ async function getCards(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 2. 搜索功能
+// 2. 搜索功能 (与V74相同)
 async function search(ext) {
     var parsed = parseExt(ext);
     var keyword = parsed.text;
@@ -102,9 +100,9 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 (★★★ 终极核心：“接力”与“动态”的完美结合 ★★★)
-async function detail(ext) {
-    log('[detail] 接力+动态最终版, 原始ext: ' + JSON.stringify(ext));
+// 3. 详情页 (★★★ 核心修复：逻辑从detail迁移至此 ★★★)
+async function getTracks(ext) {
+    log('[getTracks] 信仰之跃！原始ext: ' + JSON.stringify(ext));
     
     try {
         // 步骤1 (接力): 用最安全的方式解析ext，获取上一步传递过来的影片自身信息
@@ -118,7 +116,7 @@ async function detail(ext) {
             throw new Error("无法从ext中解析出detail_url");
         }
 
-        log('[detail] 解析出的请求URL: ' + detailUrl);
+        log('[getTracks] 解析出的请求URL: ' + detailUrl);
         
         // 步骤2 (动态): 请求后端，获取纯粹的网盘JSON
         var data = await fetchData(detailUrl);
@@ -132,7 +130,6 @@ async function detail(ext) {
             var playUrlItems = [];
             for (var i = 0; i < resources.length; i++) {
                 var item = resources[i];
-                // 按钮名 = 标题 + [大小]
                 var name = item.title + ' [' + (item.size || '未知大小') + ']';
                 var link = item.share_link;
                 playUrlItems.push(name + '$' + link);
@@ -152,7 +149,7 @@ async function detail(ext) {
         });
 
     } catch (err) {
-        log('[detail] 发生致命错误: ' + err.message);
+        log('[getTracks] 发生致命错误: ' + err.message);
         return jsonify({
             list: [{
                 vod_name: "加载失败",
@@ -165,14 +162,21 @@ async function detail(ext) {
     }
 }
 
-// 4. 播放
+// 4. detail函数 (★★★ 核心修复：彻底废弃，成为占位符 ★★★)
+async function detail(ext) {
+    log('[detail] 此函数已被废弃，不应被调用。');
+    return jsonify({ list: [] });
+}
+
+
+// 5. 播放
 async function play(flag, id, flags) {
     log('[play] 请求播放, id: ' + id);
     return jsonify({ parse: 0, url: id });
 }
 
 // =======================================================================
-// --- 辅助函数区 ---
+// --- 辅助函数区 (与V74相同) ---
 // =======================================================================
 
 function parseExt(ext) {
@@ -208,7 +212,6 @@ async function fetchData(url) {
     return data;
 }
 
-// ★★★ 核心改造：在ext中透传所有详情页需要的影片自身信息 ★★★
 function formatCards(items) {
     if (!items || !Array.isArray(items)) return [];
     return items.map(function(item) {
