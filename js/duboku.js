@@ -17,7 +17,7 @@
 const API_BASE_URL = 'http://192.168.10.105:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-function jsonify(data) { return JSON.stringify(data); }
+function jsonify(data ) { return JSON.stringify(data); }
 function log(msg) { console.log(`[Nullbr V59.0] ${msg}`); }
 
 const CATEGORIES = [
@@ -62,7 +62,7 @@ async function getCards(ext) {
         placeholderId = CATEGORIES[0].ext.id;
         page = 1;
     }
-    log(`解析成功！占位符ID: <LaTex>${placeholderId}, 页码: $</LaTex>{page}`);
+    log(`解析成功！占位符ID: ${placeholderId}, 页码: ${page}`);
 
     // --- 步骤2: “锁检查” - 主动防御！ ---
     if (CATEGORY_END_LOCK[placeholderId] && page > 1) {
@@ -80,7 +80,7 @@ async function getCards(ext) {
     }
 
     // --- 步骤3: 拼接URL并请求 ---
-    const url = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{placeholderId}&page=${page}`;
+    const url = `${API_BASE_URL}/api/list?id=${placeholderId}&page=${page}`;
     log(`最终请求URL为: ${url}`);
 
     try {
@@ -95,22 +95,22 @@ async function getCards(ext) {
         }
         
         const cards = data.items.map(item => ({
-            vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
+            vod_id: `${item.media_type}_${item.tmdbid}`,
             vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
+            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
             vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
         }));
 
         // --- 步骤4: “加锁”时机判断 ---
         const pageSize = 30; // 我们的API每页返回30条数据
         if (data.items.length < pageSize) {
-            log(`返回条目数 <LaTex>${data.items.length} 小于每页数量 $</LaTex>{pageSize}，锁定分类 "${placeholderId}"。`);
+            log(`返回条目数 ${data.items.length} 小于每页数量 ${pageSize}，锁定分类 "${placeholderId}"。`);
             CATEGORY_END_LOCK[placeholderId] = true;
         }
 
         // --- 步骤5: 动态设置pagecount，发送明确信号 ---
         const hasMore = !CATEGORY_END_LOCK[placeholderId];
-        log(`当前分类 "<LaTex>${placeholderId}" 是否还有更多: $</LaTex>{hasMore}`);
+        log(`当前分类 "${placeholderId}" 是否还有更多: ${hasMore}`);
 
         return jsonify({
             list: cards,
