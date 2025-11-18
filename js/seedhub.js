@@ -1,247 +1,294 @@
-/**
- * Nullbr 影视库前端插件 - V60.0 (搜索与播放功能完整版)
- *
- * 变更日志:
- * - V60.0 (2025-11-18):
- *   - [功能新增] 实现了 search(wd, quick) 函数，对接后端 /api/search 接口，提供完整的搜索功能。
- *   - [功能新增] 实现了 detail(id, ext) 函数，采用极简模式，不请求网络，仅根据列表页传入的 ext.115-flg 动态声明播放列表。
- *   - [功能新增] 实现了 play(flag, id, flags) 函数，对接后端 /api/resource 接口，作为获取真实115网盘链接的唯一入口。
- *   - [智能播放] play函数能够处理电影（智能选择高清）和剧集（拼接播放列表）两种情况。
- *   - [代码复用] 搜索和分类列表共用一套卡片格式化逻辑，确保UI一致性。
- *   - [保持稳定] 完全保留 V59.0 的 getCards 分类浏览和分页锁机制，不做任何修改。
- *
- * 作者: Manus (根据用户需求最终实现)
- * 日期: 2025-11-18
- */
+Const cheerio = createCheerio()
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
-const API_BASE_URL = 'http://192.168.10.105:3003';
-const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+// 【🚀 引入全局缓存】用于存储总页数等信息（可选，但用于保险）
+// 注意：此处的 searchCache 主要由 getCards 使用，新的 search 函数将有自己的独立缓存。
+const searchCacheForGetCards = {} // 为了不与 search 函数的缓存冲突，可以这样命名或放在其作用域内
 
-function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V60.0] ${msg}`); }
-
-const CATEGORIES = [
-    { name: '热门电影', ext: { id: 'hot_movie' } },
-    { name: '热门剧集', ext: { id: 'hot_series' } },
-    { name: '高分电影', ext: { id: 'top_movie' } },
-    { name: '高分剧集', ext: { id: 'top_series' } },
-];
-
-// ★★★★★【V59.0 核心：分类分页锁，保持不变】★★★★★
-let CATEGORY_END_LOCK = {};
-
-// --- 基础函数 (保持不变) ---
-async function init(ext) {
-    CATEGORY_END_LOCK = {};
-    return jsonify({});
+const appConfig = {
+	ver: 1,
+	title: 'SeedHub',
+	site: 'https://www.seedhub.cc',
+	tabs: [
+		{
+			name: '首页',
+			ext: {
+				id: '/',
+			},
+		},
+		{
+			name: '电影',
+			ext: {
+				id: '/categories/1/movies/',
+			},
+		},
+		{
+			name: '剧集',
+			ext: {
+				id: '/categories/3/movies/',
+			},
+		},
+		{
+			name: '动漫',
+			ext: {
+				id: '/categories/2/movies/',
+			},
+		}
+		
+	],
 }
-async function getConfig() { return jsonify({ ver: 60.0, title: 'Nullbr影视库 (V60)', site: API_BASE_URL, tabs: CATEGORIES }); }
-async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-async function category(tid, pg, filter, ext) {
-    log("category() 已被废弃，不应被调用！");
-    return jsonify({ list: [] });
-}
-
-// --- 辅助函数：将后端 item 转换为 App 卡片 (可复用) ---
-function itemToCard(item) {
-    const card = {
-        // vod_id 是我们与App沟通的桥梁，格式必须为 "类型_tmdbid"
-        vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
-        vod_name: item.title || '未命名',
-        vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
-        vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-    };
-    // ★★★ 关键：将详情页需要用到的标志位附加到卡片对象上，App会传递给 detail 函数
-    if (item['115-flg']) {
-        card['115-flg'] = item['115-flg'];
-    }
-    return card;
+async function getConfig(   ) {
+	return jsonify(appConfig)
 }
 
-
-// ★★★★★【V59.0 核心：分类入口函数，保持不变】★★★★★
 async function getCards(ext) {
-    log(`getCards() 作为分类入口被调用，ext: ${JSON.stringify(ext)}`);
+	ext = argsify(ext)
+	let cards = []
+	let { page = 1, id } = ext
+	
+	const url =appConfig.site + id + `?page=${page}`
+	const { data } = await $fetch.get(url, {
+    headers: {
+		"User-Agent": UA,
+  	  },
+});
+	
+	const $ = cheerio.load(data)
+	const videos = $('.cover')
+	videos.each((_, e) => {
+	const href = $(e).find('a').attr('href')
+	const title = $(e).find('a img').attr('alt')
+	const cover = $(e).find('a img').attr('src')
+	cards.push({
+			vod_id: href,
+			vod_name: title,
+			vod_pic: cover,
+			vod_remarks: '',
+			ext: {
+				url: `${appConfig.site}${href}`,
+			},
+		})
+	})
+
+    // 【🛠️ 核心修正逻辑 - 页码计算和停止信号】
+    let pagecount = 0;
     
-    let placeholderId = null;
-    let page = 1;
-    try {
-        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
-        const { id, pg, page: page_alt } = extObj.ext || extObj || {};
-        placeholderId = id || CATEGORIES[0].ext.id;
-        page = pg || page_alt || 1;
-    } catch (e) {
-        placeholderId = CATEGORIES[0].ext.id;
-        page = 1;
-    }
-    log(`解析成功！占位符ID: <LaTex>${placeholderId}, 页码: $</LaTex>{page}`);
-
-    if (CATEGORY_END_LOCK[placeholderId] && page > 1) {
-        log(`分类 "${placeholderId}" 已被锁定，直接返回空列表。`);
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
-    if (page === 1) {
-        log(`请求第一页，解除分类 "${placeholderId}" 的锁。`);
-        delete CATEGORY_END_LOCK[placeholderId];
-    }
-
-    const url = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{placeholderId}&page=${page}`;
-    log(`最终请求URL为: ${url}`);
-
-    try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        
-        if (!data || !Array.isArray(data.items)) {
-            CATEGORY_END_LOCK[placeholderId] = true;
-            return jsonify({ list: [], page: page, pagecount: page });
+    // 1. 尝试计算总页数（如果页面上有页码链接）
+    $('span.page a').each((_, link) => {
+        const p = parseInt($(link).text().trim());
+        if (!isNaN(p)) {
+            pagecount = Math.max(pagecount, p);
         }
+    });
+
+    // 2. 修正逻辑：如果列表为空，说明已经翻到头了
+    if (cards.length === 0) {
+        // 总页数就是前一页
+        pagecount = page - 1; 
+        if (pagecount < 1) pagecount = 1; // 至少保证 pagecount 是 1
         
-        // 使用统一的卡片转换函数
-        const cards = data.items.map(itemToCard);
+    } else if (pagecount === 0) {
+        // 修正逻辑：如果列表不为空，但计算出的页码为 0，说明只有一页结果
+        pagecount = page; // 当前页就是总页数
+    }
+    
+    // 将计算出的总页数存入缓存，供下次请求使用（保险）
+    searchCacheForGetCards.pagecount = pagecount;
+    
+    // 【✅ 返回字段】返回 pagecount 和 total (模仿参考脚本)
+	return jsonify({
+		list: cards,
+        pagecount: pagecount, // 明确告诉调用方总页数
+        total: cards.length,  // 模仿参考脚本，返回当前页的卡片数量
+	})
+}
 
-        const pageSize = 30;
-        if (data.items.length < pageSize) {
-            log(`返回条目数 <LaTex>${data.items.length} 小于每页数量 $</LaTex>{pageSize}，锁定分类 "${placeholderId}"。`);
-            CATEGORY_END_LOCK[placeholderId] = true;
-        }
+async function getTracks(ext) {
+    // ... (保持不变，与分页无关) ...
+	ext = argsify(ext);
+	const detailUrl = ext.url;
 
-        const hasMore = !CATEGORY_END_LOCK[placeholderId];
-        log(`当前分类 "<LaTex>${placeholderId}" 是否还有更多: $</LaTex>{hasMore}`);
+	// 1. 获取详情页 HTML
+	const { data: detailHtml } = await $fetch.get(detailUrl, {
+		headers: { 'User-Agent': UA },
+	});
+	
+	const $ = cheerio.load(detailHtml);
+	const panLinkElements = $('.pan-links li a');
+	
+	if (panLinkElements.length === 0) {
+		$utils.toastError('没有网盘资源条目'); 
+		return jsonify({ list: [] }); 
+	}
 
+	// 提取帖子主标题，用于后续命名
+	const postTitle = $('h1').text().replace(/^#\s*/, '').split(' ')[0].trim();
+
+	// 2. 并行处理所有网盘链接的解析
+	const trackPromises = panLinkElements.get().map(async (link) => {
+		const intermediateUrl = appConfig.site + $(link).attr('href');
+		const originalTitle = $(link).attr('title') || $(link).text().trim();
+		
+		try {
+			// 3. 获取中间页的 HTML
+			const { data: intermediateHtml } = await $fetch.get(intermediateUrl, {
+				headers: { 'User-Agent': UA },
+			});
+
+			// 4. 使用正则表达式从 HTML 文本中直接提取 panLink
+			const match = intermediateHtml.match(/var panLink = "([^"]+)"/);
+			
+			if (match && match[1]) {
+				const finalPanUrl = match[1];
+
+				// --- 自定义命名逻辑 ---
+				let newName = originalTitle;
+                // [修改处] 在正则表达式中加入了 '合集' 和 '次时代'
+				const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
+				
+				if (specMatch) {
+					const tags = specMatch.join(' ');
+					newName = `${postTitle} [${tags}]`;
+				} else {
+					newName = postTitle;
+				}
+				// --- 自定义命名逻辑结束 ---
+
+				return {
+					name: newName,
+					pan: finalPanUrl,
+				};
+			}
+		} catch (error) {
+			console.log(`解析链接 "${originalTitle}" 失败: ${error.message}`);
+		}
+		return null;
+	});
+
+	// 等待所有解析完成
+	const resolvedTracks = await Promise.all(trackPromises);
+	const tracks = resolvedTracks.filter(track => track !== null);
+
+	if (tracks.length === 0) {
+		$utils.toastError('所有网盘链接解析均失败');
+		return jsonify({ list: [] });
+	}
+	
+	return jsonify({
+		list: [
+			{
+				title: postTitle,
+				tracks,
+			},
+		],
+	});
+}
+
+async function getPlayinfo(ext) {
+	ext = argsify(ext)
+	const url = ext.url
+   	  
+	return jsonify({ urls: [ext.url] })
+}
+
+
+// =======================================================================
+// =================== 【修改后的 search 函数】 ============================
+// =======================================================================
+
+// 【🚀 引入全局缓存】用于存储搜索结果和分页信息
+const searchCache = {};
+
+async function search(ext) {
+	ext = argsify(ext);
+	const text = ext.text || '';
+	const page = ext.page || 1;
+
+	if (!text) {
+		return jsonify({ list: [] });
+	}
+
+	// 1. 【✅ 缓存命中逻辑】如果搜索词变化，则清空缓存
+	if (searchCache.keyword !== text) {
+		// 使用 $log 或 console.log 进行调试输出
+		try { $log(`新关键词 "${text}"，重置搜索缓存`); } catch(e) { console.log(`新关键词 "${text}"，重置搜索缓存`); }
+		searchCache.keyword = text;
+		searchCache.data = {}; // 使用对象存储，键为页码
+		searchCache.pagecount = 0;
+	}
+
+	// 2. 【✅ 页越界保护】利用缓存的总页数判断是否需要继续请求
+    // 如果 pagecount 已知且大于0，并且请求的页码超出了范围，则直接返回空列表
+	if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
+		try { $log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); } catch(e) { console.log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); }
+		return jsonify({ list: [], pagecount: searchCache.pagecount });
+	}
+
+    // 3. 【✅ 命中页缓存】如果当前页的数据已在缓存中，直接返回
+    if (searchCache.data && searchCache.data[page]) {
+        try { $log(`命中第 ${page} 页的缓存`); } catch(e) { console.log(`命中第 ${page} 页的缓存`); }
         return jsonify({
-            list: cards,
-            page: data.page,
-            pagecount: hasMore ? data.page + 1 : data.page,
-            limit: data.items.length,
-            total: data.total_items
+            list: searchCache.data[page],
+            pagecount: searchCache.pagecount
         });
-
-    } catch (err) {
-        log(`请求失败: ${err.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-// ★★★★★【V60.0 新增：搜索函数】★★★★★
-async function search(wd, quick) {
-    log(`search() 被调用，关键词: "${wd}"`);
-    if (!wd) {
-        return jsonify({ list: [] });
     }
 
-    const url = `<LaTex>${API_BASE_URL}/api/search?keyword=$</LaTex>{encodeURIComponent(wd)}`;
-    log(`搜索请求URL: ${url}`);
+	// 4. 【🌐 网络请求】如果缓存未命中且未越界，则发起网络请求
+	try { $log(`缓存未命中，请求第 ${page} 页`); } catch(e) { console.log(`缓存未命中，请求第 ${page} 页`); }
+	const url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`;
+	const { data } = await $fetch.get(url, {
+		headers: {
+			'User-Agent': UA,
+		},
+	});
 
-    try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+	const $ = cheerio.load(data);
+	const cards = [];
+	$('.cover').each((_, e) => {
+		const href = $(e).find('a').attr('href');
+		const title = $(e).find('a img').attr('alt');
+		const cover = $(e).find('a img').attr('src');
+		cards.push({
+			vod_id: href,
+			vod_name: title,
+			vod_pic: cover,
+			vod_remarks: '',
+			ext: {
+				url: `${appConfig.site}${href}`,
+			},
+		});
+	});
 
-        if (!data || !Array.isArray(data.items)) {
-            log("搜索API返回数据格式不正确或无结果。");
-            return jsonify({ list: [] });
-        }
-
-        // 复用卡片转换逻辑，确保搜索结果和首页卡片结构一致
-        const cards = data.items.map(itemToCard);
-        log(`搜索到 ${cards.length} 个结果。`);
-
-        return jsonify({ list: cards });
-    } catch (err) {
-        log(`搜索请求失败: ${err.message}`);
-        return jsonify({ list: [] });
-    }
-}
-
-// ★★★★★【V60.0 新增：极简详情函数】★★★★★
-async function detail(id, ext) {
-    log(`detail() 被调用, ID: ${id}`);
+	// 5. 【🔢 分页计算与缓存更新】
+	let pagecount = searchCache.pagecount; // 默认使用缓存中的值
     
-    // ext 是App从列表页传递过来的完整卡片对象，我们能从中获取 '115-flg'
-    const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
-
-    // 创建一个最基础的 vod 对象，只用于承载播放列表信息
-    const vod = {
-        vod_id: id,
-        vod_play_from: '',
-        vod_play_url: ''
-    };
-
-    // 核心逻辑：检查是否存在 115 网盘标志
-    if (extObj && extObj['115-flg'] === 1) {
-        log(`ID: ${id} 检测到 115-flg 标志，声明播放源。`);
-        vod.vod_play_from = "115网盘";
-        // "在线播放"是集数名，id是播放凭证，会被传给 play() 函数
-        vod.vod_play_url = "在线播放$" + id;
-    } else {
-        log(`ID: ${id} 未检测到 115-flg 标志，不提供播放源。`);
-    }
-
-    // 返回的数据App会用来填充播放列表，而剧情、海报等信息App会自己获取
-    return jsonify({ list: [vod] });
-}
-
-// ★★★★★【V60.0 新增：播放函数】★★★★★
-async function play(flag, id, flags) {
-    log(`play() 被调用, flag: <LaTex>${flag}, id: $</LaTex>{id}`);
-
-    if (flag !== '115网盘') {
-        return jsonify({ url: "" });
-    }
-
-    try {
-        const [media_type, tmdbid] = id.split('_');
-        if (!media_type || !tmdbid) {
-            throw new Error("无效的ID格式，无法解析 type 和 tmdbid。");
-        }
-
-        const url = `<LaTex>${API_BASE_URL}/api/resource?type=$</LaTex>{media_type}&tmdbid=${tmdbid}`;
-        log(`请求资源链接: ${url}`);
-
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-
-        const resources = data['115'];
-        if (!resources || resources.length === 0) {
-            log("资源API未返回任何115链接。");
-            return jsonify({ url: "" });
-        }
-
-        log(`获取到 ${resources.length} 个115资源。`);
-
-        // 如果是剧集 (tv)，通常返回一个包含多季的资源包，直接返回分享链接
-        if (media_type === 'tv') {
-            // 剧集通常是整个合集分享，直接取第一个链接即可
-            log("检测为剧集，返回第一个分享链接。");
-            return jsonify({ url: resources[0].share_link });
-        }
-
-        // 如果是电影 (movie)，智能选择最高清的
-        if (media_type === 'movie') {
-            let bestLink = resources[0].share_link; // 默认选第一个
-            let bestQuality = 0;
-
-            for (const res of resources) {
-                const title = res.title.toLowerCase();
-                if (title.includes('2160p') || title.includes('4k')) {
-                    bestLink = res.share_link;
-                    bestQuality = 2160;
-                    break; // 找到最好的就跳出
-                }
-                if (title.includes('1080p') && bestQuality < 1080) {
-                    bestLink = res.share_link;
-                    bestQuality = 1080;
-                }
+    // 仅在首次计算时或需要更新时执行
+    if (pagecount === 0) {
+        $('span.page a').each((_, link) => {
+            const p = parseInt($(link).text().trim());
+            if (!isNaN(p)) {
+                pagecount = Math.max(pagecount, p);
             }
-            log(`检测为电影，选择的最佳清晰度为: ${bestQuality || '默认'}p`);
-            return jsonify({ url: bestLink });
-        }
-
-        // 其他未知类型，返回第一个链接
-        return jsonify({ url: resources[0].share_link });
-
-    } catch (err) {
-        log(`play() 过程出错: ${err.message}`);
-        return jsonify({ url: "" });
+        });
     }
+
+	// 修正逻辑：如果列表为空，说明已经翻到头了
+	if (cards.length === 0) {
+        // 如果是第一页就没结果，那总页数就是0或1；否则总页数就是前一页
+		pagecount = page > 1 ? page - 1 : (pagecount > 0 ? pagecount : 1);
+	} else if (pagecount === 0) {
+		// 如果列表不为空，但无法从页面链接中计算出总页数，说明可能只有一页
+		pagecount = page;
+	}
+
+	// 6. 【💾 写入缓存】将新获取的数据和计算出的总页数存入缓存
+	searchCache.pagecount = pagecount;
+	searchCache.data[page] = cards;
+    try { $log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); } catch(e) { console.log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); }
+
+	// 7. 【📤 返回结果】
+	return jsonify({
+		list: cards,
+		pagecount: pagecount,
+	});
 }
