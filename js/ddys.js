@@ -1,5 +1,5 @@
 /**
- * Nullbr 影视库前端插件 - V108.0 (最终收官版)
+ * Nullbr 影视库前端插件 - V109.0 (最终收官版)
  *
  * 核心思想:
  * 1. 分类页/搜索页: 逻辑与V88完全一致，getCards函数正确地使用jsonify包装vod_id。
@@ -26,21 +26,22 @@ var END_LOCK = {};
 
 // ================== 工具函数 ==================
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V108.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V109.0] ' + msg); }
 
-// ================== 插件入口 ==================
+// ================== 插件入口 (与V88完全一致) ==================
 async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 108.0, title: 'Nullbr影视库 (V108)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 109.0, title: 'Nullbr影视库 (V109)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
+async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); } // 保持V88的空占位符状态
 
-// ================== 核心功能区 ==================
+// ================== 核心功能区 (与V88完全一致) ==================
 
 // 1. 分类列表
-async function category(tid, pg, filter, ext) {
-    var parsed = parseExt({ id: tid, pg: pg });
+async function getCards(ext) {
+    var parsed = parseExt(ext);
     var id = parsed.id;
     var page = parsed.page;
     var lockKey = 'cat_' + id;
@@ -68,8 +69,8 @@ async function category(tid, pg, filter, ext) {
 }
 
 // 2. 搜索功能
-async function search(wd, quick, pg) {
-    var parsed = parseExt({ text: wd, pg: pg });
+async function search(ext) {
+    var parsed = parseExt(ext);
     var keyword = parsed.text;
     var page = parsed.page;
     if (!keyword) return jsonify({ list: [] });
@@ -97,9 +98,9 @@ async function search(wd, quick, pg) {
     } catch (err) { return handleError(err); }
 }
 
-// ★★★★★【这是唯一的、回归了“观影网装箱模式”的终极 getTracks 函数】★★★★★
+// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网装箱模式”的终极 getTracks 函数】★★★★★
 async function getTracks(ext) {
-    log('[getTracks] V108.0 观影网装箱版, 原始ext: ' + JSON.stringify(ext));
+    log('[getTracks] V109.0 观影网装箱版, 原始ext: ' + JSON.stringify(ext));
     try {
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
@@ -126,8 +127,8 @@ async function getTracks(ext) {
 
 // 4. detail函数 (废弃的占位符)
 async function detail(ext) {
-    log('[detail] 此函数已被废弃，正在转发到 getTracks...');
-    return getTracks(ext); // 作为最后的保险，如果App意外调用了detail，我们将其转发到正确的getTracks
+    log('[detail] 此函数已被废弃，不应被调用。');
+    return jsonify({ list: [] });
 }
 
 // 5. 播放
@@ -146,7 +147,7 @@ function parseExt(ext) {
         var nestedExt = extObj.ext || extObj || {};
         var id = nestedExt.id || (extObj.class && extObj.class.length > 0 ? extObj.class[0].ext.id : CATEGORIES[0].ext.id);
         var page = nestedExt.pg || nestedExt.page || 1;
-        var text = nestedExt.text || wd || ""; // 增加对全局wd的兼容
+        var text = nestedExt.text || "";
         return { id: id, page: page, text: text };
     } catch (e) {
         return { id: CATEGORIES[0].ext.id, page: 1, text: "" };
