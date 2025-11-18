@@ -1,22 +1,22 @@
 /**
- * Nullbr 影视库前端插件 - V89.0 (XPTV专用版)
+ * Nullbr 影视库前端插件 - V89.0 (终极信使版)
  *
  * 变更日志:
  * - V89.0 (2025-11-18):
- *   - 专门适配XPTV播放器
- *   - 使用vod_play_url字符串格式
- *   - 支持115网盘直链播放
+ *   - [架构统一] 全面采用与“观影网”项目相同的“后端大脑，前端信使”模式。
+ *   - [简化formatCards] 不再自行拼接detail_url，完全信赖并使用后端在ext中提供的完整URL。
+ *   - [重写getTracks] getTracks函数回归纯粹，只负责请求ext.detail_url并透传后端返回的、已完美加工的JSON。
+ *   - 前端不再关心任何链接清理、域名转换或数据拼接的逻辑。
  *
  * 作者: Manus
  * 日期: 2025-11-18
- * 适用: XPTV
  */
 
-var API_BASE_URL = 'http://192.168.1.7:3003';
+var API_BASE_URL = 'http://192.168.1.7:3003'; // 保持不变 ，指向你的后端服务
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr XPTV V89] ' + msg); }
+function jsonify(data ) { return JSON.stringify(data); }
+function log(msg) { console.log('[Nullbr V89.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -27,31 +27,14 @@ var CATEGORIES = [
 
 var END_LOCK = {};
 
-// --- 入口函数 ---
+// --- 入口函数 (无变化) ---
 async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-
-async function getConfig() {
-    return jsonify({
-        ver: 89.0,
-        title: 'Nullbr影视库 (XPTV)',
-        site: API_BASE_URL,
-        tabs: CATEGORIES
-    });
-}
-
-async function home() {
-    return jsonify({
-        class: CATEGORIES,
-        filters: {}
-    });
-}
-
-async function category(tid, pg, filter, ext) {
-    return jsonify({ list: [] });
-}
+async function getConfig() { return jsonify({ ver: 89.0, title: 'Nullbr影视库 (V89)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
+async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
 // =======================================================================
 // --- 核心功能区 ---
@@ -64,14 +47,13 @@ async function getCards(ext) {
     var page = parsed.page;
     var lockKey = 'cat_' + id;
     
-    if (END_LOCK[lockKey] && page > 1) {
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
+    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
     try {
         var data = await fetchData(url);
+        // ★★★ 核心简化：formatCards现在只做最简单的格式化 ★★★
         var cards = formatCards(data.items);
         
         var pageSize = 30;
@@ -85,9 +67,7 @@ async function getCards(ext) {
             limit: cards.length,
             total: data.total_items
         });
-    } catch (err) {
-        return handleError(err);
-    }
+    } catch (err) { return handleError(err); }
 }
 
 // 2. 搜索功能
@@ -98,14 +78,13 @@ async function search(ext) {
     if (!keyword) return jsonify({ list: [] });
     var lockKey = 'search_' + keyword;
 
-    if (END_LOCK[lockKey] && page > 1) {
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
+    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
     try {
         var data = await fetchData(url);
+        // ★★★ 核心简化：formatCards现在只做最简单的格式化 ★★★
         var cards = formatCards(data.items);
 
         var pageSize = 30;
@@ -119,17 +98,15 @@ async function search(ext) {
             limit: cards.length,
             total: data.total_results
         });
-    } catch (err) {
-        return handleError(err);
-    }
+    } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 - XPTV专用
-async function detail(ext) {
-    log('[detail] XPTV详情请求');
+// 3. 详情页 (★★★ 终极核心：纯粹的信使 ★★★)
+async function getTracks(ext) {
+    log('[getTracks] 纯粹信使版, 原始ext: ' + JSON.stringify(ext));
     
     try {
-        // 解析ext获取detail_url
+        // 步骤1: 从ext中获取后端提供好的detail_url
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
 
@@ -137,50 +114,31 @@ async function detail(ext) {
             throw new Error("无法从ext中解析出detail_url");
         }
 
-        log('[detail] 请求: ' + detailUrl);
+        log('[getTracks] 解析出的请求URL: ' + detailUrl);
         
-        // 请求后端
+        // 步骤2: 请求后端的智能加工接口
         var data = await fetchData(detailUrl);
         
-        // XPTV使用detail函数,返回vod_play_url格式
-        var result = {
-            vod_play_url: data.vod_play_url || "",
-            vod_play_from: "115网盘"
-        };
-        
-        log('[detail] 成功获取播放链接');
-        return jsonify(result);
+        // 步骤3: 直接、原封不动地将后端返回的、已经处理好的JSON，透传给App
+        log('[getTracks] 成功获取后端加工后的数据，直接透传给App。');
+        return jsonify(data);
 
     } catch (err) {
-        log('[detail] 错误: ' + err.message);
-        return jsonify({
-            vod_play_url: "115网盘$加载失败$",
-            vod_play_from: "115网盘"
-        });
+        log('[getTracks] 发生致命错误: ' + err.message);
+        return jsonify({ list: [{ title: "错误", tracks: [{ name: "加载失败: " + err.message, pan: "" }] }] });
     }
 }
 
-// 4. getTracks (XPTV备用)
-async function getTracks(ext) {
-    log('[getTracks] XPTV可能不使用此函数,重定向到detail');
-    return await detail(ext);
+// 4. detail函数 (废弃的占位符)
+async function detail(ext) {
+    log('[detail] 此函数已被废弃，不应被调用。');
+    return jsonify({ list: [] });
 }
 
-// 5. 播放 - XPTV专用
+// 5. 播放
 async function play(flag, id, flags) {
-    log('[play] 播放请求');
-    log('[play] flag: ' + flag);
-    log('[play] id: ' + id);
-    
-    // XPTV会传入115网盘链接
-    // 直接返回,让XPTV的内置播放器处理
-    return jsonify({
-        parse: 0,
-        url: id,
-        header: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-    });
+    log('[play] 请求播放, id: ' + id);
+    return jsonify({ parse: 0, url: id });
 }
 
 // =======================================================================
@@ -202,9 +160,7 @@ function parseExt(ext) {
 
 function parseDetailExt(ext) {
     try {
-        if (typeof ext === 'string') {
-            ext = JSON.parse(ext);
-        }
+        if (typeof ext === 'string') { ext = JSON.parse(ext); }
         if (ext && ext.ext) { return ext.ext; }
         if (ext) { return ext; }
         return {};
@@ -220,20 +176,18 @@ async function fetchData(url) {
     return data;
 }
 
+// ★★★ 核心简化：formatCards不再需要拼接URL，只做最基础的格式转换 ★★★
 function formatCards(items) {
     if (!items || !Array.isArray(items)) return [];
     return items.map(function(item) {
-        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
         var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
         return {
             vod_id: item.media_type + '_' + item.tmdbid,
             vod_name: item.title || '未命名',
             vod_pic: picUrl,
             vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
-            vod_year: item.release_date ? item.release_date.substring(0, 4) : '',
-            ext: {
-                detail_url: detailUrl
-            }
+            // ext现在直接使用后端注入好的ext对象，里面包含了我们需要的detail_url
+            ext: item.ext 
         };
     });
 }
