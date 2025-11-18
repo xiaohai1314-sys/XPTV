@@ -1,11 +1,10 @@
 /**
- * Nullbr 影视库前端插件 - V109.0 (最终收官版)
+ * Nullbr 影视库前端插件 - V110.0 (最终收官版)
  *
  * 核心思想:
- * 1. 分类页/搜索页: 逻辑与V88完全一致，getCards函数正确地使用jsonify包装vod_id。
- * 2. 详情页(getTracks): 不再是“纯粹信使”，而是“观影网装箱员”。
- *    它会从后端获取结构化的JSON，然后将其“装箱”，
- *    放进一个`list`数组中，再返回给App。
+ * 1. 分类页/搜索页: 逻辑与V88完全一致。
+ * 2. vod_id: 不再进行任何jsonify或ext包裹，直接使用详情页URL作为字符串。
+ * 3. getTracks: 直接将传入的ext参数作为URL使用。
  *
  * 作者: Manus (由你最终指引)
  * 日期: 2025-11-18
@@ -26,14 +25,14 @@ var END_LOCK = {};
 
 // ================== 工具函数 ==================
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V109.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V110.0] ' + msg); }
 
 // ================== 插件入口 (与V88完全一致) ==================
 async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 109.0, title: 'Nullbr影视库 (V109)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 110.0, title: 'Nullbr影视库 (V110)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); } // 保持V88的空占位符状态
 
@@ -98,13 +97,12 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网装箱模式”的终极 getTracks 函数】★★★★★
+// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网明信片模式”的终极 getTracks 函数】★★★★★
 async function getTracks(ext) {
-    log('[getTracks] V109.0 观影网装箱版, 原始ext: ' + JSON.stringify(ext));
+    log('[getTracks] V110.0 观影网明信片版, 原始ext: ' + JSON.stringify(ext));
     try {
-        var parsedExt = parseDetailExt(ext);
-        var detailUrl = parsedExt.detail_url;
-        if (!detailUrl) { throw new Error("无法从ext中解析出detail_url"); }
+        var detailUrl = ext; // ★★★★★【在这里，我们直接把ext当成URL，因为App会把vod_id的值直接传给它！】★★★★★
+        if (!detailUrl || typeof detailUrl !== 'string') { throw new Error("传入的ext不是一个有效的URL字符串"); }
         log('[getTracks] 解析出的请求URL: ' + detailUrl);
         
         var data = await fetchData(detailUrl); // data 是 {"title": "...", "tracks": [...]}
@@ -138,7 +136,7 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 (与V88完全一致) ---
+// --- 辅助函数区 ---
 // =======================================================================
 
 function parseExt(ext) {
@@ -154,17 +152,19 @@ function parseExt(ext) {
     }
 }
 
-function parseDetailExt(ext) {
-    try {
-        if (typeof ext === 'string') {
-            ext = JSON.parse(ext);
-        }
-        if (ext && ext.ext) { return ext.ext; }
-        if (ext) { return ext; }
-        return {};
-    } catch (e) {
-        return {};
-    }
+// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网明信片模式”的终极 formatCards 函数】★★★★★
+function formatCards(items) {
+    if (!items || !Array.isArray(items)) return [];
+    return items.map(function(item) {
+        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
+        var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
+        return {
+            vod_id: detailUrl, // ★★★★★【在这里，我们把详情页URL，直接作为字符串，赋值给vod_id！】★★★★★
+            vod_name: item.title || '未命名',
+            vod_pic: picUrl,
+            vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
+        };
+    });
 }
 
 async function fetchData(url) {
@@ -172,20 +172,6 @@ async function fetchData(url) {
     var data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
     if (!data) throw new Error("后端未返回有效数据");
     return data;
-}
-
-function formatCards(items) {
-    if (!items || !Array.isArray(items)) return [];
-    return items.map(function(item) {
-        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
-        var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
-        return {
-            vod_id: jsonify({ ext: { detail_url: detailUrl } }), // ★★★ 核心：将请求详情的URL打包进vod_id
-            vod_name: item.title || '未命名',
-            vod_pic: picUrl,
-            vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
-        };
-    });
 }
 
 function handleError(err) {
