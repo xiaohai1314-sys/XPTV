@@ -1,8 +1,8 @@
 /**
- * Nullbr 影视库前端插件 - V103.0 (最终收官版)
+ * Nullbr 影视库前端插件 - V104.0 (最终收官版)
  *
  * 核心思想:
- * 1. 分类页/搜索页: 逻辑不变，getCards函数正确地使用jsonify包装vod_id。
+ * 1. 分类页/搜索页: 逻辑与V88完全一致，getCards函数正确地使用jsonify包装vod_id。
  * 2. 详情页(getTracks): 不再是“纯粹信使”，而是“观影网装箱员”。
  *    它会从后端获取结构化的JSON，然后将其“装箱”，
  *    放进一个`list`数组中，再返回给App。
@@ -23,16 +23,16 @@ var CATEGORIES = [
 ];
 
 // ================== 工具函数 ==================
-function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log("[Nullbr V103.0] " + msg); }
+function jsonify(data ) { return JSON.stringify(data); }
+function log(msg) { console.log("[Nullbr V104.0] " + msg); }
 
 // ================== 插件入口 ==================
 async function init(ext) { return getConfig(); }
 
 async function getConfig() {
     return jsonify({
-        ver: 103.0,
-        title: 'Nullbr影视库 (V103)',
+        ver: 104.0,
+        title: 'Nullbr影视库 (V104)',
         site: API_BASE_URL,
         tabs: CATEGORIES
     });
