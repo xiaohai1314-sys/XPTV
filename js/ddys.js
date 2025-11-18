@@ -1,14 +1,14 @@
 /**
- * Nullbr 影视库前端插件 - V85.0 (观影网终极模仿版)
+ * Nullbr 影视库前端插件 - V88.0 (纯粹信使版)
  *
  * 变更日志:
- * - V85.0 (2025-11-17):
- *   - [终极思想] 接受用户最终指正，getTracks的返回结构必须100%模仿“观影网”的成功范例。
- *   - [重写getTracks] getTracks函数现在：
- *     1. (架构不变) 继承V77的正确通信架构。
- *     2. (结构革命) 不再返回包含vod_name, vod_pic的详情对象。
- *     3. (精确模仿) 只返回一个包含`list`键的对象，`list`是一个数组，数组成员是`{ title: "播放源名", tracks: [...] }`格式。
- *     4. (细节精确) `tracks`数组中的每个对象，其`name`字段由`item.title`和`item.size`精确构成。
+ * - V88.0 (2025-11-17):
+ *   - [终极思想] 接受用户最终指正，严格模仿“观影网”的前后端分工模式。
+ *   - [重写getTracks] getTracks函数现在极其简单：
+ *     1. (接力) 从ext中获取detail_url。
+ *     2. (请求) 请求后端的智能加工接口。
+ *     3. (透传) 直接、原封不动地将后端返回的、已经处理好的JSON，返回给App。
+ *     4. 不再有任何循环、拼接或逻辑判断！
  *   - 这是对我们所有探索的最终总结，是我们回归正确道路的唯一宣言。
  *
  * 作者: Manus (由用户最终修正)
@@ -19,7 +19,7 @@ var API_BASE_URL = 'http://192.168.10.105:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V85.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V88.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -35,7 +35,7 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 85.0, title: 'Nullbr影视库 (V85)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 88.0, title: 'Nullbr影视库 (V88)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
@@ -102,12 +102,12 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 (★★★ 终极核心：100%模仿“观影网”返回结构 ★★★)
+// 3. 详情页 (★★★ 终极核心：纯粹的信使 ★★★)
 async function getTracks(ext) {
-    log('[getTracks] 观影网终极模仿版, 原始ext: ' + JSON.stringify(ext));
+    log('[getTracks] 纯粹信使版, 原始ext: ' + JSON.stringify(ext));
     
     try {
-        // 步骤1 (接力): 获取影片自身信息
+        // 步骤1: 从ext中获取detail_url
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
 
@@ -117,47 +117,12 @@ async function getTracks(ext) {
 
         log('[getTracks] 解析出的请求URL: ' + detailUrl);
         
-        // 步骤2 (动态): 获取网盘JSON
+        // 步骤2: 请求后端的智能加工接口
         var data = await fetchData(detailUrl);
         
-        // 步骤3 (终极核心：构造“观影网”模式的返回结构)
-        var resources = data['115'];
-        var tracks = [];
-
-        if (resources && Array.isArray(resources) && resources.length > 0) {
-            // 如果存在且非空，则组装播放列表
-            for (var i = 0; i < resources.length; i++) {
-                var item = resources[i];
-                // 精确构造按钮名称
-                var name = item.title;
-                if (item.size) {
-                    name += ' [' + item.size + ']';
-                }
-                // 精确构造track对象
-                tracks.push({
-                    name: name,
-                    pan: item.share_link
-                });
-            }
-            // 返回包含一个播放源分组的list
-            return jsonify({
-                list: [{
-                    title: "115网盘",
-                    tracks: tracks
-                }]
-            });
-        } else {
-            // 如果不存在或为空，返回一个明确的无资源提示
-            return jsonify({
-                list: [{
-                    title: "无资源",
-                    tracks: [{
-                        name: "未找到115网盘链接",
-                        pan: ""
-                    }]
-                }]
-            });
-        }
+        // 步骤3: 直接、原封不动地将后端返回的、已经处理好的JSON，返回给App
+        log('[getTracks] 成功获取后端加工后的数据，直接透传给App。');
+        return jsonify(data);
 
     } catch (err) {
         log('[getTracks] 发生致命错误: ' + err.message);
