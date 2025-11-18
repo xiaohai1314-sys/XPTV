@@ -1,244 +1,176 @@
 /**
- * Nullbr 影视库前端插件 - V67.0 (基于V65的精准修复版)
- *
- * 变更日志:
- * - V67.0 (2025-11-18):
- *   - [深刻检讨] 本版本以用户确认“还好好的”V65版本为绝对基准。
- *   - [精准修复1] 仅在 search 函数中添加对JSON格式关键词(wd)的解析，解决搜索问题。
- *   - [精准修复2] 仅在 detail 函数中为 vod_play_url 添加 <LaTex> 标签，解决详情页转圈问题。
- *   - [绝对稳定] getCards 函数与V65版本完全一致，逐字不差，确保分类列表绝对正常。
- *   - 我为之前的反复出错和愚蠢行为再次向您致以最诚挚的道歉。
- *
- * 作者: Manus (在用户的严厉指正下进行精准修复)
- * 日期: 2025-11-18
+ * 找盘资源前端插件 - V1.7.1 (仅115和天翼版)
+ * 变更内容：
+ *  - 搜索结果只保留“115网盘”和“天翼网盘”。
+ *  - 禁用所有其他网盘，包括夸克、阿里、UC、迅雷、百度等。
+ *  - 移除了原有的夸克画质筛选和排序逻辑。
  */
 
-// =======================================================================
-// --- 核心配置区 (与V65一致) ---
-// =======================================================================
+// --- 配置区 ---
+const API_ENDPOINT = "http://192.168.1.3:3004/api/get_real_url"; 
+const SITE_URL = "https://v2pan.com";
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const cheerio = createCheerio();
+const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
+const DEBUG = true;
+const PAGE_SIZE = 12;
+const SEARCH_PAGE_SIZE = 30;
 
-const API_BASE_URL = 'http://192.168.10.105:3003';
-const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-const API_KEY = '5sJvQEDxhJXdsTquRsMdfSksDgiajta1'; 
+// --- 辅助函数 ---
+function log(msg ) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http' )) return path; return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`; }
 
-function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V67.0] ${msg}`); }
+// --- 全局缓存 ---
+let cardsCache = {};
 
-const CATEGORIES = [
-    { name: '热门电影', ext: { id: 'hot_movie' } },
-    { name: '热门剧集', ext: { id: 'hot_series' } },
-    { name: '高分电影', ext: { id: 'top_movie' } },
-    { name: '高分剧集', ext: { id: 'top_series' } },
-];
-
-let CATEGORY_END_LOCK = {};
-
-// =======================================================================
-// --- V65 核心代码区 (除版本号外，原封不动) ---
-// =======================================================================
-
-async function init(ext) {
-    CATEGORY_END_LOCK = {};
-    return jsonify({});
-}
-async function getConfig() { return jsonify({ ver: 67.0, title: 'Nullbr影视库 (V67)', site: API_BASE_URL, tabs: CATEGORIES }); }
-async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-
-async function category(tid, pg, filter, ext) {
-    log("category() 已被废弃，不应被调用！");
-    return jsonify({ list: [] });
+// --- 插件入口函数 ---
+async function getConfig() {
+    log("==== 插件初始化 V1.7.1 (仅115和天翼版) ====");
+    const CUSTOM_CATEGORIES = [
+        { name: '电影', ext: { id: '电影' } },
+        { name: '电视剧', ext: { id: '电视剧' } },
+        { name: '动漫', ext: { id: '动漫' } }
+    ];
+    return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【V65 的 getCards 函数 - 保证与V65逐字不差】★★★★★
+// ★★★★★【首页分页】(保持不变) ★★★★★
 async function getCards(ext) {
-    log(`getCards() 作为唯一入口被调用，ext: ${JSON.stringify(ext)}`);
-    
-    let placeholderId = null;
-    let page = 1;
+    ext = argsify(ext);
+    const { id: categoryName, page = 1 } = ext;
+    const url = SITE_URL;
+    log(`[getCards] 分类="${categoryName}", 页=${page}`);
     try {
-        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
-        const { id, pg, page: page_alt } = extObj.ext || extObj || {};
-        placeholderId = id || CATEGORIES[0].ext.id;
-        page = pg || page_alt || 1;
+        const cacheKey = `category_${categoryName}`;
+        let allCards = cardsCache[cacheKey];
+        if (!allCards) {
+            log(`[getCards] 缓存未命中，获取首页`);
+            const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+            const $ = cheerio.load(data);
+            allCards = [];
+            const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
+            if (categorySpan.length === 0) { log(`[getCards] ❌ 找不到分类:"${categoryName}"`); return jsonify({ list: [] }); }
+            log(`[getCards] ✓ 找到分类，提取卡片`);
+            let rowDiv = categorySpan.closest('div.d-flex').parent().next('div.row');
+            if (rowDiv.length === 0) { rowDiv = categorySpan.closest('div.d-flex').next('div.row'); }
+            if (rowDiv.length === 0) { log(`[getCards] ❌ 找不到row容器`); return jsonify({ list: [] }); }
+            rowDiv.find('a.col-4').each((_, item) => {
+                const linkElement = $(item);
+                const imgElement = linkElement.find('img.lozad');
+                allCards.push({
+                    vod_id: linkElement.attr('href') || "",
+                    vod_name: linkElement.find('h2').text().trim() || "",
+                    vod_pic: getCorrectPicUrl(imgElement.attr('data-src')),
+                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                    ext: { url: linkElement.attr('href') || "" }
+                });
+            });
+            cardsCache[cacheKey] = allCards;
+            log(`[getCards] ✓ 缓存${allCards.length}个卡片`);
+        }
+        const startIdx = (page - 1) * PAGE_SIZE;
+        const endIdx = startIdx + PAGE_SIZE;
+        const pageCards = allCards.slice(startIdx, endIdx);
+        log(`[getCards] 总数=${allCards.length}, 返回=${pageCards.length}个 (页码${page})`);
+        return jsonify({ list: pageCards });
     } catch (e) {
-        placeholderId = CATEGORIES[0].ext.id;
-        page = 1;
-    }
-    log(`解析成功！占位符ID: ${placeholderId}, 页码: ${page}`);
-
-    if (CATEGORY_END_LOCK[placeholderId] && page > 1) {
-        log(`分类 "${placeholderId}" 已被锁定，直接返回空列表。`);
-        return jsonify({ list: [], page: page, pagecount: page });
-    }
-    if (page === 1) {
-        log(`请求第一页，解除分类 "${placeholderId}" 的锁。`);
-        delete CATEGORY_END_LOCK[placeholderId];
-    }
-
-    const url = `${API_BASE_URL}/api/list?id=${placeholderId}&page=${page}`;
-    log(`最终请求URL为: ${url}`);
-
-    try {
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        
-        if (!data || !Array.isArray(data.items)) {
-            CATEGORY_END_LOCK[placeholderId] = true;
-            return jsonify({ list: [], page: page, pagecount: page });
-        }
-        
-        const cards = data.items.map(item => {
-            const card = {
-                vod_id: `${item.media_type}_${item.tmdbid}`,
-                vod_name: item.title || '未命名',
-                vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-                vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-            };
-            // 这一行在V65的getCards里没有，为了100%一致，也去掉
-            // if (item['115-flg']) { card['115-flg'] = item['115-flg']; }
-            return card;
-        });
-
-        const pageSize = 30;
-        if (data.items.length < pageSize) {
-            log(`返回条目数 ${data.items.length} 小于每页数量 ${pageSize}，锁定分类 "${placeholderId}"。`);
-            CATEGORY_END_LOCK[placeholderId] = true;
-        }
-
-        const hasMore = !CATEGORY_END_LOCK[placeholderId];
-        log(`当前分类 "${placeholderId}" 是否还有更多: ${hasMore}`);
-
-        return jsonify({
-            list: cards,
-            page: data.page,
-            pagecount: hasMore ? data.page + 1 : data.page,
-            limit: data.items.length,
-            total: data.total_items
-        });
-
-    } catch (err) {
-        log(`请求失败: ${err.message}`);
+        log(`[getCards] ❌ 异常: ${e.message}`);
         return jsonify({ list: [] });
     }
 }
 
-// =======================================================================
-// --- 精准修复区 ---
-// =======================================================================
-
-// ★★★★★【搜索函数 - 精准修复1】★★★★★
-async function search(wd, quick) {
-    log(`search() 被调用，原始关键词(wd): "${wd}"`);
-    if (!wd) { return jsonify({ list: [] }); }
-
-    let keyword = wd;
-    // ★★★ 修复1：检查wd是否为JSON字符串，如果是则解析出真正的关键词 ★★★
-    try {
-        const wdObj = JSON.parse(wd);
-        if (wdObj && wdObj.text) {
-            keyword = wdObj.text;
-            log(`检测到JSON关键词，提取文本: "${keyword}"`);
-        }
-    } catch (e) {
-        log("关键词为纯文本，直接使用。");
-    }
-
-    const encodedWd = encodeURIComponent(keyword);
-    const url = `${API_BASE_URL}/api/search?keyword=${encodedWd}`;
-    log(`搜索请求URL: ${url}`);
-
-    try {
-        const response = await $fetch.get(url, {
-            headers: { 'X-API-KEY': API_KEY }
-        });
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-
-        if (!data || !Array.isArray(data.items)) {
-            log("搜索API返回数据格式不正确或无结果。");
-            return jsonify({ list: [] });
-        }
-
-        const cards = data.items.map(item => {
-            const card = {
-                vod_id: `${item.media_type}_${item.tmdbid}`,
-                vod_name: item.title || '未命名',
-                vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-                vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-            };
-            if (item['115-flg']) { card['115-flg'] = item['115-flg']; }
-            return card;
-        });
-        log(`搜索到 ${cards.length} 个结果。`);
-        return jsonify({ list: cards });
-    } catch (err) {
-        log(`搜索请求失败: ${err.message}`);
+// ★★★★★【搜索 - 仅保留115和天翼】★★★★★
+async function search(ext) {
+    ext = argsify(ext);
+    const text = ext.text || '';
+    const page = ext.page || 1;
+    if (!text) {
+        log(`[search] 搜索词为空`);
         return jsonify({ list: [] });
     }
-}
 
-// ★★★★★【详情函数 - 精准修复2】★★★★★
-async function detail(id, ext) {
-    log(`detail() 被调用, ID: ${id}`);
-    const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
-    const vod = { vod_id: id, vod_play_from: '', vod_play_url: '' };
-
-    // 注意：这里的extObj可能为空，因为V65的getCards没有传递它。
-    // 但play函数仍然可以工作，因为它只依赖ID。
-    // 为了让播放按钮出现，我们需要一个更可靠的方式判断。
-    // 暂时我们先假设ext能拿到，如果不行再调整。
-    // if (extObj && extObj['115-flg'] === 1) {
-    // 修正：既然V65的getCards没有传递115-flg，detail这里就不能依赖它。
-    // 我们只能乐观地假设所有条目都有播放源，或者找到新的判断方法。
-    // 目前最稳妥的办法是，只要能进详情，就尝试提供播放按钮。
-    log(`为 ID: ${id} 尝试声明播放源。`);
-    vod.vod_play_from = "115网盘";
-    // ★★★ 修复2：为 vod_play_url 的拼接加上 <LaTex> 标签 ★★★
-    vod.vod_play_url = `<LaTex>在线播放$$</LaTex>${id}`;
-    
-    return jsonify({ list: [vod] });
-}
-
-// ★★★★★【播放函数 - 与V65一致】★★★★★
-async function play(flag, id, flags) {
-    log(`play() 被调用, flag: ${flag}, id: ${id}`);
-    if (flag !== '115网盘') { return jsonify({ url: "" }); }
+    log(`[search] 关键词="${text}", 页=${page}`);
+    const filter = 0;
+    const url = `${SITE_URL}/s/${encodeURIComponent(text)}/${filter}/${page}`;
+    log(`[search] URL: ${url}`);
 
     try {
-        const [media_type, tmdbid] = id.split('_');
-        if (!media_type || !tmdbid) { throw new Error("无效的ID格式"); }
+        const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+        const $ = cheerio.load(data);
+        const cards = [];
+        let originalCount = 0;
 
-        const url = `${API_BASE_URL}/api/resource?type=${media_type}&tmdbid=${tmdbid}`;
-        log(`请求资源链接: ${url}`);
+        $("a.resource-item").each((idx, item) => {
+            originalCount++;
+            const linkElement = $(item);
+            const resourceLink = linkElement.attr('href');
+            const title = linkElement.find('h2').text().trim();
+            const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
-        const response = await $fetch.get(url);
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        const resources = data['115'];
-
-        if (!resources || resources.length === 0) {
-            log("资源API未返回任何115链接。");
-            return jsonify({ url: "" });
-        }
-        log(`获取到 ${resources.length} 个115资源。`);
-
-        if (media_type === 'tv') {
-            log("检测为剧集，返回第一个分享链接。");
-            return jsonify({ url: resources[0].share_link });
-        }
-
-        if (media_type === 'movie') {
-            let bestLink = resources[0].share_link;
-            let bestQuality = 0;
-            for (const res of resources) {
-                const title = (res.title || '').toLowerCase();
-                if (title.includes('2160p') || title.includes('4k')) { bestLink = res.share_link; bestQuality = 2160; break; }
-                if (title.includes('1080p') && bestQuality < 1080) { bestLink = res.share_link; bestQuality = 1080; }
+            // 只保留“115网盘”和“天翼网盘”
+            if (panType.includes('115') || panType.includes('天翼')) {
+                if (resourceLink && title) {
+                    cards.push({
+                        vod_id: resourceLink,
+                        vod_name: title,
+                        vod_pic: FALLBACK_PIC,
+                        vod_remarks: `[${panType}]`,
+                        ext: { url: resourceLink }
+                    });
+                }
+            } else {
+                // 过滤掉所有其他网盘
+                log(`[search] 过滤掉 [${panType}] 资源: ${title}`);
             }
-            log(`检测为电影，选择的最佳清晰度为: ${bestQuality || '默认'}p`);
-            return jsonify({ url: bestLink });
-        }
-        return jsonify({ url: resources[0].share_link });
-    } catch (err) {
-        log(`play() 过程出错: ${err.message}`);
-        return jsonify({ url: "" });
+        });
+
+        log(`[search] ✓ 第${page}页找到${originalCount}个原始结果, 过滤后保留${cards.length}个`);
+        return jsonify({ list: cards });
+
+    } catch (e) {
+        log(`[search] ❌ 异常: ${e.message}`);
+        return jsonify({ list: [] });
     }
 }
+
+
+// ★★★★★【详情页】(保持不变) ★★★★★
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const { url } = ext;
+    if (!url) { log(`[getTracks] ❌ URL为空`); return jsonify({ list: [] }); }
+    const middleUrl = getCorrectPicUrl(url);
+    log(`[getTracks] 将请求后端API解析: ${middleUrl}`);
+    try {
+        const apiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(middleUrl)}`;
+        const response = await $fetch.get(apiUrl);
+        const result = JSON.parse(response.data);
+        if (result.success && result.real_url) {
+            log(`[getTracks] ✓ 后端API成功返回真实链接: ${result.real_url}`);
+            let panName = '网盘链接';
+            if (result.real_url.includes('quark')) panName = '夸克网盘';
+            else if (result.real_url.includes('baidu')) panName = '百度网盘';
+            else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
+            else if (result.real_url.includes('115')) panName = '115网盘';
+            else if (result.real_url.includes('cloud.189.cn')) panName = '天翼网盘';
+            return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: result.real_url, ext: {} }] }] });
+        } else {
+            log(`[getTracks] ❌ 后端API返回错误: ${result.error || '未知错误'}`);
+            throw new Error(result.error || 'API did not return a real URL');
+        }
+    } catch (e) {
+        log(`[getTracks] ❌ 请求后端API时发生异常: ${e.message}`);
+        return jsonify({ list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }] });
+    }
+}
+
+// --- 兼容接口 (保持不变) ---
+async function init() { return getConfig(); }
+async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
+async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
+async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
+async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
+
+log('==== 插件加载完成 V1.7.1 ====');
