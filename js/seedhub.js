@@ -1,4 +1,4 @@
-Const cheerio = createCheerio()
+const cheerio = createCheerio()
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)'
 
 // 【🚀 引入全局缓存】用于存储总页数等信息（可选，但用于保险）
@@ -65,7 +65,7 @@ async function getCards(ext) {
 			vod_pic: cover,
 			vod_remarks: '',
 			ext: {
-				url: `${appConfig.site}${href}`,
+				url: `<LaTex>${appConfig.site}$</LaTex>{href}`,
 			},
 		})
 	})
@@ -127,7 +127,7 @@ async function getTracks(ext) {
 	// 2. 并行处理所有网盘链接的解析
 	const trackPromises = panLinkElements.get().map(async (link) => {
 		const intermediateUrl = appConfig.site + $(link).attr('href');
-		const originalTitle = $(link).attr('title') || $(link).text().trim();
+		const originalTitle = <LaTex>$(link).attr('title') || $</LaTex>(link).text().trim();
 		
 		try {
 			// 3. 获取中间页的 HTML
@@ -148,7 +148,7 @@ async function getTracks(ext) {
 				
 				if (specMatch) {
 					const tags = specMatch.join(' ');
-					newName = `${postTitle} [${tags}]`;
+					newName = `<LaTex>${postTitle} [$</LaTex>{tags}]`;
 				} else {
 					newName = postTitle;
 				}
@@ -160,7 +160,7 @@ async function getTracks(ext) {
 				};
 			}
 		} catch (error) {
-			console.log(`解析链接 "${originalTitle}" 失败: ${error.message}`);
+			console.log(`解析链接 "<LaTex>${originalTitle}" 失败: $</LaTex>{error.message}`);
 		}
 		return null;
 	});
@@ -211,7 +211,7 @@ async function search(ext) {
 	// 1. 【✅ 缓存命中逻辑】如果搜索词变化，则清空缓存
 	if (searchCache.keyword !== text) {
 		// 使用 $log 或 console.log 进行调试输出
-		try { $log(`新关键词 "${text}"，重置搜索缓存`); } catch(e) { console.log(`新关键词 "${text}"，重置搜索缓存`); }
+		try { <LaTex>$log(`新关键词 "$</LaTex>{text}"，重置搜索缓存`); } catch(e) { console.log(`新关键词 "${text}"，重置搜索缓存`); }
 		searchCache.keyword = text;
 		searchCache.data = {}; // 使用对象存储，键为页码
 		searchCache.pagecount = 0;
@@ -220,13 +220,13 @@ async function search(ext) {
 	// 2. 【✅ 页越界保护】利用缓存的总页数判断是否需要继续请求
     // 如果 pagecount 已知且大于0，并且请求的页码超出了范围，则直接返回空列表
 	if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
-		try { $log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); } catch(e) { console.log(`页码越界 (请求第 ${page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); }
+		try { <LaTex>$log(`页码越界 (请求第 $</LaTex>{page} 页, 总共 <LaTex>${searchCache.pagecount} 页)，直接返回空`); } catch(e) { console.log(`页码越界 (请求第 $</LaTex>{page} 页, 总共 ${searchCache.pagecount} 页)，直接返回空`); }
 		return jsonify({ list: [], pagecount: searchCache.pagecount });
 	}
 
     // 3. 【✅ 命中页缓存】如果当前页的数据已在缓存中，直接返回
     if (searchCache.data && searchCache.data[page]) {
-        try { $log(`命中第 ${page} 页的缓存`); } catch(e) { console.log(`命中第 ${page} 页的缓存`); }
+        try { <LaTex>$log(`命中第 $</LaTex>{page} 页的缓存`); } catch(e) { console.log(`命中第 ${page} 页的缓存`); }
         return jsonify({
             list: searchCache.data[page],
             pagecount: searchCache.pagecount
@@ -234,8 +234,8 @@ async function search(ext) {
     }
 
 	// 4. 【🌐 网络请求】如果缓存未命中且未越界，则发起网络请求
-	try { $log(`缓存未命中，请求第 ${page} 页`); } catch(e) { console.log(`缓存未命中，请求第 ${page} 页`); }
-	const url = `${appConfig.site}/s/${encodeURIComponent(text)}/?page=${page}`;
+	try { <LaTex>$log(`缓存未命中，请求第 $</LaTex>{page} 页`); } catch(e) { console.log(`缓存未命中，请求第 ${page} 页`); }
+	const url = `<LaTex>${appConfig.site}/s/$</LaTex>{encodeURIComponent(text)}/?page=${page}`;
 	const { data } = await $fetch.get(url, {
 		headers: {
 			'User-Agent': UA,
@@ -254,7 +254,7 @@ async function search(ext) {
 			vod_pic: cover,
 			vod_remarks: '',
 			ext: {
-				url: `${appConfig.site}${href}`,
+				url: `<LaTex>${appConfig.site}$</LaTex>{href}`,
 			},
 		});
 	});
@@ -284,7 +284,7 @@ async function search(ext) {
 	// 6. 【💾 写入缓存】将新获取的数据和计算出的总页数存入缓存
 	searchCache.pagecount = pagecount;
 	searchCache.data[page] = cards;
-    try { $log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); } catch(e) { console.log(`第 ${page} 页数据已缓存，计算总页数为: ${pagecount}`); }
+    try { <LaTex>$log(`第 $</LaTex>{page} 页数据已缓存，计算总页数为: <LaTex>${pagecount}`); } catch(e) { console.log(`第 $</LaTex>{page} 页数据已缓存，计算总页数为: ${pagecount}`); }
 
 	// 7. 【📤 返回结果】
 	return jsonify({
