@@ -1,15 +1,15 @@
 /**
- * 找盘资源前端插件 - V1.7.1 (仅115和天翼版)
+ * 找盘资源前端插件 - V1.8.0 (仅保留天翼+115版)
  * 变更内容：
- *  - 搜索结果只保留“115网盘”和“天翼网盘”。
- *  - 禁用所有其他网盘，包括夸克、阿里、UC、迅雷、百度等。
- *  - 移除了原有的夸克画质筛选和排序逻辑。
+ * - 移除夸克、阿里、UC、百度等网盘资源
+ * - 移除夸克画质筛选与排序逻辑
+ * - 搜索结果严格只保留：天翼网盘、115网盘
  */
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.1.3:3004/api/get_real_url"; 
 const SITE_URL = "https://v2pan.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
@@ -17,17 +17,17 @@ const PAGE_SIZE = 12;
 const SEARCH_PAGE_SIZE = 30;
 
 // --- 辅助函数 ---
-function log(msg ) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
+function log(msg) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http' )) return path; return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`; }
+function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http')) return path; return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`; }
 
 // --- 全局缓存 ---
 let cardsCache = {};
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V1.7.1 (仅115和天翼版) ====");
+    log("==== 插件初始化 V1.8.0 (仅保留天翼+115) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -81,7 +81,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【搜索 - 仅保留115和天翼】★★★★★
+// ★★★★★【搜索 - 仅保留天翼和115】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
@@ -109,24 +109,24 @@ async function search(ext) {
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
-            // 只保留“115网盘”和“天翼网盘”
-            if (panType.includes('115') || panType.includes('天翼')) {
-                if (resourceLink && title) {
-                    cards.push({
-                        vod_id: resourceLink,
-                        vod_name: title,
-                        vod_pic: FALLBACK_PIC,
-                        vod_remarks: `[${panType}]`,
-                        ext: { url: resourceLink }
-                    });
-                }
+            // --- 核心筛选逻辑：只保留天翼和115 ---
+            // panType 通常是 "天翼云盘", "115网盘", "夸克网盘" 等字符串
+            const isTargetPan = panType.includes('天翼') || panType.includes('115');
+
+            if (isTargetPan) {
+                cards.push({
+                    vod_id: resourceLink,
+                    vod_name: title,
+                    vod_pic: FALLBACK_PIC,
+                    vod_remarks: `[${panType}]`,
+                    ext: { url: resourceLink }
+                });
             } else {
-                // 过滤掉所有其他网盘
-                log(`[search] 过滤掉 [${panType}] 资源: ${title}`);
+                // log(`[search] 过滤非目标网盘: [${panType}] ${title}`);
             }
         });
 
-        log(`[search] ✓ 第${page}页找到${originalCount}个原始结果, 过滤后保留${cards.length}个`);
+        log(`[search] ✓ 第${page}页原始结果${originalCount}个, 筛选(天翼/115)后保留${cards.length}个`);
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -135,8 +135,7 @@ async function search(ext) {
     }
 }
 
-
-// ★★★★★【详情页】(保持不变) ★★★★★
+// ★★★★★【详情页】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -149,13 +148,18 @@ async function getTracks(ext) {
         const result = JSON.parse(response.data);
         if (result.success && result.real_url) {
             log(`[getTracks] ✓ 后端API成功返回真实链接: ${result.real_url}`);
+            
+            // 优化链接名称显示
             let panName = '网盘链接';
-            if (result.real_url.includes('quark')) panName = '夸克网盘';
-            else if (result.real_url.includes('baidu')) panName = '百度网盘';
-            else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
-            else if (result.real_url.includes('115')) panName = '115网盘';
-            else if (result.real_url.includes('cloud.189.cn')) panName = '天翼网盘';
-            return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: result.real_url, ext: {} }] }] });
+            const realUrl = result.real_url;
+            
+            if (realUrl.includes('189.cn') || realUrl.includes('cloud.189')) panName = '天翼云盘';
+            else if (realUrl.includes('115.com')) panName = '115网盘';
+            else if (realUrl.includes('quark')) panName = '夸克网盘';
+            else if (realUrl.includes('baidu')) panName = '百度网盘';
+            else if (realUrl.includes('aliyundrive')) panName = '阿里云盘';
+
+            return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: realUrl, ext: {} }] }] });
         } else {
             log(`[getTracks] ❌ 后端API返回错误: ${result.error || '未知错误'}`);
             throw new Error(result.error || 'API did not return a real URL');
@@ -173,4 +177,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V1.7.1 ====');
+log('==== 插件加载完成 V1.8.0 ====');
