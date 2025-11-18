@@ -1,21 +1,22 @@
 /**
- * Nullbr 影视库前端插件 - V88.2 (多格式支持版)
+ * Nullbr 影视库前端插件 - V89.0 (XPTV专用版)
  *
  * 变更日志:
- * - V88.2 (2025-11-18):
- *   - 支持多种数据格式返回
- *   - 增加格式转换兜底方案
- *   - 确保最大兼容性
+ * - V89.0 (2025-11-18):
+ *   - 专门适配XPTV播放器
+ *   - 使用vod_play_url字符串格式
+ *   - 支持115网盘直链播放
  *
  * 作者: Manus
  * 日期: 2025-11-18
+ * 适用: XPTV
  */
 
 var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V88.2] ' + msg); }
+function log(msg) { console.log('[Nullbr XPTV V89] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -34,8 +35,8 @@ async function init(ext) {
 
 async function getConfig() {
     return jsonify({
-        ver: 88.2,
-        title: 'Nullbr影视库 (V88.2)',
+        ver: 89.0,
+        title: 'Nullbr影视库 (XPTV)',
         site: API_BASE_URL,
         tabs: CATEGORIES
     });
@@ -123,12 +124,12 @@ async function search(ext) {
     }
 }
 
-// 3. 详情页 - 智能格式转换版
-async function getTracks(ext) {
-    log('[getTracks] 开始处理详情请求');
+// 3. 详情页 - XPTV专用
+async function detail(ext) {
+    log('[detail] XPTV详情请求');
     
     try {
-        // 步骤1: 解析ext获取detail_url
+        // 解析ext获取detail_url
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
 
@@ -136,55 +137,49 @@ async function getTracks(ext) {
             throw new Error("无法从ext中解析出detail_url");
         }
 
-        log('[getTracks] 请求URL: ' + detailUrl);
+        log('[detail] 请求: ' + detailUrl);
         
-        // 步骤2: 请求后端
+        // 请求后端
         var data = await fetchData(detailUrl);
         
-        // 步骤3: 智能格式转换
-        var finalData = ensureCompatibleFormat(data);
+        // XPTV使用detail函数,返回vod_play_url格式
+        var result = {
+            vod_play_url: data.vod_play_url || "",
+            vod_play_from: "115网盘"
+        };
         
-        log('[getTracks] 成功获取并处理数据');
-        return jsonify(finalData);
+        log('[detail] 成功获取播放链接');
+        return jsonify(result);
 
     } catch (err) {
-        log('[getTracks] 错误: ' + err.message);
+        log('[detail] 错误: ' + err.message);
         return jsonify({
-            list: [{
-                title: "错误",
-                tracks: [{
-                    name: "加载失败: " + err.message,
-                    pan: ""
-                }]
-            }]
+            vod_play_url: "115网盘$加载失败$",
+            vod_play_from: "115网盘"
         });
     }
 }
 
-// 4. detail函数 (兼容性支持)
-async function detail(ext) {
-    log('[detail] 被调用,重定向到getTracks');
-    return await getTracks(ext);
+// 4. getTracks (XPTV备用)
+async function getTracks(ext) {
+    log('[getTracks] XPTV可能不使用此函数,重定向到detail');
+    return await detail(ext);
 }
 
-// 5. 播放
+// 5. 播放 - XPTV专用
 async function play(flag, id, flags) {
-    log('[play] 播放URL: ' + id);
+    log('[play] 播放请求');
+    log('[play] flag: ' + flag);
+    log('[play] id: ' + id);
     
-    // 如果URL包含115cdn.com,直接播放
-    if (id.indexOf('115cdn.com') !== -1) {
-        return jsonify({
-            parse: 0,
-            url: id,
-            header: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-    }
-    
+    // XPTV会传入115网盘链接
+    // 直接返回,让XPTV的内置播放器处理
     return jsonify({
         parse: 0,
-        url: id
+        url: id,
+        header: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
     });
 }
 
@@ -235,55 +230,12 @@ function formatCards(items) {
             vod_name: item.title || '未命名',
             vod_pic: picUrl,
             vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
+            vod_year: item.release_date ? item.release_date.substring(0, 4) : '',
             ext: {
                 detail_url: detailUrl
             }
         };
     });
-}
-
-// ★★★ 新增: 智能格式转换函数 ★★★
-function ensureCompatibleFormat(data) {
-    // 如果已经有正确的list结构,直接返回
-    if (data.list && Array.isArray(data.list)) {
-        return data;
-    }
-    
-    // 尝试从urls字段构建
-    if (data.urls && Array.isArray(data.urls) && data.urls.length > 0) {
-        return {
-            list: [{
-                title: data.source || "115网盘",
-                tracks: data.urls
-            }]
-        };
-    }
-    
-    // 尝试从parse_urls字段构建
-    if (data.parse_urls && Array.isArray(data.parse_urls) && data.parse_urls.length > 0) {
-        return {
-            list: [{
-                title: "115网盘",
-                tracks: data.parse_urls.map(function(url, index) {
-                    return {
-                        name: "资源 " + (index + 1),
-                        pan: url
-                    };
-                })
-            }]
-        };
-    }
-    
-    // 如果什么都没有,返回空资源
-    return {
-        list: [{
-            title: "无资源",
-            tracks: [{
-                name: "未找到可用资源",
-                pan: ""
-            }]
-        }]
-    };
 }
 
 function handleError(err) {
