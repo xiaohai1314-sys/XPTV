@@ -1,21 +1,21 @@
 /**
- * Nullbr 影视库前端插件 - V60.1 (已修复详情页转圈)
+ * Nullbr 影视库前端插件 - V60.1 (详情页网络请求测试版)
  *
  * 变更日志:
  * - V60.1 (2025-11-18):
- * - [修复] 修复了 detail 函数因缺少 vod_id 等关键字段导致 App 详情页无限转圈的问题。
- * - [优化] 完善了 detail 函数的错误处理和返回结构。
+ *   - [调试] 修改 detail 函数，使其返回一个固定的、不依赖网络的假数据。
+ *   - [目的] 用于验证 App 详情页的“转圈”问题是否由 `$fetch` 网络请求被环境（如App安全策略）阻止引起。
+ *   - 如果此版本能正常显示详情页的按钮，则证明问题在于网络请求；否则问题在其他地方。
  *
- * 作者: Manus (由用户最终修正)
+ * 作者: Manus
  * 日期: 2025-11-18
  */
 
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V60.1] ${msg}`);
-}
+function jsonify(data) { return JSON.stringify(data); }
+function log(msg) { console.log(`[Nullbr V60.1 Test] ${msg}`); }
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -23,37 +23,33 @@ const CATEGORIES = [
     { name: '高分电影', ext: { id: 'top_movie' } },
     { name: '高分剧集', ext: { id: 'top_series' } },
 ];
-// ★★★★★【统一的分页锁，服务于分类和搜索】★★★★★
+
 let END_LOCK = {};
 
 // --- 入口函数 ---
 async function init(ext) {
     END_LOCK = {};
-// 插件初始化时，清空所有锁
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 60.1, title: 'Nullbr影视库 (V60)', site: API_BASE_URL, tabs: CATEGORIES });
-}
-async function home() { return jsonify({ class: CATEGORIES, filters: {} });
-}
-async function category(tid, pg, filter, ext) { return jsonify({ list: [] });
-} // 彻底废弃
+async function getConfig() { return jsonify({ ver: 60.1, title: 'Nullbr影视库 (V60.1 Test)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
+async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
 // =======================================================================
 // --- 核心功能区 ---
 // =======================================================================
 
-// 1. 分类列表 (V59的最终形态)
+// 1. 分类列表 (保持不变)
 async function getCards(ext) {
     const { id, page } = parseExt(ext);
-    const lockKey = `cat_${id}`; // 分类锁的键，加个前缀避免和搜索冲突
+    const lockKey = `cat_${id}`;
     
     if (END_LOCK[lockKey] && page > 1) {
         return jsonify({ list: [], page: page, pagecount: page });
     }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
-    const url = `${API_BASE_URL}/api/list?id=${id}&page=${page}`;
+    const url = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{id}&page=${page}`;
     log(`[getCards] 请求URL: ${url}`);
 
     try {
@@ -65,6 +61,7 @@ async function getCards(ext) {
             END_LOCK[lockKey] = true;
         }
         const hasMore = !END_LOCK[lockKey];
+
         return jsonify({
             list: cards,
             page: data.page,
@@ -77,30 +74,30 @@ async function getCards(ext) {
     }
 }
 
-// 2. 搜索功能 (全新实现)
+// 2. 搜索功能 (保持不变)
 async function search(ext) {
     const { text: keyword, page } = parseExt(ext);
     if (!keyword) return jsonify({ list: [] });
     const lockKey = `search_${keyword}`;
-    // 搜索锁的键
 
     if (END_LOCK[lockKey] && page > 1) {
         return jsonify({ list: [], page: page, pagecount: page });
     }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
-    const url = `${API_BASE_URL}/api/search?keyword=${encodeURIComponent(keyword)}&page=${page}`;
+    const url = `<LaTex>${API_BASE_URL}/api/search?keyword=$</LaTex>{encodeURIComponent(keyword)}&page=${page}`;
     log(`[search] 请求URL: ${url}`);
 
     try {
         const data = await fetchData(url);
         const cards = formatCards(data.items);
 
-        const pageSize = 30; // 搜索结果也是每页30条
+        const pageSize = 30;
         if (data.items.length < pageSize) {
             END_LOCK[lockKey] = true;
         }
         const hasMore = !END_LOCK[lockKey];
+
         return jsonify({
             list: cards,
             page: data.page,
@@ -113,72 +110,32 @@ async function search(ext) {
     }
 }
 
-// 3. 详情页/网盘提取 (已修复 V60.1)
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// 3. 详情页/网盘提取 (已修改为返回固定假数据，用于测试)
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function detail(id) {
-    log(`[detail] 请求详情, vod_id: ${id}`);
-    if (!id || id.indexOf('_') === -1) return jsonify({ list: [] });
+    log(`[detail] (测试版) 请求详情, vod_id: ${id}`);
+    log('[detail] (测试版) 跳过网络请求，直接返回固定的假数据...');
 
-    const [type, tmdbid] = id.split('_');
-    const url = `${API_BASE_URL}/api/resource?type=${type}&tmdbid=${tmdbid}`; 
-    log(`[detail] 请求URL: ${url}`);
+    // 直接返回一个写死的、格式正确的JSON，完全不发起网络请求
+    const fakeTracks = [
+        { name: "测试链接-UC [10.5 GB]", url: "https://115.com/fake_uc_link" },
+        { name: "测试链接-夸克 [20.8 GB]", url: "https://pan.quark.cn/fake_quark_link" },
+        { name: "无大小信息的链接", url: "https://115.com/another_fake_link" }
+    ];
 
-    try {
-        const data = await fetchData(url);
-        
-        // 准备播放列表字符串
-        let playUrl = "";
-        let displayTitle = "未知资源";
-
-        // 安全地处理返回数据
-        if (data && data['115'] && Array.isArray(data['115']) && data['115'].length > 0) {
-            // 尝试用第一个文件的标题作为详情页标题
-            displayTitle = data['115'][0].title || displayTitle;
-
-            playUrl = data['115'].map(item => {
-                const name = item.title || '未知文件名';
-                const size = item.size ? `[${item.size}]` : '';
-                const link = item.share_link;
-                // 格式：文件名$网盘链接
-                return `${name} ${size}$${link}`;
-            }).join('#'); // 使用 # 分隔剧集
-        }
-
-        // ★★★ 关键修复：返回完整的 vod 对象结构 (解决了转圈问题) ★★★
-        return jsonify({
-            list: [{
-                vod_id: id, // 【至关重要】原样返回ID，否则UI会卡住
-                vod_name: displayTitle,
-                vod_pic: "",
-                type_name: "115网盘",
-                vod_year: "",
-                vod_area: "",
-                vod_remarks: data['115'] ? `共${data['115'].length}个文件` : "未找到网盘资源",
-                vod_actor: "",
-                vod_director: "",
-                vod_content: "资源由Nullbr提供。请点击下方选集播放。若无法播放请检查115账号状态。",
-                vod_play_from: "115",
-                vod_play_url: playUrl
-            }]
-        });
-    } catch (err) {
-        // 出错时也要返回一个带 id 的结构，防止 App 陷入死循环
-        log(`[detail] 发生错误: ${err.message}`);
-        return jsonify({
-            list: [{
-                vod_id: id,
-                vod_name: "加载失败",
-                vod_content: `加载错误: ${err.message}`,
-                vod_play_from: "115",
-                vod_play_url: ""
-            }]
-        });
-    }
+    return jsonify({
+        list: [{
+            vod_name: "网盘资源 (测试数据)",
+            vod_play_from: "115", // 这个 "from" 字段可以保持不变
+            vod_play_url: fakeTracks.map(t => `<LaTex>${t.name}$</LaTex>${t.url}`).join('#')
+        }]
+    });
 }
 
-// 4. 播放 (全新实现)
+// 4. 播放 (保持不变)
 async function play(flag, id, flags) {
-    log(`[play] 请求播放, flag: ${flag}, id: ${id}`);
-    // 直接将网盘链接返回给App
+    log(`[play] 请求播放, flag: <LaTex>${flag}, id: $</LaTex>{id}`);
     return jsonify({
         parse: 0,
         url: id
@@ -186,29 +143,23 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 ---
+// --- 辅助函数区 (保持不变) ---
 // =======================================================================
 
-// 统一解析ext参数
 function parseExt(ext) {
     try {
-        const extObj = typeof ext === 'string' ?
-        JSON.parse(ext) : ext;
+        const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
         const { id, pg, page: page_alt, text } = extObj.ext || extObj || {};
         return {
-            id: id ||
-            (extObj.class && extObj.class.length > 0 ? extObj.class[0].ext.id : CATEGORIES[0].ext.id),
-            page: pg ||
-            page_alt || 1,
-            text: text ||
-            ""
+            id: id || (extObj.class && extObj.class.length > 0 ? extObj.class[0].ext.id : CATEGORIES[0].ext.id),
+            page: pg || page_alt || 1,
+            text: text || ""
         };
     } catch (e) {
         return { id: CATEGORIES[0].ext.id, page: 1, text: "" };
     }
 }
 
-// 统一请求数据
 async function fetchData(url) {
     const response = await $fetch.get(url);
     const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
@@ -216,18 +167,16 @@ async function fetchData(url) {
     return data;
 }
 
-// 统一格式化卡片
 function formatCards(items) {
     if (!items || !Array.isArray(items)) return [];
     return items.map(item => ({
-        vod_id: `${item.media_type}_${item.tmdbid}`,
+        vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
         vod_name: item.title || '未命名',
-        vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
+        vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
         vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : '')
     }));
 }
 
-// 统一错误处理
 function handleError(err) {
     log(`请求失败: ${err.message}`);
     return jsonify({ list: [] });
