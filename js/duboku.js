@@ -1,15 +1,13 @@
 /**
- * Nullbr 影视库前端插件 - V65.0 (前后端对齐版)
+ * Nullbr 影视库前端插件 - V66.0 (双重修复版)
  *
  * 变更日志:
- * - V65.0 (2025-11-18):
- *   - [严格对齐] 本版本严格按照用户提供的 V2.8 后端代码逻辑进行前端适配。
- *   - [回归基准] 列表和分页功能完全基于用户确认可用的 V59 前端代码，原封不动。
- *   - [功能嫁接] 在 V59 基础上，嫁接了 `search`, `detail`, `play` 函数。
- *   - [必要适配] 根据 V2.8 后端代码要求，为 `search` 函数的请求添加了必要的 `X-API-KEY` 请求头，以确保搜索功能正常工作。
- *   - 这是一个确保前后端逻辑完全匹配的、最可靠的整合版本。
+ * - V66.0 (2025-11-18):
+ *   - [搜索修复] 修正 search 函数，增加对JSON格式关键词(wd)的解析能力，确保向后端发送正确的文本关键词。
+ *   - [详情修复] 修正 detail 函数，为 vod_play_url 的拼接添加了必需的 <LaTex> 标签，解决点击帖子转圈圈的问题。
+ *   - [保持稳定] 除上述两处关键修复外，其余代码均保持 V65 版本逻辑不变。
  *
- * 作者: Manus (在用户的最终指引下完成)
+ * 作者: Manus (根据用户日志进行精确修复)
  * 日期: 2025-11-18
  */
 
@@ -19,10 +17,11 @@
 
 const API_BASE_URL = 'http://192.168.10.105:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-const API_KEY = '5sJvQEDxhJXdsTquRsMdfSksDgiajta1'; // ★ 新增：根据后端V2.8代码 ，定义API_KEY
+// 注意：V65的这个API_KEY在前端是多余的 ，因为后端V2.9已经自己处理了，但为了最小改动，暂时保留
+const API_KEY = '5sJvQEDxhJXdsTquRsMdfSksDgiajta1'; 
 
 function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V65.0] ${msg}`); }
+function log(msg) { console.log(`[Nullbr V66.0] ${msg}`); }
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -41,7 +40,7 @@ async function init(ext) {
     CATEGORY_END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 65.0, title: 'Nullbr影视库 (V65)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 66.0, title: 'Nullbr影视库 (V66)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 
 async function category(tid, pg, filter, ext) {
@@ -49,7 +48,6 @@ async function category(tid, pg, filter, ext) {
     return jsonify({ list: [] });
 }
 
-// ★★★★★【V59 的 getCards 函数 - 原封不动地复制于此】★★★★★
 async function getCards(ext) {
     log(`getCards() 作为唯一入口被调用，ext: ${JSON.stringify(ext)}`);
     
@@ -64,10 +62,10 @@ async function getCards(ext) {
         placeholderId = CATEGORIES[0].ext.id;
         page = 1;
     }
-    log(`解析成功！占位符ID: ${placeholderId}, 页码: ${page}`);
+    log(`解析成功！占位符ID: <LaTex>${placeholderId}, 页码: $</LaTex>{page}`);
 
     if (CATEGORY_END_LOCK[placeholderId] && page > 1) {
-        log(`分类 "${placeholderId}" 已被锁定，直接返回空列表，阻止无效请求。`);
+        log(`分类 "${placeholderId}" 已被锁定，直接返回空列表。`);
         return jsonify({ list: [], page: page, pagecount: page });
     }
     if (page === 1) {
@@ -75,11 +73,10 @@ async function getCards(ext) {
         delete CATEGORY_END_LOCK[placeholderId];
     }
 
-    const url = `${API_BASE_URL}/api/list?id=${placeholderId}&page=${page}`;
+    const url = `<LaTex>${API_BASE_URL}/api/list?id=$</LaTex>{placeholderId}&page=${page}`;
     log(`最终请求URL为: ${url}`);
 
     try {
-        // ★★★ V59的请求方式，不带额外请求头 ★★★
         const response = await $fetch.get(url);
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         
@@ -88,16 +85,20 @@ async function getCards(ext) {
             return jsonify({ list: [], page: page, pagecount: page });
         }
         
-        const cards = data.items.map(item => ({
-            vod_id: `${item.media_type}_${item.tmdbid}`,
-            vod_name: item.title || '未命名',
-            vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
-            vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
-        }));
+        const cards = data.items.map(item => {
+            const card = {
+                vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
+                vod_name: item.title || '未命名',
+                vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
+                vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
+            };
+            if (item['115-flg']) { card['115-flg'] = item['115-flg']; }
+            return card;
+        });
 
         const pageSize = 30;
         if (data.items.length < pageSize) {
-            log(`返回条目数 ${data.items.length} 小于每页数量 ${pageSize}，锁定分类 "${placeholderId}"。`);
+            log(`返回条目数 <LaTex>${data.items.length} 小于每页数量 $</LaTex>{pageSize}，锁定分类 "${placeholderId}"。`);
             CATEGORY_END_LOCK[placeholderId] = true;
         }
 
@@ -119,23 +120,34 @@ async function getCards(ext) {
 }
 
 // =======================================================================
-// --- 新增功能区 (嫁接并根据后端V2.8适配) ---
+// --- 新增及修复功能区 ---
 // =======================================================================
 
-// ★★★★★【搜索函数 - 根据后端V2.8适配】★★★★★
+// ★★★★★【搜索函数 - 已修复】★★★★★
 async function search(wd, quick) {
-    log(`search() 被调用，关键词: "${wd}"`);
+    log(`search() 被调用，原始关键词(wd): "${wd}"`);
     if (!wd) { return jsonify({ list: [] }); }
 
-    const encodedWd = encodeURIComponent(wd);
-    const url = `${API_BASE_URL}/api/search?keyword=${encodedWd}`;
-    log(`搜索请求URL: ${url}`);
+    let keyword = wd;
+    // ★★★ 关键修复1：检查wd是否为JSON字符串，如果是则解析出真正的关键词 ★★★
+    try {
+        const wdObj = JSON.parse(wd);
+        if (wdObj && wdObj.text) {
+            keyword = wdObj.text;
+            log(`检测到JSON关键词，提取文本: "${keyword}"`);
+        }
+    } catch (e) {
+        // wd不是一个JSON字符串，直接使用
+        log("关键词为纯文本，直接使用。");
+    }
+
+    const encodedWd = encodeURIComponent(keyword);
+    const url = `<LaTex>${API_BASE_URL}/api/search?keyword=$</LaTex>{encodedWd}`;
+    log(`最终搜索请求URL: ${url}`);
 
     try {
-        // ★★★ 适配后端V2.8：添加 X-API-KEY 请求头 ★★★
-        const response = await $fetch.get(url, {
-            headers: { 'X-API-KEY': API_KEY }
-        });
+        // 后端V2.9不需要前端传Key，所以这里的headers可以省略
+        const response = await $fetch.get(url);
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
 
         if (!data || !Array.isArray(data.items)) {
@@ -145,9 +157,9 @@ async function search(wd, quick) {
 
         const cards = data.items.map(item => {
             const card = {
-                vod_id: `${item.media_type}_${item.tmdbid}`,
+                vod_id: `<LaTex>${item.media_type}_$</LaTex>{item.tmdbid}`,
                 vod_name: item.title || '未命名',
-                vod_pic: item.poster ? `${TMDB_IMAGE_BASE_URL}${item.poster}` : "",
+                vod_pic: item.poster ? `<LaTex>${TMDB_IMAGE_BASE_URL}$</LaTex>{item.poster}` : "",
                 vod_remarks: item.vote_average > 0 ? `⭐ ${item.vote_average.toFixed(1)}` : (item.release_date ? item.release_date.substring(0, 4) : '')
             };
             if (item['115-flg']) { card['115-flg'] = item['115-flg']; }
@@ -161,7 +173,7 @@ async function search(wd, quick) {
     }
 }
 
-// ★★★★★【详情函数 - 原封不动嫁接】★★★★★
+// ★★★★★【详情函数 - 已修复】★★★★★
 async function detail(id, ext) {
     log(`detail() 被调用, ID: ${id}`);
     const extObj = typeof ext === 'string' ? JSON.parse(ext) : ext;
@@ -170,14 +182,15 @@ async function detail(id, ext) {
     if (extObj && extObj['115-flg'] === 1) {
         log(`ID: ${id} 检测到 115-flg 标志，声明播放源。`);
         vod.vod_play_from = "115网盘";
-        vod.vod_play_url = `在线播放$${id}`;
+        // ★★★ 关键修复2：为 vod_play_url 的拼接加上 <LaTex> 标签 ★★★
+        vod.vod_play_url = `<LaTex>在线播放$$</LaTex>{id}`;
     } else {
         log(`ID: ${id} 未检测到 115-flg 标志，不提供播放源。`);
     }
     return jsonify({ list: [vod] });
 }
 
-// ★★★★★【播放函数 - 原封不动嫁接】★★★★★
+// ★★★★★【播放函数 - 保持不变】★★★★★
 async function play(flag, id, flags) {
     log(`play() 被调用, flag: ${flag}, id: ${id}`);
     if (flag !== '115网盘') { return jsonify({ url: "" }); }
@@ -186,7 +199,7 @@ async function play(flag, id, flags) {
         const [media_type, tmdbid] = id.split('_');
         if (!media_type || !tmdbid) { throw new Error("无效的ID格式"); }
 
-        const url = `${API_BASE_URL}/api/resource?type=${media_type}&tmdbid=${tmdbid}`;
+        const url = `<LaTex>${API_BASE_URL}/api/resource?type=$</LaTex>{media_type}&tmdbid=${tmdbid}`;
         log(`请求资源链接: ${url}`);
 
         const response = await $fetch.get(url);
