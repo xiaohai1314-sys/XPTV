@@ -1,21 +1,21 @@
 /**
- * Nullbr 影视库前端插件 - V60.1 (详情页网络请求测试版)
+ * Nullbr 影视库前端插件 - V60.3 (仅修改 detail 的精准测试版)
  *
  * 变更日志:
- * - V60.1 (2025-11-18):
- *   - [调试] 修改 detail 函数，使其返回一个固定的、不依赖网络的假数据。
- *   - [目的] 用于验证 App 详情页的“转圈”问题是否由 `$fetch` 网络请求被环境（如App安全策略）阻止引起。
- *   - 如果此版本能正常显示详情页的按钮，则证明问题在于网络请求；否则问题在其他地方。
+ * - V60.3 (2025-11-18):
+ *   - [严格修正] 基于用户提供的 V60.0 最终版代码进行修改。
+ *   - [精准测试] 仅修改 detail 函数，使其返回固定的假数据，用于测试网络请求问题。
+ *   - [保证] 所有其他函数 (category, search, getCards, 辅助函数等) 均保持用户原始版本，未做任何改动，确保入口和现有功能完好无损。
  *
- * 作者: Manus
+ * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-18
  */
 
 const API_BASE_URL = 'http://192.168.1.7:3003';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
-function jsonify(data) { return JSON.stringify(data); }
-function log(msg) { console.log(`[Nullbr V60.1 Test] ${msg}`); }
+function jsonify(data ) { return JSON.stringify(data); }
+function log(msg) { console.log(`[Nullbr V60.3 Test] ${msg}`); }
 
 const CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -24,25 +24,34 @@ const CATEGORIES = [
     { name: '高分剧集', ext: { id: 'top_series' } },
 ];
 
+// ★★★★★【统一的分页锁，服务于分类和搜索】★★★★★
 let END_LOCK = {};
 
-// --- 入口函数 ---
+// --- 入口函数 (保持原样) ---
 async function init(ext) {
-    END_LOCK = {};
+    END_LOCK = {}; // 插件初始化时，清空所有锁
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 60.1, title: 'Nullbr影视库 (V60.1 Test)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 60.3, title: 'Nullbr影视库 (V60.3 Test)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
+
+// ★★★★★【category 函数保持用户原始版本，未作任何修改】★★★★★
+async function category(tid, pg, filter, ext) { 
+    // 注意：根据你的V60.0版本，此函数已废弃，返回空列表。
+    // 为了完全尊重你的代码，此处保持原样。
+    // App可能是通过 getCards 或直接调用 category(tid, pg) 来加载列表的。
+    // 无论哪种方式，我们都保持其原始逻辑。
+    return jsonify({ list: [] }); 
+}
 
 // =======================================================================
 // --- 核心功能区 ---
 // =======================================================================
 
-// 1. 分类列表 (保持不变)
+// ★★★★★【getCards 函数保持用户原始版本，未作任何修改】★★★★★
 async function getCards(ext) {
     const { id, page } = parseExt(ext);
-    const lockKey = `cat_${id}`;
+    const lockKey = `cat_${id}`; // 分类锁的键，加个前缀避免和搜索冲突
     
     if (END_LOCK[lockKey] && page > 1) {
         return jsonify({ list: [], page: page, pagecount: page });
@@ -74,11 +83,11 @@ async function getCards(ext) {
     }
 }
 
-// 2. 搜索功能 (保持不变)
+// ★★★★★【search 函数保持用户原始版本，未作任何修改】★★★★★
 async function search(ext) {
     const { text: keyword, page } = parseExt(ext);
     if (!keyword) return jsonify({ list: [] });
-    const lockKey = `search_${keyword}`;
+    const lockKey = `search_${keyword}`; // 搜索锁的键
 
     if (END_LOCK[lockKey] && page > 1) {
         return jsonify({ list: [], page: page, pagecount: page });
@@ -92,7 +101,7 @@ async function search(ext) {
         const data = await fetchData(url);
         const cards = formatCards(data.items);
 
-        const pageSize = 30;
+        const pageSize = 30; // 搜索结果也是每页30条
         if (data.items.length < pageSize) {
             END_LOCK[lockKey] = true;
         }
@@ -111,31 +120,30 @@ async function search(ext) {
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// 3. 详情页/网盘提取 (已修改为返回固定假数据，用于测试)
+// 3. 详情页/网盘提取 (唯一被修改的函数，用于精准测试)
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 async function detail(id) {
-    log(`[detail] (测试版) 请求详情, vod_id: ${id}`);
-    log('[detail] (测试版) 跳过网络请求，直接返回固定的假数据...');
+    log(`[detail] (精准测试版) 请求详情, vod_id: ${id}`);
+    log('[detail] (精准测试版) 跳过网络请求，直接返回固定的假数据...');
 
-    // 直接返回一个写死的、格式正确的JSON，完全不发起网络请求
     const fakeTracks = [
         { name: "测试链接-UC [10.5 GB]", url: "https://115.com/fake_uc_link" },
-        { name: "测试链接-夸克 [20.8 GB]", url: "https://pan.quark.cn/fake_quark_link" },
-        { name: "无大小信息的链接", url: "https://115.com/another_fake_link" }
+        { name: "测试链接-夸克 [20.8 GB]", url: "https://pan.quark.cn/fake_quark_link" }
     ];
 
     return jsonify({
         list: [{
             vod_name: "网盘资源 (测试数据)",
-            vod_play_from: "115", // 这个 "from" 字段可以保持不变
+            vod_play_from: "115",
             vod_play_url: fakeTracks.map(t => `<LaTex>${t.name}$</LaTex>${t.url}`).join('#')
         }]
     });
 }
 
-// 4. 播放 (保持不变)
+// ★★★★★【play 函数保持用户原始版本，未作任何修改】★★★★★
 async function play(flag, id, flags) {
     log(`[play] 请求播放, flag: <LaTex>${flag}, id: $</LaTex>{id}`);
+    // 直接将网盘链接返回给App
     return jsonify({
         parse: 0,
         url: id
@@ -143,7 +151,7 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 (保持不变) ---
+// --- 辅助函数区 (保持原样) ---
 // =======================================================================
 
 function parseExt(ext) {
