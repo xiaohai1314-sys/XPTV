@@ -1,11 +1,14 @@
 /**
- * 找盘资源前端插件 - V1.7.0 (排序与清理增强)
+ * 找盘资源前端插件 - V1.7.0 (夸克筛选+优先级排序版)
  * 变更内容：
- *  - [修正] 严格恢复了 getConfig 中 ver: 1 的整数类型，确保APP兼容性，解决分类不显示问题。
- *  - [增强] 在 search 函数中，对所有搜索结果强制按 (115 > 天翼 > 阿里 > 夸克) 的优先级排序。
- *  - [增强] 在 search 函数中，对115链接进行域名归一化(115cdn.com -> 115.com)和末尾字符清理。
- *  - [保留] 保留了原有的夸克网盘内部画质筛选和排序逻辑。
- *  - [承诺] 除 search 函数和新增的 clean115Link 辅助函数外，其余代码与用户原始脚本完全一致。
+ *  - 对夸克网盘资源增加画质筛选（1080P、4K、原盘、REMUX、次世代、杜比、UHD、蓝光）
+ *  - 对夸克网盘资源进行优先级排序（4K > 原盘 > REMUX > 杜比 > UHD > 蓝光 > 次世代 > 1080P）
+ *  - 其他网盘（115、天翼、阿里、UC等）不过滤
+ *
+ *  --- Manus 增强内容 ---
+ *  - [增强] search函数: 增加115链接清理(含cdn转换)功能。
+ *  - [增强] search函数: 增加按(115 > 天翼 > 阿里 > 夸克)的强制优先级排序。
+ *  - [承诺] 除search函数外，其余代码严格保持用户原始版本，确保分类等功能不受影响。
  */
 
 // --- 配置区 ---
@@ -24,35 +27,21 @@ function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(e
 function jsonify(data) { return JSON.stringify(data); }
 function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http')) return path; return `<LaTex>${SITE_URL}$</LaTex>{path.startsWith('/') ? '' : '/'}${path}`; }
 
-// ★★★ 新增的115链接清理函数 ★★★
-function clean115Link(link) {
-    if (typeof link === 'string' && (link.includes('115.com') || link.includes('115cdn.com'))) {
-        const originalUrl = link;
-        link = link.replace('//115cdn.com/', '//115.com/');
-        link = link.replace(/[&#]+$/, '');
-        if (link !== originalUrl) {
-            log(`[115链接清理] 原始: <LaTex>${originalUrl} -> 清理后: $</LaTex>{link}`);
-        }
-    }
-    return link;
-}
-
 // --- 全局缓存 ---
 let cardsCache = {};
 
-// ★★★★★【插件入口函数 - 严格恢复至你的原始版本】★★★★★
+// --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V1.7.0 (排序与清理增强) ====");
+    log("==== 插件初始化 V1.7.0 (夸克筛选+优先级排序) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
         { name: '动漫', ext: { id: '动漫' } }
     ];
-    // ★★★ 关键修正：ver 必须是整数 1 ★★★
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分页】(严格保持你的原始版本) ★★★★★
+// ★★★★★【首页分页】(保持不变) ★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -97,6 +86,19 @@ async function getCards(ext) {
     }
 }
 
+// ★★★ 新增的115链接清理辅助函数 ★★★
+function clean115Link(link) {
+    if (typeof link === 'string' && (link.includes('115.com') || link.includes('115cdn.com'))) {
+        const originalUrl = link;
+        link = link.replace('//115cdn.com/', '//115.com/');
+        link = link.replace(/[&#]+$/, '');
+        if (link !== originalUrl) {
+            log(`[115链接清理] 原始: <LaTex>${originalUrl} -> 清理后: $</LaTex>{link}`);
+        }
+    }
+    return link;
+}
+
 // ★★★★★【搜索 - 唯一被增强的函数】★★★★★
 async function search(ext) {
     ext = argsify(ext);
@@ -108,25 +110,34 @@ async function search(ext) {
     }
 
     log(`[search] 关键词="<LaTex>${text}", 页=$</LaTex>{page}`);
-    const url = `<LaTex>${SITE_URL}/s/$</LaTex>{encodeURIComponent(text)}/0/${page}`;
+    const filter = 0;
+    const url = `<LaTex>${SITE_URL}/s/$</LaTex>{encodeURIComponent(text)}/<LaTex>${filter}/$</LaTex>{page}`;
     log(`[search] URL: ${url}`);
 
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
-        let cards = [];
+        const cards = [];
+        let originalCount = 0;
 
+        // 优先级定义
         const panOrder = ['115', '天翼', '阿里', '夸克'];
         const quarkQualityOrder = ['4K', '原盘', 'REMUX', '杜比', 'UHD', '蓝光', '次世代', '1080P'];
 
-        $("a.resource-item").each((_, item) => {
+        $("a.resource-item").each((idx, item) => {
+            originalCount++;
             const linkElement = $(item);
             let resourceLink = linkElement.attr('href');
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
-            if (panType.includes('迅雷') || panType.includes('百度')) return;
+            // 1. 过滤不想要的网盘
+            if (panType.includes('迅雷') || panType.includes('百度')) {
+                log(`[search] 过滤掉 [<LaTex>${panType}] 资源: $</LaTex>{title}`);
+                return;
+            }
 
+            // 2. ★★★ 115链接清理 ★★★
             if (panType.includes('115')) {
                 resourceLink = clean115Link(resourceLink);
             }
@@ -137,20 +148,27 @@ async function search(ext) {
                 vod_pic: FALLBACK_PIC,
                 vod_remarks: `[${panType}]`,
                 ext: { url: resourceLink },
-                _panType: panType,
-                _quarkQuality: null
+                _panType: panType, // 内部排序用
+                _quarkQuality: null // 夸克内部排序用
             };
 
+            // 3. 为夸克资源打上画质标签 (保留你原有的逻辑)
             if (panType.includes('夸克')) {
-                const matchedKeyword = quarkQualityOrder.find(q => title.toUpperCase().includes(q.toUpperCase()));
-                if (!matchedKeyword) return;
+                const qualityKeywords = ['1080P', '4K', '原盘', 'REMUX', '次世代', '杜比', 'UHD', '蓝光'];
+                const matchedKeyword = qualityKeywords.find(q => title.toUpperCase().includes(q.toUpperCase()));
+                if (!matchedKeyword) {
+                    log(`[search] 夸克资源未匹配画质关键词，跳过: ${title}`);
+                    return;
+                }
                 card._quarkQuality = matchedKeyword;
             }
             
             cards.push(card);
         });
 
+        // 4. ★★★ 排序逻辑 (整合版) ★★★
         cards.sort((a, b) => {
+            // 第一层：按网盘类型强制排序
             const aPanIndex = panOrder.findIndex(p => a._panType.includes(p));
             const bPanIndex = panOrder.findIndex(p => b._panType.includes(p));
             const effectiveAIndex = aPanIndex === -1 ? panOrder.length : aPanIndex;
@@ -160,6 +178,7 @@ async function search(ext) {
                 return effectiveAIndex - effectiveBIndex;
             }
 
+            // 第二层：如果都是夸克网盘，按画质排序 (保留你原有的逻辑)
             if (a._panType.includes('夸克') && b._panType.includes('夸克')) {
                 const aQualityIndex = quarkQualityOrder.indexOf(a._quarkQuality);
                 const bQualityIndex = quarkQualityOrder.indexOf(b._quarkQuality);
@@ -170,7 +189,7 @@ async function search(ext) {
             return 0;
         });
 
-        log(`[search] ✓ 找到并处理了 ${cards.length} 个结果`);
+        log(`[search] ✓ 第<LaTex>${page}页找到$</LaTex>{originalCount}个原始结果, 过滤后保留${cards.length}个`);
         return jsonify({ list: cards.map(({ _panType, _quarkQuality, ...rest }) => rest) });
 
     } catch (e) {
@@ -179,7 +198,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】(严格保持你的原始版本) ★★★★★
+// ★★★★★【详情页】(保持不变) ★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -207,11 +226,9 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 (严格保持你的原始版本) ---
+// --- 兼容接口 (保持不变) ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
-
-log('==== 插件加载完成 V1.7.0 (增强版) ====');
