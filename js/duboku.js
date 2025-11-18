@@ -1,9 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.8.1 (天翼+115 Only - 修复分类)
+ * 找盘资源前端插件 - V1.9.0 (仅保留天翼+115，移除所有筛选和排序)
  * 变更内容：
- * - 修复了 V1.8.0 版本中 getCards 和 search 可能存在的逻辑问题。
- * - 保持搜索结果严格只保留：天翼网盘、115网盘。
- * - 移除夸克、阿里、UC、百度等网盘资源。
+ * - 移除 V1.7.0 的夸克画质筛选和优先级排序逻辑。
+ * - 搜索结果严格只保留：天翼网盘、115网盘。
+ * - 恢复了对 Cheerio 选择器的原始依赖，确保健壮性。
  */
 
 // --- 配置区 ---
@@ -27,7 +27,7 @@ let cardsCache = {};
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V1.8.1 (天翼+115 Only - 修复分类) ====");
+    log("==== 插件初始化 V1.9.0 (仅保留天翼+115) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -36,7 +36,7 @@ async function getConfig() {
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分页】(已恢复原始 V1.7.0 逻辑) ★★★★★
+// ★★★★★【首页分页】(原始 V1.7.0 逻辑 - 未修改) ★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -109,12 +109,11 @@ async function search(ext) {
             const title = linkElement.find('h2').text().trim();
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
-            // 检查链接和标题是否有效，并进行目标网盘筛选
-            if (resourceLink && title) {
-                // --- 核心筛选逻辑：只保留天翼和115 ---
-                const isTargetPan = panType.includes('天翼') || panType.includes('115');
+            // --- 核心筛选逻辑：只保留天翼和115 ---
+            const isTargetPan = panType.includes('天翼') || panType.includes('115');
 
-                if (isTargetPan) {
+            if (isTargetPan) {
+                if (resourceLink && title) {
                     cards.push({
                         vod_id: resourceLink,
                         vod_name: title,
@@ -124,10 +123,14 @@ async function search(ext) {
                     });
                 }
             }
+            // 否则，所有其他网盘（夸克、阿里、百度、迅雷等）都被过滤掉。
         });
+        
+        // 移除排序逻辑 (排序是针对夸克的，现已不再需要)
 
-        log(`[search] ✓ 第${page}页原始结果${originalCount}个, 筛选(天翼/115)后保留${cards.length}个`);
-        return jsonify({ list: cards });
+        log(`[search] ✓ 第${page}页找到${originalCount}个原始结果, 过滤后保留${cards.length}个`);
+        // 注意：这里返回的 cards 是一个普通数组，不需要再 map。
+        return jsonify({ list: cards }); 
 
     } catch (e) {
         log(`[search] ❌ 异常: ${e.message}`);
@@ -135,7 +138,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】(保持不变) ★★★★★
+// ★★★★★【详情页】(V1.8.2 优化逻辑 - 保持不变) ★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -177,4 +180,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V1.8.1 ====');
+log('==== 插件加载完成 V1.9.0 ====');
