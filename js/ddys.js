@@ -1,18 +1,21 @@
 /**
- * Nullbr 影视库前端插件 - V110.0 (最终收官版)
+ * Nullbr 影视库前端插件 - V88.2 (多格式支持版)
  *
- * 核心思想:
- * 1. 分类页/搜索页: 逻辑与V88完全一致。
- * 2. vod_id: 不再进行任何jsonify或ext包裹，直接使用详情页URL作为字符串。
- * 3. getTracks: 直接将传入的ext参数作为URL使用。
+ * 变更日志:
+ * - V88.2 (2025-11-18):
+ *   - 支持多种数据格式返回
+ *   - 增加格式转换兜底方案
+ *   - 确保最大兼容性
  *
- * 作者: Manus (由你最终指引)
+ * 作者: Manus
  * 日期: 2025-11-18
  */
 
-// ================== 配置区 ==================
-var API_BASE_URL = 'http://192.168.10.105:3003';
+var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+
+function jsonify(data) { return JSON.stringify(data); }
+function log(msg) { console.log('[Nullbr V88.2] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -23,20 +26,35 @@ var CATEGORIES = [
 
 var END_LOCK = {};
 
-// ================== 工具函数 ==================
-function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V110.0] ' + msg); }
-
-// ================== 插件入口 (与V88完全一致) ==================
+// --- 入口函数 ---
 async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 110.0, title: 'Nullbr影视库 (V110)', site: API_BASE_URL, tabs: CATEGORIES }); }
-async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); } // 保持V88的空占位符状态
 
-// ================== 核心功能区 (与V88完全一致) ==================
+async function getConfig() {
+    return jsonify({
+        ver: 88.2,
+        title: 'Nullbr影视库 (V88.2)',
+        site: API_BASE_URL,
+        tabs: CATEGORIES
+    });
+}
+
+async function home() {
+    return jsonify({
+        class: CATEGORIES,
+        filters: {}
+    });
+}
+
+async function category(tid, pg, filter, ext) {
+    return jsonify({ list: [] });
+}
+
+// =======================================================================
+// --- 核心功能区 ---
+// =======================================================================
 
 // 1. 分类列表
 async function getCards(ext) {
@@ -45,7 +63,9 @@ async function getCards(ext) {
     var page = parsed.page;
     var lockKey = 'cat_' + id;
     
-    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
+    if (END_LOCK[lockKey] && page > 1) {
+        return jsonify({ list: [], page: page, pagecount: page });
+    }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
@@ -64,7 +84,9 @@ async function getCards(ext) {
             limit: cards.length,
             total: data.total_items
         });
-    } catch (err) { return handleError(err); }
+    } catch (err) {
+        return handleError(err);
+    }
 }
 
 // 2. 搜索功能
@@ -75,7 +97,9 @@ async function search(ext) {
     if (!keyword) return jsonify({ list: [] });
     var lockKey = 'search_' + keyword;
 
-    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
+    if (END_LOCK[lockKey] && page > 1) {
+        return jsonify({ list: [], page: page, pagecount: page });
+    }
     if (page === 1) { delete END_LOCK[lockKey]; }
 
     var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
@@ -94,45 +118,74 @@ async function search(ext) {
             limit: cards.length,
             total: data.total_results
         });
-    } catch (err) { return handleError(err); }
-}
-
-// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网明信片模式”的终极 getTracks 函数】★★★★★
-async function getTracks(ext) {
-    log('[getTracks] V110.0 观影网明信片版, 原始ext: ' + JSON.stringify(ext));
-    try {
-        var detailUrl = ext; // ★★★★★【在这里，我们直接把ext当成URL，因为App会把vod_id的值直接传给它！】★★★★★
-        if (!detailUrl || typeof detailUrl !== 'string') { throw new Error("传入的ext不是一个有效的URL字符串"); }
-        log('[getTracks] 解析出的请求URL: ' + detailUrl);
-        
-        var data = await fetchData(detailUrl); // data 是 {"title": "...", "tracks": [...]}
-        
-        log('[getTracks] 成功获取后端加工后的数据，准备装箱。');
-        
-        var finalResponse = {
-            list: [data] // ★★★★★【在这里，我们把后端返回的整个对象，作为数组的第一个元素，放进list里！】★★★★★
-        };
-
-        log('[getTracks] 装箱完成，最终返回的对象: ' + JSON.stringify(finalResponse));
-        return jsonify(finalResponse);
-
     } catch (err) {
-        log('[getTracks] 发生致命错误: ' + err.message);
-        return jsonify({ list: [{ title: "错误", tracks: [{ name: "加载失败: " + err.message, pan: "" }] }] });
+        return handleError(err);
     }
 }
 
+// 3. 详情页 - 智能格式转换版
+async function getTracks(ext) {
+    log('[getTracks] 开始处理详情请求');
+    
+    try {
+        // 步骤1: 解析ext获取detail_url
+        var parsedExt = parseDetailExt(ext);
+        var detailUrl = parsedExt.detail_url;
 
-// 4. detail函数 (废弃的占位符)
+        if (!detailUrl) {
+            throw new Error("无法从ext中解析出detail_url");
+        }
+
+        log('[getTracks] 请求URL: ' + detailUrl);
+        
+        // 步骤2: 请求后端
+        var data = await fetchData(detailUrl);
+        
+        // 步骤3: 智能格式转换
+        var finalData = ensureCompatibleFormat(data);
+        
+        log('[getTracks] 成功获取并处理数据');
+        return jsonify(finalData);
+
+    } catch (err) {
+        log('[getTracks] 错误: ' + err.message);
+        return jsonify({
+            list: [{
+                title: "错误",
+                tracks: [{
+                    name: "加载失败: " + err.message,
+                    pan: ""
+                }]
+            }]
+        });
+    }
+}
+
+// 4. detail函数 (兼容性支持)
 async function detail(ext) {
-    log('[detail] 此函数已被废弃，不应被调用。');
-    return jsonify({ list: [] });
+    log('[detail] 被调用,重定向到getTracks');
+    return await getTracks(ext);
 }
 
 // 5. 播放
 async function play(flag, id, flags) {
-    log('[play] 请求播放, id: ' + id);
-    return jsonify({ parse: 0, url: id });
+    log('[play] 播放URL: ' + id);
+    
+    // 如果URL包含115cdn.com,直接播放
+    if (id.indexOf('115cdn.com') !== -1) {
+        return jsonify({
+            parse: 0,
+            url: id,
+            header: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+    }
+    
+    return jsonify({
+        parse: 0,
+        url: id
+    });
 }
 
 // =======================================================================
@@ -152,19 +205,17 @@ function parseExt(ext) {
     }
 }
 
-// ★★★★★【这是唯一的、在V88基础上修改的、回归了“观影网明信片模式”的终极 formatCards 函数】★★★★★
-function formatCards(items) {
-    if (!items || !Array.isArray(items)) return [];
-    return items.map(function(item) {
-        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
-        var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
-        return {
-            vod_id: detailUrl, // ★★★★★【在这里，我们把详情页URL，直接作为字符串，赋值给vod_id！】★★★★★
-            vod_name: item.title || '未命名',
-            vod_pic: picUrl,
-            vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
-        };
-    });
+function parseDetailExt(ext) {
+    try {
+        if (typeof ext === 'string') {
+            ext = JSON.parse(ext);
+        }
+        if (ext && ext.ext) { return ext.ext; }
+        if (ext) { return ext; }
+        return {};
+    } catch (e) {
+        return {};
+    }
 }
 
 async function fetchData(url) {
@@ -172,6 +223,67 @@ async function fetchData(url) {
     var data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
     if (!data) throw new Error("后端未返回有效数据");
     return data;
+}
+
+function formatCards(items) {
+    if (!items || !Array.isArray(items)) return [];
+    return items.map(function(item) {
+        var detailUrl = API_BASE_URL + '/api/resource?type=' + item.media_type + '&tmdbid=' + item.tmdbid;
+        var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : "";
+        return {
+            vod_id: item.media_type + '_' + item.tmdbid,
+            vod_name: item.title || '未命名',
+            vod_pic: picUrl,
+            vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
+            ext: {
+                detail_url: detailUrl
+            }
+        };
+    });
+}
+
+// ★★★ 新增: 智能格式转换函数 ★★★
+function ensureCompatibleFormat(data) {
+    // 如果已经有正确的list结构,直接返回
+    if (data.list && Array.isArray(data.list)) {
+        return data;
+    }
+    
+    // 尝试从urls字段构建
+    if (data.urls && Array.isArray(data.urls) && data.urls.length > 0) {
+        return {
+            list: [{
+                title: data.source || "115网盘",
+                tracks: data.urls
+            }]
+        };
+    }
+    
+    // 尝试从parse_urls字段构建
+    if (data.parse_urls && Array.isArray(data.parse_urls) && data.parse_urls.length > 0) {
+        return {
+            list: [{
+                title: "115网盘",
+                tracks: data.parse_urls.map(function(url, index) {
+                    return {
+                        name: "资源 " + (index + 1),
+                        pan: url
+                    };
+                })
+            }]
+        };
+    }
+    
+    // 如果什么都没有,返回空资源
+    return {
+        list: [{
+            title: "无资源",
+            tracks: [{
+                name: "未找到可用资源",
+                pan: ""
+            }]
+        }]
+    };
 }
 
 function handleError(err) {
