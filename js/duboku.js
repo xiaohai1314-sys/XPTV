@@ -1,7 +1,7 @@
 /**
- * 找盘资源前端插件 - V1.7.0 (排序与清理增强 - 像素级修正版)
+ * 找盘资源前端插件 - V1.7.0 (排序与清理增强 - 最终忏悔版)
  * 变更内容：
- *  - [像素级修正] 严格恢复了 play() 函数至用户原始版本，移除画蛇添足的 "parse: 0" 字段。
+ *  - [最终忏悔修正] 严格恢复了 home() 函数至用户原始版本，确保APP能正确解析到 class 键，解决分类Tab不显示的核心问题。
  *  - [承诺] 除 search 函数和新增的 clean115Link 辅助函数外，其余所有代码，包括所有兼容接口，均与用户原始脚本完全一致，逐字符校对。
  *  - [增强] 在 search 函数中，增加115链接清理(含cdn转换)功能。
  *  - [增强] 在 search 函数中，增加按(115 > 天翼 > 阿里 > 夸克)的强制优先级排序。
@@ -224,8 +224,8 @@ async function getTracks(ext) {
 
 // --- 兼容接口 (保持不变) ---
 async function init() { return getConfig(); }
+// ★★★ 关键修正：home 函数严格恢复至你的原始版本 ★★★
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
-// ★★★ 关键修正：play 函数严格恢复至你的原始版本 ★★★
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
