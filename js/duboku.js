@@ -1,10 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.7.1 (排序与清理增强 - 最终忏悔版)
+ * 找盘资源前端插件 - V1.7.0 (增强版)
  * 变更内容：
- *  - [最终忏悔修正] 严格恢复了 home() 函数至用户原始版本，确保APP能正确解析到 class 键，解决分类Tab不显示的核心问题。
- *  - [承诺] 除 search 函数和新增的 clean115Link 辅助函数外，其余所有代码，包括所有兼容接口，均与用户原始脚本完全一致，逐字符校对。
- *  - [增强] 在 search 函数中，增加115链接清理(含cdn转换)功能。
- *  - [增强] 在 search 函数中，增加按(115 > 天翼 > 阿里 > 夸克)的强制优先级排序。
+ *  - [移植自V1.7.1] 增加115链接清理(含cdn转换)功能。
+ *  - [移植自V1.7.1] 增加按(115 > 天翼 > 阿里 > 夸克)的强制优先级排序。
+ *  - [保留V1.7.0] 保留夸克网盘内部的画质筛选与优先级排序。
  */
 
 // --- 配置区 ---
@@ -23,12 +22,25 @@ function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(e
 function jsonify(data) { return JSON.stringify(data); }
 function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http')) return path; return `<LaTex>${SITE_URL}$</LaTex>{path.startsWith('/') ? '' : '/'}${path}`; }
 
+// ★★★ 新增的115链接清理辅助函数 (移植自V1.7.1) ★★★
+function clean115Link(link) {
+    if (typeof link === 'string' && (link.includes('115.com') || link.includes('115cdn.com'))) {
+        const originalUrl = link;
+        link = link.replace('//115cdn.com/', '//115.com/');
+        link = link.replace(/[&#]+$/, ''); // 移除末尾的&或#
+        if (link !== originalUrl) {
+            log(`[115链接清理] 原始: <LaTex>${originalUrl} -> 清理后: $</LaTex>{link}`);
+        }
+    }
+    return link;
+}
+
 // --- 全局缓存 ---
 let cardsCache = {};
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V1.7.0 (夸克筛选+优先级排序) ====");
+    log("==== 插件初始化 V1.7.0 (增强版) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -37,7 +49,7 @@ async function getConfig() {
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分页】(保持不变) ★★★★★
+// ★★★★★【首页分页】(保持V1.7.0不变) ★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -82,20 +94,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★ 新增的115链接清理辅助函数 ★★★
-function clean115Link(link) {
-    if (typeof link === 'string' && (link.includes('115.com') || link.includes('115cdn.com'))) {
-        const originalUrl = link;
-        link = link.replace('//115cdn.com/', '//115.com/');
-        link = link.replace(/[&#]+$/, '');
-        if (link !== originalUrl) {
-            log(`[115链接清理] 原始: <LaTex>${originalUrl} -> 清理后: $</LaTex>{link}`);
-        }
-    }
-    return link;
-}
-
-// ★★★★★【搜索 - 唯一被增强的函数】★★★★★
+// ★★★★★【搜索 - 唯一修改的函数】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
@@ -133,7 +132,7 @@ async function search(ext) {
                 return;
             }
 
-            // 2. ★★★ 115链接清理 ★★★
+            // 2. ★★★ 115链接清理 (移植自V1.7.1) ★★★
             if (panType.includes('115')) {
                 resourceLink = clean115Link(resourceLink);
             }
@@ -148,13 +147,13 @@ async function search(ext) {
                 _quarkQuality: null // 夸克内部排序用
             };
 
-            // 3. 为夸克资源打上画质标签 (保留你原有的逻辑)
+            // 3. 为夸克资源打上画质标签 (保留V1.7.0的逻辑)
             if (panType.includes('夸克')) {
                 const qualityKeywords = ['1080P', '4K', '原盘', 'REMUX', '次世代', '杜比', 'UHD', '蓝光'];
                 const matchedKeyword = qualityKeywords.find(q => title.toUpperCase().includes(q.toUpperCase()));
                 if (!matchedKeyword) {
                     log(`[search] 夸克资源未匹配画质关键词，跳过: ${title}`);
-                    return;
+                    return; // 如果夸克资源没有画质标签，则跳过
                 }
                 card._quarkQuality = matchedKeyword;
             }
@@ -162,7 +161,7 @@ async function search(ext) {
             cards.push(card);
         });
 
-        // 4. ★★★ 排序逻辑 (整合版) ★★★
+        // 4. ★★★ 排序逻辑 (移植自V1.7.1) ★★★
         cards.sort((a, b) => {
             // 第一层：按网盘类型强制排序
             const aPanIndex = panOrder.findIndex(p => a._panType.includes(p));
@@ -174,7 +173,7 @@ async function search(ext) {
                 return effectiveAIndex - effectiveBIndex;
             }
 
-            // 第二层：如果都是夸克网盘，按画质排序 (保留你原有的逻辑)
+            // 第二层：如果都是夸克网盘，按画质排序 (保留V1.7.0的逻辑)
             if (a._panType.includes('夸克') && b._panType.includes('夸克')) {
                 const aQualityIndex = quarkQualityOrder.indexOf(a._quarkQuality);
                 const bQualityIndex = quarkQualityOrder.indexOf(b._quarkQuality);
@@ -182,10 +181,11 @@ async function search(ext) {
                     return aQualityIndex - bQualityIndex;
                 }
             }
-            return 0;
+            return 0; // 其他情况保持原始顺序
         });
 
         log(`[search] ✓ 第<LaTex>${page}页找到$</LaTex>{originalCount}个原始结果, 过滤后保留${cards.length}个`);
+        // 返回前移除内部排序用的临时字段
         return jsonify({ list: cards.map(({ _panType, _quarkQuality, ...rest }) => rest) });
 
     } catch (e) {
@@ -194,7 +194,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】(保持不变) ★★★★★
+// ★★★★★【详情页】(保持V1.7.0不变) ★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -222,10 +222,11 @@ async function getTracks(ext) {
     }
 }
 
-// --- 兼容接口 (保持不变) ---
+// --- 兼容接口 (保持V1.7.0不变) ---
 async function init() { return getConfig(); }
-// ★★★ 关键修正：home 函数严格恢复至你的原始版本 ★★★
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
 async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg || 1 }); }
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
+
+log('==== 插件加载完成 V1.7.0 (增强版) ====');
