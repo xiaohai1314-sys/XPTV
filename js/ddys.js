@@ -1,14 +1,14 @@
 /**
- * Nullbr 影视库前端插件 - V79.1 (纯粹115最终版)
+ * Nullbr 影视库前端插件 - V85.0 (观影网终极模仿版)
  *
  * 变更日志:
- * - V79.0 (2025-11-17):
- *   - [终极思想] 接受用户最终指正，回归V77成功通信的基础，并修正其数据处理逻辑。
+ * - V85.0 (2025-11-17):
+ *   - [终极思想] 接受用户最终指正，getTracks的返回结构必须100%模仿“观影网”的成功范例。
  *   - [重写getTracks] getTracks函数现在：
- *     1. (接力) 从ext中获取影片自身信息。
- *     2. (动态) 请求后端获取网盘JSON。
- *     3. (纯粹处理) 只检查data['115']，如果存在且非空，则组装播放列表；否则，返回明确的无资源提示。
- *     4. (结合) 将影片信息与唯一的115播放列表，组合成最终的详情页UI。
+ *     1. (架构不变) 继承V77的正确通信架构。
+ *     2. (结构革命) 不再返回包含vod_name, vod_pic的详情对象。
+ *     3. (精确模仿) 只返回一个包含`list`键的对象，`list`是一个数组，数组成员是`{ title: "播放源名", tracks: [...] }`格式。
+ *     4. (细节精确) `tracks`数组中的每个对象，其`name`字段由`item.title`和`item.size`精确构成。
  *   - 这是对我们所有探索的最终总结，是我们回归正确道路的唯一宣言。
  *
  * 作者: Manus (由用户最终修正)
@@ -19,7 +19,7 @@ var API_BASE_URL = 'http://192.168.10.105:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V79.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V85.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -35,7 +35,7 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 79.0, title: 'Nullbr影视库 (V79)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 85.0, title: 'Nullbr影视库 (V85)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
@@ -102,17 +102,14 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 (★★★ 终极核心：只认115，但健壮处理 ★★★)
+// 3. 详情页 (★★★ 终极核心：100%模仿“观影网”返回结构 ★★★)
 async function getTracks(ext) {
-    log('[getTracks] 纯粹115最终版, 原始ext: ' + JSON.stringify(ext));
+    log('[getTracks] 观影网终极模仿版, 原始ext: ' + JSON.stringify(ext));
     
     try {
         // 步骤1 (接力): 获取影片自身信息
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
-        var vodName = parsedExt.vod_name || '加载中...';
-        var vodPic = parsedExt.vod_pic || '';
-        var vodContent = parsedExt.vod_content || '加载中...';
 
         if (!detailUrl) {
             throw new Error("无法从ext中解析出detail_url");
@@ -123,45 +120,55 @@ async function getTracks(ext) {
         // 步骤2 (动态): 获取网盘JSON
         var data = await fetchData(detailUrl);
         
-        // 步骤3 (终极核心：只认115，但正确处理)
+        // 步骤3 (终极核心：构造“观影网”模式的返回结构)
         var resources = data['115'];
-        var vod_play_url;
+        var tracks = [];
 
         if (resources && Array.isArray(resources) && resources.length > 0) {
             // 如果存在且非空，则组装播放列表
-            var playUrlItems = [];
             for (var i = 0; i < resources.length; i++) {
                 var item = resources[i];
-                var name = item.title + ' [' + (item.size || '未知大小') + ']';
-                var link = item.share_link;
-                playUrlItems.push(name + '$' + link);
+                // 精确构造按钮名称
+                var name = item.title;
+                if (item.size) {
+                    name += ' [' + item.size + ']';
+                }
+                // 精确构造track对象
+                tracks.push({
+                    name: name,
+                    pan: item.share_link
+                });
             }
-            vod_play_url = playUrlItems.join('#');
+            // 返回包含一个播放源分组的list
+            return jsonify({
+                list: [{
+                    title: "115网盘",
+                    tracks: tracks
+                }]
+            });
         } else {
-            // 如果不存在或为空，返回明确的无资源提示
-            vod_play_url = "未找到115网盘链接";
+            // 如果不存在或为空，返回一个明确的无资源提示
+            return jsonify({
+                list: [{
+                    title: "无资源",
+                    tracks: [{
+                        name: "未找到115网盘链接",
+                        pan: ""
+                    }]
+                }]
+            });
         }
-        
-        // 步骤4 (结合): 将影片信息与唯一的115播放列表组合
-        return jsonify({
-            list: [{
-                vod_name: vodName,
-                vod_pic: vodPic,
-                vod_content: vodContent,
-                vod_play_from: "115网盘",
-                vod_play_url: vod_play_url
-            }]
-        });
 
     } catch (err) {
         log('[getTracks] 发生致命错误: ' + err.message);
+        // 发生错误时，也返回一个符合结构的错误提示
         return jsonify({
             list: [{
-                vod_name: "加载失败",
-                vod_pic: "",
-                vod_content: "错误信息: " + err.message,
-                vod_play_from: "错误",
-                vod_play_url: "加载失败$"
+                title: "错误",
+                tracks: [{
+                    name: "加载失败: " + err.message,
+                    pan: ""
+                }]
             }]
         });
     }
@@ -227,10 +234,7 @@ function formatCards(items) {
             vod_pic: picUrl,
             vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''),
             ext: {
-                detail_url: detailUrl,
-                vod_name: item.title || '未命名',
-                vod_pic: picUrl,
-                vod_content: item.overview || '暂无简介'
+                detail_url: detailUrl
             }
         };
     });
