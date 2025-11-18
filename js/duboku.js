@@ -1,9 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.7.2 (115+天翼专版)
+ * 找盘资源前端插件 - V1.7.1 (仅保留 115 + 天翼)
  * 变更内容：
- *  - 分类列表恢复
- *  - 搜索结果仅保留 115 和 天翼
- *  - 去掉夸克/百度/迅雷/阿里/UC资源
+ *  - 删除夸克筛选与排序
+ *  - 删除夸克、百度、迅雷、阿里、UC等所有网盘
+ *  - 搜索结果仅保留 115 网盘 + 天翼网盘
  */
 
 // --- 配置区 ---
@@ -14,6 +14,7 @@ const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
 const PAGE_SIZE = 12;
+const SEARCH_PAGE_SIZE = 30;
 
 // --- 辅助函数 ---
 function log(msg) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
@@ -24,9 +25,10 @@ function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.start
 // --- 全局缓存 ---
 let cardsCache = {};
 
-// ★★★★★【插件初始化】★★★★★
+
+// ★★★★★【初始化】★★★★★
 async function getConfig() {
-    log("==== 插件初始化 V1.7.2 (115+天翼专版) ====");
+    log("==== 插件初始化 V1.7.1 (仅115+天翼) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -35,7 +37,9 @@ async function getConfig() {
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分类分页】★★★★★
+
+
+// ★★★★★【首页分页 - 原样保留】★★★★★
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -80,7 +84,9 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【搜索】★★★★★
+
+
+// ★★★★★【搜索：只保留 115 + 天翼】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const text = ext.text || '';
@@ -95,7 +101,6 @@ async function search(ext) {
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
         const $ = cheerio.load(data);
-
         const cards = [];
         let originalCount = 0;
 
@@ -103,21 +108,15 @@ async function search(ext) {
             originalCount++;
 
             const link = $(item);
-            const resourceLink = link.attr("href");
-            const title = link.find("h2").text().trim();
-            if (!resourceLink || !title) return;
+            const resourceLink = link.attr('href');
+            const title = link.find('h2').text().trim();
+            const panType = link.find('span.text-success').text().trim() || '未知';
 
-            // 网盘类型提取
-            let panType = link.find(".badge, .btn-sm").first().text().trim();
-
-            // 兜底判断标题里
-            if (!panType) {
-                if (/天翼|189/.test(title)) panType = "天翼";
-                else if (/115/.test(title)) panType = "115";
+            // ★★★ 只保留 115 和 天翼 ★★★
+            if (!panType.includes("115") && !panType.includes("天翼")) {
+                log(`[search] ❌ 过滤非115/天翼: ${panType} - ${title}`);
+                return;
             }
-
-            // 只保留 115 + 天翼
-            if (!(panType.includes("115") || panType.includes("天翼"))) return;
 
             cards.push({
                 vod_id: resourceLink,
@@ -138,7 +137,9 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页 getTracks】★★★★★
+
+
+// ★★★★★【详情页】(保持不变)★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -176,6 +177,8 @@ async function getTracks(ext) {
     }
 }
 
+
+
 // --- 兼容接口 ---
 async function init() { return getConfig(); }
 async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
@@ -183,4 +186,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V1.7.2 (115+天翼专版) ====');
+log('==== 插件加载完成 V1.7.1 (仅115+天翼) ====');
