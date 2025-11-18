@@ -1,9 +1,9 @@
 /**
- * 找盘资源前端插件 - V1.9.0 (仅保留天翼+115，移除所有筛选和排序)
+ * 找盘资源前端插件 - V2.0.0 (仅保留天翼+115，确保搜索功能稳定)
  * 变更内容：
- * - 移除 V1.7.0 的夸克画质筛选和优先级排序逻辑。
+ * - 移除 V1.7.0 的所有夸克筛选和优先级排序逻辑。
  * - 搜索结果严格只保留：天翼网盘、115网盘。
- * - 恢复了对 Cheerio 选择器的原始依赖，确保健壮性。
+ * - 保持其他函数（如 getCards）与原始 V1.7.0 脚本完全一致，以确保稳定性。
  */
 
 // --- 配置区 ---
@@ -27,7 +27,7 @@ let cardsCache = {};
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V1.9.0 (仅保留天翼+115) ====");
+    log("==== 插件初始化 V2.0.0 (仅保留天翼+115) ====");
     const CUSTOM_CATEGORIES = [
         { name: '电影', ext: { id: '电影' } },
         { name: '电视剧', ext: { id: '电视剧' } },
@@ -110,6 +110,7 @@ async function search(ext) {
             const panType = linkElement.find('span.text-success').text().trim() || '未知';
 
             // --- 核心筛选逻辑：只保留天翼和115 ---
+            // 只要网盘类型包含 '天翼' 或 '115'，就保留
             const isTargetPan = panType.includes('天翼') || panType.includes('115');
 
             if (isTargetPan) {
@@ -123,13 +124,12 @@ async function search(ext) {
                     });
                 }
             }
-            // 否则，所有其他网盘（夸克、阿里、百度、迅雷等）都被过滤掉。
+            // 所有其他网盘（夸克、阿里、百度、迅雷等）将被跳过
         });
         
-        // 移除排序逻辑 (排序是针对夸克的，现已不再需要)
+        // 删除了原始的夸克排序逻辑
 
         log(`[search] ✓ 第${page}页找到${originalCount}个原始结果, 过滤后保留${cards.length}个`);
-        // 注意：这里返回的 cards 是一个普通数组，不需要再 map。
         return jsonify({ list: cards }); 
 
     } catch (e) {
@@ -138,7 +138,7 @@ async function search(ext) {
     }
 }
 
-// ★★★★★【详情页】(V1.8.2 优化逻辑 - 保持不变) ★★★★★
+// ★★★★★【详情页】(V1.8.2 优化逻辑 - 保留) ★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -180,4 +180,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { log(`[detail] 详情ID: ${id}`); return getTracks({ url: id }); }
 async function play(flag, id) { log(`[play] 直接播放: ${id}`); return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V1.9.0 ====');
+log('==== 插件加载完成 V2.0.0 ====');
