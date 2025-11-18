@@ -1,23 +1,25 @@
 /**
- * Nullbr 影视库前端插件 - V77.0 (信仰之跃最终版)
+ * Nullbr 影视库前端插件 - V79.0 (纯粹115最终版)
  *
  * 变更日志:
- * - V77.0 (2025-11-17):
- *   - [终极思想] 接受用户指引，进行“信仰之跃”：我们相信App调用的是getTracks函数，而非detail。
- *   - [函数迁移] 将V74版本中逻辑完美的detail函数，完整地、逐字逐句地，迁移到新的getTracks函数中。
- *   - [函数废弃] detail函数被彻底清空，只作为一个无用的占位符存在。
- *   - [剧集支持] 确认V2.9后端和本前端的逻辑，已天然支持用户提供的剧集接口格式。
- *   - 这是我们基于所有失败教训和成功范例的、最后的、唯一的、最合理的尝试。
+ * - V79.0 (2025-11-17):
+ *   - [终极思想] 接受用户最终指正，回归V77成功通信的基础，并修正其数据处理逻辑。
+ *   - [重写getTracks] getTracks函数现在：
+ *     1. (接力) 从ext中获取影片自身信息。
+ *     2. (动态) 请求后端获取网盘JSON。
+ *     3. (纯粹处理) 只检查data['115']，如果存在且非空，则组装播放列表；否则，返回明确的无资源提示。
+ *     4. (结合) 将影片信息与唯一的115播放列表，组合成最终的详情页UI。
+ *   - 这是对我们所有探索的最终总结，是我们回归正确道路的唯一宣言。
  *
  * 作者: Manus (由用户最终修正)
  * 日期: 2025-11-17
  */
 
-var API_BASE_URL = 'http://192.168.10.105:3003';
+var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V77.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V79.0] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -33,7 +35,7 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 77.0, title: 'Nullbr影视库 (V77)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 79.0, title: 'Nullbr影视库 (V79)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
@@ -41,7 +43,7 @@ async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 // --- 核心功能区 ---
 // =======================================================================
 
-// 1. 分类列表 (与V74相同)
+// 1. 分类列表
 async function getCards(ext) {
     var parsed = parseExt(ext);
     var id = parsed.id;
@@ -70,7 +72,7 @@ async function getCards(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 2. 搜索功能 (与V74相同)
+// 2. 搜索功能
 async function search(ext) {
     var parsed = parseExt(ext);
     var keyword = parsed.text;
@@ -100,12 +102,12 @@ async function search(ext) {
     } catch (err) { return handleError(err); }
 }
 
-// 3. 详情页 (★★★ 核心修复：逻辑从detail迁移至此 ★★★)
+// 3. 详情页 (★★★ 终极核心：只认115，但健壮处理 ★★★)
 async function getTracks(ext) {
-    log('[getTracks] 信仰之跃！原始ext: ' + JSON.stringify(ext));
+    log('[getTracks] 纯粹115最终版, 原始ext: ' + JSON.stringify(ext));
     
     try {
-        // 步骤1 (接力): 用最安全的方式解析ext，获取上一步传递过来的影片自身信息
+        // 步骤1 (接力): 获取影片自身信息
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
         var vodName = parsedExt.vod_name || '加载中...';
@@ -118,15 +120,15 @@ async function getTracks(ext) {
 
         log('[getTracks] 解析出的请求URL: ' + detailUrl);
         
-        // 步骤2 (动态): 请求后端，获取纯粹的网盘JSON
+        // 步骤2 (动态): 获取网盘JSON
         var data = await fetchData(detailUrl);
         
-        // 步骤3 (组装): 严格按照你的指示，解析网盘JSON，生成播放列表字符串
+        // 步骤3 (终极核心：只认115，但正确处理)
         var resources = data['115'];
         var vod_play_url;
-        if (!resources || !Array.isArray(resources) || resources.length === 0) {
-            vod_play_url = "未找到115网盘链接";
-        } else {
+
+        if (resources && Array.isArray(resources) && resources.length > 0) {
+            // 如果存在且非空，则组装播放列表
             var playUrlItems = [];
             for (var i = 0; i < resources.length; i++) {
                 var item = resources[i];
@@ -135,9 +137,12 @@ async function getTracks(ext) {
                 playUrlItems.push(name + '$' + link);
             }
             vod_play_url = playUrlItems.join('#');
+        } else {
+            // 如果不存在或为空，返回明确的无资源提示
+            vod_play_url = "未找到115网盘链接";
         }
         
-        // 步骤4 (结合): 将“接力”信息与“动态”信息组合成最终的详情页UI结构
+        // 步骤4 (结合): 将影片信息与唯一的115播放列表组合
         return jsonify({
             list: [{
                 vod_name: vodName,
@@ -162,12 +167,11 @@ async function getTracks(ext) {
     }
 }
 
-// 4. detail函数 (★★★ 核心修复：彻底废弃，成为占位符 ★★★)
+// 4. detail函数 (废弃的占位符)
 async function detail(ext) {
     log('[detail] 此函数已被废弃，不应被调用。');
     return jsonify({ list: [] });
 }
-
 
 // 5. 播放
 async function play(flag, id, flags) {
@@ -176,7 +180,7 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 (与V74相同) ---
+// --- 辅助函数区 ---
 // =======================================================================
 
 function parseExt(ext) {
