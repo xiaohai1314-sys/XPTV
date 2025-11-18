@@ -11,7 +11,7 @@
 // ★ 后端不再需要cheerio
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 // ★ 指向你的后端服务器地址
-const BACKEND_URL = 'http://192.168.10.105:5000'; 
+const BACKEND_URL = 'http://192.168.1.3:5000'; 
 
 const appConfig = {
     ver: 18.0,
