@@ -12,7 +12,7 @@
  * 日期: 2025-11-18
  */
 
-var API_BASE_URL = 'http://192.168.1.7:3003'; // 保持不变 ，指向你的后端服务
+var API_BASE_URL = 'http://192.168.10.102:3003'; // 保持不变 ，指向你的后端服务
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
