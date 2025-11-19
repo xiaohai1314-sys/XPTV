@@ -1,9 +1,10 @@
 /**
- * 找盘资源前端插件 - V4.1 (WebSocket轮询修复版)
+ * 找盘资源前端插件 - V4.2 (WebSocket轮询修复版 - 真正完整版)
  * 核心功能：
  *  1. 修复了V4.0中因无法主动刷新UI导致内容不显示的问题。
  *  2. search函数在首次请求时会等待初步结果，确保能返回数据。
  *  3. 依然通过WebSocket接收后续数据和状态，实现分阶段加载。
+ *  4. 修正了因代码不完整导致的首页空白和搜索不通的bug。
  */
 
 // --- 配置区 ---
@@ -35,32 +36,83 @@ async function getConfig() {
 }
 
 // 【首页分页】
-async function getCards(ext) { /* 与 V4.0 版本完全相同 */ }
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { id: categoryName, page = 1 } = ext;
+    const url = SITE_URL;
+    try {
+        const cacheKey = `category_${categoryName}`;
+        let allCards = cardsCache[cacheKey];
+        if (!allCards) {
+            const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+            const $ = cheerio.load(data);
+            allCards = [];
+            const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
+            if (categorySpan.length === 0) return jsonify({ list: [] });
+            let rowDiv = categorySpan.closest('div.d-flex').parent().next('div.row');
+            if (rowDiv.length === 0) rowDiv = categorySpan.closest('div.d-flex').next('div.row');
+            if (rowDiv.length === 0) return jsonify({ list: [] });
+            rowDiv.find('a.col-4').each((_, item) => {
+                const linkElement = $(item);
+                allCards.push({
+                    vod_id: linkElement.attr('href') || "",
+                    vod_name: linkElement.find('h2').text().trim() || "",
+                    vod_pic: getCorrectPicUrl(linkElement.find('img.lozad').attr('data-src')),
+                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                    ext: { url: linkElement.attr('href') || "" }
+                });
+            });
+            cardsCache[cacheKey] = allCards;
+        }
+        const startIdx = (page - 1) * PAGE_SIZE;
+        const endIdx = startIdx + PAGE_SIZE;
+        const pageCards = allCards.slice(startIdx, endIdx);
+        return jsonify({ list: pageCards });
+    } catch (e) {
+        log(`[首页加载失败] ${e.message}`);
+        return jsonify({ list: [] });
+    }
+}
 
 // 【WebSocket 管理】
 function setupWebSocket(clientId) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+    }
+    
     const wsUrl = `ws://${API_ENDPOINT.split('/')[2]}/?clientId=${clientId}`;
     log(`[WSS] 准备连接到: ${wsUrl}`);
     ws = new WebSocket(wsUrl);
+
     ws.onopen = () => { log(`[WSS] WebSocket 已连接。`); };
     ws.onclose = () => { log(`[WSS] WebSocket 已断开。`); };
     ws.onerror = (err) => { log(`[WSS] 发生错误: ${err ? err.message : 'Unknown error'}`); };
+
     ws.onmessage = (event) => {
         try {
             const message = JSON.parse(event.data);
             log(`[WSS] 收到消息: ${message.event}`);
-            if (!searchSession || searchSession.clientId !== clientId) return;
+
+            if (!searchSession || searchSession.clientId !== clientId) {
+                log(`[WSS] 忽略来自旧会话的消息。`);
+                return;
+            }
+
             if (message.event === 'initial_results') {
                 searchSession.initialList = message.list || [];
                 searchSession.initialLoaded = true;
+                log(`[WSS] 已接收并存储 ${searchSession.initialList.length} 条初步结果。`);
             } else if (message.event === 'unlock_pagination') {
                 searchSession.hasMore = true;
+                log(`[WSS] 收到解锁信号，确认有更多数据。`);
             } else if (message.event === 'quark_completed') {
                 searchSession.quarkList = message.list || [];
                 searchSession.quarkLoaded = true;
+                log(`[WSS] 已接收并存储 ${searchSession.quarkList.length} 条夸克结果。`);
             }
-        } catch (e) { log(`[WSS] 解析消息失败: ${e.message}`); }
+        } catch (e) {
+            log(`[WSS] 解析消息失败: ${e.message}`);
+        }
     };
 }
 
@@ -101,7 +153,7 @@ async function search(ext) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 if (!searchSession.initialLoaded) {
-                    log(`[Search] 等待初步结果超时。`);
+                    log(`[Search] 等待初步结果超时，可能无快速网盘结果。`);
                 }
                 
             } else { throw new Error('Failed to initiate search stream.'); }
@@ -113,6 +165,7 @@ async function search(ext) {
 
     // --- 合并与分页逻辑 (对所有页码都适用) ---
     if (!searchSession.clientId) {
+        log(`[Search] 错误：没有活动的搜索会话。`);
         return jsonify({ list: [], page: 1, pagecount: 1, hasmore: false });
     }
 
@@ -139,7 +192,7 @@ async function search(ext) {
     
     const hasMore = page < totalPageCount || !searchSession.quarkLoaded;
 
-    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, hasmore=${hasMore}`);
+    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, 总计 ${totalCount} 条, 总页数 ${totalPageCount}, hasmore=${hasMore}`);
     return jsonify({
         list: pageList,
         page: page,
@@ -149,7 +202,31 @@ async function search(ext) {
 }
 
 // 【详情页】
-async function getTracks(ext) { /* 与 V4.0 版本完全相同 */ }
+async function getTracks(ext) {
+    ext = argsify(ext);
+    const { url } = ext;
+    if (!url) return jsonify({ list: [] });
+    const middleUrl = getCorrectPicUrl(url);
+    try {
+        // ★★★ 关键修复：确保使用正确的API地址 ★★★
+        const apiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(middleUrl)}`;
+        // ★★★ 关键修复：确保使用 await 等待异步结果 ★★★
+        const response = await $fetch.get(apiUrl);
+        const result = JSON.parse(response.data);
+        if (result.success && result.real_url) {
+            let panName = '网盘链接';
+            if (result.real_url.includes('quark')) panName = '夸克网盘';
+            else if (result.real_url.includes('baidu')) panName = '百度网盘';
+            else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
+            return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: result.real_url, ext: {} }] }] });
+        } else {
+            throw new Error(result.error || 'API error');
+        }
+    } catch (e) {
+        log(`[详情页解析失败] ${e.message}`);
+        return jsonify({ list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }] });
+    }
+}
 
 // --- 兼容接口 ---
 async function init() { return getConfig(); }
@@ -158,4 +235,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V4.1 (WebSocket轮询修复版) ====');
+log('==== 插件加载完成 V4.1 (WebSocket轮询修复版 - 真正完整版) ====');
