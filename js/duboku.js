@@ -1,5 +1,5 @@
 /**
- * 找盘资源前端插件 - V-Final-V2.5 (渐进式加载最终版)
+ * 找盘资源前端插件 - V-Final-V2.6 (渐进式加载最终版)
  * 核心功能：
  *  1. 实现分阶段渐进式加载，首次搜索极速响应。
  *  2. 前端驱动，按需请求夸克等后续资源。
@@ -34,44 +34,6 @@ async function getConfig() {
 }
 
 // ★★★★★【首页分页】★★★★★
-async function getCards(ext) {
-    ext = argsify(ext);
-    const { id: categoryName, page = 1 } = ext;
-    const url = SITE_URL;
-    try {
-        const cacheKey = `category_${categoryName}`;
-        let allCards = cardsCache[cacheKey];
-        if (!allCards) {
-            const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
-            const $ = cheerio.load(data);
-            allCards = [];
-            const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
-            if (categorySpan.length === 0) return jsonify({ list: [] });
-            let rowDiv = categorySpan.closest('div.d-flex').parent().next('div.row');
-            if (rowDiv.length === 0) rowDiv = categorySpan.closest('div.d-flex').next('div.row');
-            if (rowDiv.length === 0) return jsonify({ list: [] });
-            rowDiv.find('a.col-4').each((_, item) => {
-                const linkElement = $(item);
-                allCards.push({
-                    vod_id: linkElement.attr('href') || "",
-                    vod_name: linkElement.find('h2').text().trim() || "",
-                    vod_pic: getCorrectPicUrl(linkElement.find('img.lozad').attr('data-src')),
-                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                    ext: { url: linkElement.attr('href') || "" }
-                });
-            });
-            cardsCache[cacheKey] = allCards;
-        }
-        const startIdx = (page - 1) * PAGE_SIZE;
-        const endIdx = startIdx + PAGE_SIZE;
-        const pageCards = allCards.slice(startIdx, endIdx);
-        return jsonify({ list: pageCards });
-    } catch (e) {
-        return jsonify({ list: [] });
-    }
-}
-
-// ★★★★★【搜索 - 渐进式加载总控制器】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -79,24 +41,20 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // 如果是新的搜索词 (page=1)，或关键词变化，则重置会话
     if (page === 1 || !searchSession.keyword || searchSession.keyword !== keyword) {
         log(`[Search] 新的搜索开始，关键词: "${keyword}"`);
         searchSession = {
             keyword: keyword,
-            stage: 1, // 1: 初始阶段, 2: 夸克阶段
+            stage: 1,
             stage1Results: [],
             stage2Results: [],
             stage1Loaded: false,
             stage2Loaded: false,
-            pageCount: 1,
         };
     }
 
-    log(`[Search] 当前会话: page=${page}, stage=${searchSession.stage}`);
     const baseUrl = API_ENDPOINT.substring(0, API_ENDPOINT.indexOf('/api/'));
 
-    // --- 阶段 1: 加载高优先级资源 (115, 天翼, 阿里) ---
     if (!searchSession.stage1Loaded) {
         log(`[Search] 请求阶段1 (高优) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=1`;
@@ -111,12 +69,14 @@ async function search(ext) {
             log(`[Search] ❌ 阶段1请求失败: ${e.message}`);
         }
         searchSession.stage1Loaded = true;
-        searchSession.stage = 2; // 准备进入下一阶段
     }
 
-    // --- 判断是否需要加载阶段2 (夸克) ---
-    const stage1PageCount = Math.ceil(searchSession.stage1Results.length / SEARCH_PAGE_SIZE);
-    // 当用户请求的页码超出了阶段1能提供的范围，且阶段2尚未加载时，触发加载
+    // ★★★★★【核心修改开始】★★★★★
+    // 将合并与分页的逻辑提前，并进行整合
+    let combinedList = [...searchSession.stage1Results];
+    let stage1PageCount = Math.ceil(combinedList.length / SEARCH_PAGE_SIZE) || 1;
+
+    // 当需要加载更多页，并且 stage2 尚未加载时，触发加载
     if (page > stage1PageCount && !searchSession.stage2Loaded) {
         log(`[Search] 翻页触发，请求阶段2 (夸克) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=2`;
@@ -132,9 +92,10 @@ async function search(ext) {
         }
         searchSession.stage2Loaded = true;
     }
-
-    // --- 合并与分页 ---
-    const combinedList = [...searchSession.stage1Results, ...searchSession.stage2Results];
+    
+    // 无论何时，都使用当前所有已加载的数据进行合并
+    combinedList = [...searchSession.stage1Results, ...searchSession.stage2Results];
+    
     const totalCount = combinedList.length;
     const totalPageCount = Math.ceil(totalCount / SEARCH_PAGE_SIZE) || 1;
 
