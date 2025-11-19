@@ -9,7 +9,7 @@
  */
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://192.168.1.3:3004"; // 【重要】只保留基础URL
+const API_ENDPOINT = "http://192.168.10.102:3004"; // 【重要】只保留基础URL
 const SITE_URL = "https://v2pan.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
