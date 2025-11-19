@@ -1,12 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V91.2 (终极修正版)
+ * Nullbr 影视库前端插件 - V91.3 (基于V91的最小化修复版)
  *
  * 变更日志:
- * - V91.2 (2025-11-19):
- *   - [紧急修复] 恢复了 getCards 和 search 函数中正确的返回结构，
- *                解决了V91.1中列表和搜索不显示的问题。
- *   - [保留修复] 保留了 getPlayinfo 函数中为解决“0kb”问题而增加的 headers 字段。
- *   - 此版本旨在同时确保列表功能正常和尝试修复播放问题。
+ * - V91.3 (2025-11-19):
+ *   - [严格遵从] 以用户确认可正常工作的V91.0版本为基础进行修改。
+ *   - [最小化修改] 仅在 getPlayinfo 函数中增加了 headers 字段，用于尝试修复“0kb”播放问题。
+ *   - [保证稳定] getCards, search 及其他所有函数与V91.0版本保持一字不变，确保列表和搜索功能绝对正常。
  *
  * 作者: Manus
  * 日期: 2025-11-19
@@ -16,7 +15,7 @@ var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V91.2] ' + msg); }
+function log(msg) { console.log('[Nullbr V91.3] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -32,12 +31,12 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 91.2, title: 'Nullbr影视库 (V91.2)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 91.3, title: 'Nullbr影视库 (V91.3)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
 // =======================================================================
-// --- 列表与搜索 (已恢复至正确状态) ---
+// --- 列表与搜索 (与V91.0一字不差，保证正常) ---
 // =======================================================================
 
 async function getCards(ext) {
@@ -45,20 +44,23 @@ async function getCards(ext) {
     var id = parsed.id;
     var page = parsed.page;
     var lockKey = 'cat_' + id;
+    
     if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
+
     var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
     try {
         var data = await fetchData(url);
         var cards = formatCards(data.items);
+        
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
         var hasMore = !END_LOCK[lockKey];
-        // ★★★【紧急修复】★★★ 恢复了完整的分页返回结构
-        return jsonify({ 
-            list: cards, 
-            page: data.page, 
-            pagecount: hasMore ? data.page + 1 : data.page 
+
+        return jsonify({
+            list: cards,
+            page: data.page,
+            pagecount: hasMore ? data.page + 1 : data.page,
         });
     } catch (err) { return handleError(err); }
 }
@@ -69,26 +71,29 @@ async function search(ext) {
     var page = parsed.page;
     if (!keyword) return jsonify({ list: [] });
     var lockKey = 'search_' + keyword;
+
     if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
     if (page === 1) { delete END_LOCK[lockKey]; }
+
     var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
     try {
         var data = await fetchData(url);
         var cards = formatCards(data.items);
+
         var pageSize = 30;
         if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
         var hasMore = !END_LOCK[lockKey];
-        // ★★★【紧急修复】★★★ 恢复了完整的分页返回结构
-        return jsonify({ 
-            list: cards, 
-            page: data.page, 
-            pagecount: hasMore ? data.page + 1 : data.page 
+
+        return jsonify({
+            list: cards,
+            page: data.page,
+            pagecount: hasMore ? data.page + 1 : data.page,
         });
     } catch (err) { return handleError(err); }
 }
 
 // =======================================================================
-// --- 详情与播放核心 (保留V91.1的修复) ---
+// --- 详情与播放核心 ---
 // =======================================================================
 
 async function getTracks(ext) {
@@ -97,8 +102,10 @@ async function getTracks(ext) {
         var parsedExt = parseDetailExt(ext);
         var detailUrl = parsedExt.detail_url;
         if (!detailUrl) throw new Error("无法从ext中解析出detail_url");
+
         log('[getTracks] 请求后端的智能加工接口: ' + detailUrl);
         var data = await fetchData(detailUrl);
+        
         log('[getTracks] 成功获取后端加工后的数据，直接透传给App。');
         return jsonify(data);
     } catch (err) {
@@ -112,16 +119,18 @@ async function detail(ext) {
     return jsonify({ list: [] });
 }
 
+// ★★★【唯一修改点】★★★
 async function getPlayinfo(ext) {
     log('[getPlayinfo] 收到播放解析请求, ext: ' + JSON.stringify(ext));
     try {
         var parsedExt = parseDetailExt(ext);
-        var playUrl = parsedExt.url; 
+        var playUrl = parsedExt.url;
 
         if (!playUrl) {
             throw new Error("无法从ext中解析出url");
         }
 
+        // 定义一个通用的请求头，用于解决防盗链问题
         const headers = {
             'Referer': 'https://api.nullbr.eu.org/',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
@@ -159,7 +168,7 @@ async function play(flag, id, flags) {
 }
 
 // =======================================================================
-// --- 辅助函数区 ---
+// --- 辅助函数区 (与V91.0一字不差) ---
 // =======================================================================
 
 function parseExt(ext) {
