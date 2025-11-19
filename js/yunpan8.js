@@ -6,13 +6,13 @@
  * - 增强：在 purify 函数中加入“符号藏码”特例解析逻辑。
  */
 
-const SITE_URL = "https://www.hmxz.org";
+const SITE_URL = "https://www.haimianxz.com";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
-const FALLBACK_PIC = "https://www.hmxz.org/view/img/logo.png";
+const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=v7bm1kesngc0aovt0rgii4hibr;bbs_token=uFjSOW6anVYBjfFXr_2BQciy6ZUuVusl6c2MgezDNhWtewf6HG;";
+const COOKIE = "bbs_sid=ssi4qit28fqdoksi651al5p196;bbs_token=EnvXd9CmLAoiJHlhbE8IB6nVuOX6_2FqDf2vPXemf8Ao7c7MJH;";
 // 请将下面的YOUR_COMPUTER_IP:3000替换为您电脑的IP地址和端口（例如: http://192.168.1.7:3000/process-thread）
 const YOUR_API_ENDPOINT = "http://192.168.1.7:3000/process-thread"; 
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // 替换为您的 API Key
