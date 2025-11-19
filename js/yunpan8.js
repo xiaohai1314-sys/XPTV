@@ -6,7 +6,7 @@
  * - 增强：在 purify 函数中加入“符号藏码”特例解析逻辑。
  */
 
-const SITE_URL = "https://www.haimianxz.com";
+const SITE_URL = "https://www.hmxz.org";
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.hmxz.org/view/img/logo.png";
