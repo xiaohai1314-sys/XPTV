@@ -1,25 +1,23 @@
 /**
- * 找盘资源前端插件 - V4.2 (WebSocket轮询修复版 - 真正完整版)
+ * 找盘资源前端插件 - V3.1 (纯分页 & 解锁版)
  * 核心功能：
- *  1. 修复了V4.0中因无法主动刷新UI导致内容不显示的问题。
- *  2. search函数在首次请求时会等待初步结果，确保能返回数据。
- *  3. 依然通过WebSocket接收后续数据和状态，实现分阶段加载。
- *  4. 修正了因代码不完整导致的首页空白和搜索不通的bug。
+ *  1. 配合 V3.1 后端，一次性获取所有数据。
+ *  2. 只负责对获取到的完整列表进行纯前端分页。
+ *  3. 通过返回正确的 pagecount 和 hasmore 标志，配合APP机制解决分页锁。
  */
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://192.168.1.7:3004/api/get_real_url";
+const API_ENDPOINT = "http://192.168.1.7:3004/api/get_real_url"; // <-- 请务必修改为您的后端服务器地址
 const SITE_URL = "https://v2pan.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64   ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
-const PAGE_SIZE = 12;
-const SEARCH_PAGE_SIZE = 30;
+const PAGE_SIZE = 12; // 首页分页大小
+const SEARCH_PAGE_SIZE = 30; // 搜索结果分页大小
 
 // --- 全局状态 ---
-let searchSession = {};
-let ws = null;
+let searchCache = {}; // 用于缓存一次完整的搜索结果
 let cardsCache = {};
 
 // --- 辅助函数 ---
@@ -30,7 +28,7 @@ function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.start
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V4.1 (WebSocket轮询修复版) ====");
+    log("==== 插件初始化 V3.1 (纯分页 & 解锁版) ====");
     const CUSTOM_CATEGORIES = [ { name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } } ];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
@@ -54,13 +52,7 @@ async function getCards(ext) {
             if (rowDiv.length === 0) return jsonify({ list: [] });
             rowDiv.find('a.col-4').each((_, item) => {
                 const linkElement = $(item);
-                allCards.push({
-                    vod_id: linkElement.attr('href') || "",
-                    vod_name: linkElement.find('h2').text().trim() || "",
-                    vod_pic: getCorrectPicUrl(linkElement.find('img.lozad').attr('data-src')),
-                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
-                    ext: { url: linkElement.attr('href') || "" }
-                });
+                allCards.push({ vod_id: linkElement.attr('href') || "", vod_name: linkElement.find('h2').text().trim() || "", vod_pic: getCorrectPicUrl(linkElement.find('img.lozad').attr('data-src')), vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "", ext: { url: linkElement.attr('href') || "" } });
             });
             cardsCache[cacheKey] = allCards;
         }
@@ -68,55 +60,10 @@ async function getCards(ext) {
         const endIdx = startIdx + PAGE_SIZE;
         const pageCards = allCards.slice(startIdx, endIdx);
         return jsonify({ list: pageCards });
-    } catch (e) {
-        log(`[首页加载失败] ${e.message}`);
-        return jsonify({ list: [] });
-    }
+    } catch (e) { return jsonify({ list: [] }); }
 }
 
-// 【WebSocket 管理】
-function setupWebSocket(clientId) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-    }
-    
-    const wsUrl = `ws://${API_ENDPOINT.split('/')[2]}/?clientId=${clientId}`;
-    log(`[WSS] 准备连接到: ${wsUrl}`);
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => { log(`[WSS] WebSocket 已连接。`); };
-    ws.onclose = () => { log(`[WSS] WebSocket 已断开。`); };
-    ws.onerror = (err) => { log(`[WSS] 发生错误: ${err ? err.message : 'Unknown error'}`); };
-
-    ws.onmessage = (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            log(`[WSS] 收到消息: ${message.event}`);
-
-            if (!searchSession || searchSession.clientId !== clientId) {
-                log(`[WSS] 忽略来自旧会话的消息。`);
-                return;
-            }
-
-            if (message.event === 'initial_results') {
-                searchSession.initialList = message.list || [];
-                searchSession.initialLoaded = true;
-                log(`[WSS] 已接收并存储 ${searchSession.initialList.length} 条初步结果。`);
-            } else if (message.event === 'unlock_pagination') {
-                searchSession.hasMore = true;
-                log(`[WSS] 收到解锁信号，确认有更多数据。`);
-            } else if (message.event === 'quark_completed') {
-                searchSession.quarkList = message.list || [];
-                searchSession.quarkLoaded = true;
-                log(`[WSS] 已接收并存储 ${searchSession.quarkList.length} 条夸克结果。`);
-            }
-        } catch (e) {
-            log(`[WSS] 解析消息失败: ${e.message}`);
-        }
-    };
-}
-
-// ★★★★★【核心修复：search 函数】★★★★★
+// 【搜索】
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -124,75 +71,39 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    if (page === 1) {
-        log(`[Search] 新搜索 (page 1)，请求流式任务...`);
+    let allCards = searchCache[keyword];
+
+    if (page === 1 || !allCards) {
+        log(`[Search] 新搜索或无缓存，正在从后端全量获取数据...`);
         const baseUrl = API_ENDPOINT.substring(0, API_ENDPOINT.indexOf('/api/'));
-        const searchApiUrl = `${baseUrl}/api/search_stream?keyword=${encodeURIComponent(keyword)}`;
-        
+        const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}`;
         try {
             const { data } = await $fetch.get(searchApiUrl);
             const result = JSON.parse(data);
-
-            if (result.success) {
-                searchSession = {
-                    clientId: result.clientId,
-                    initialList: [],
-                    quarkList: [],
-                    initialLoaded: false,
-                    quarkLoaded: false,
-                    hasMore: true,
-                };
-                setupWebSocket(result.clientId);
-
-                // ★★★ 轮询等待初步结果 ★★★
-                for (let i = 0; i < 10; i++) { // 最多等待5秒 (10 * 500ms)
-                    if (searchSession.initialLoaded) {
-                        log(`[Search] 初步结果已通过WebSocket接收。`);
-                        break;
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-                if (!searchSession.initialLoaded) {
-                    log(`[Search] 等待初步结果超时，可能无快速网盘结果。`);
-                }
-                
-            } else { throw new Error('Failed to initiate search stream.'); }
+            if (result.success && Array.isArray(result.list)) {
+                allCards = result.list;
+                searchCache[keyword] = allCards;
+                log(`[Search] 成功获取 ${allCards.length} 条数据，耗时: ${result.duration}`);
+            } else {
+                allCards = [];
+                log(`[Search] ❌ 后端返回失败或无数据。`);
+            }
         } catch (e) {
-            log(`[Search] 启动流式任务失败: ${e.message}`);
-            searchSession = {}; // 清空会话
+            allCards = [];
+            log(`[Search] ❌ 请求后端API失败: ${e.message}`);
         }
+    } else {
+        log(`[Search] 使用缓存数据进行分页，页码: ${page}`);
     }
 
-    // --- 合并与分页逻辑 (对所有页码都适用) ---
-    if (!searchSession.clientId) {
-        log(`[Search] 错误：没有活动的搜索会话。`);
-        return jsonify({ list: [], page: 1, pagecount: 1, hasmore: false });
-    }
-
-    const combinedList = [...(searchSession.initialList || []), ...(searchSession.quarkList || [])];
-    
-    const quarkQualityOrder = ['4K', '原盘', 'REMUX', '杜比', 'UHD', '蓝光', '次世代', '1080P'];
-    combinedList.sort((a, b) => {
-        const getTier = (card) => { if (card._panType === '115') return 1; if (card._panType === '天翼') return 2; if (card._panType === '阿里') return 3; if (card._panType === '夸克') return 4; return 5; };
-        const tierA = getTier(a); const tierB = getTier(b);
-        if (tierA !== tierB) return tierA - tierB;
-        if (tierA === 4) {
-            const aQualityIndex = a._quarkQuality ? quarkQualityOrder.indexOf(a._quarkQuality.toUpperCase()) : 99;
-            const bQualityIndex = b._quarkQuality ? quarkQualityOrder.indexOf(b._quarkQuality.toUpperCase()) : 99;
-            return aQualityIndex - bQualityIndex;
-        }
-        return 0;
-    });
-
-    const totalCount = combinedList.length;
+    const totalCount = allCards.length;
     const totalPageCount = Math.ceil(totalCount / SEARCH_PAGE_SIZE) || 1;
     const startIndex = (page - 1) * SEARCH_PAGE_SIZE;
     const endIndex = startIndex + SEARCH_PAGE_SIZE;
-    const pageList = combinedList.slice(startIndex, endIndex);
-    
-    const hasMore = page < totalPageCount || !searchSession.quarkLoaded;
+    const pageList = allCards.slice(startIndex, endIndex);
+    const hasMore = page < totalPageCount;
 
-    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, 总计 ${totalCount} 条, 总页数 ${totalPageCount}, hasmore=${hasMore}`);
+    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, hasmore=${hasMore}`);
     return jsonify({
         list: pageList,
         page: page,
@@ -208,24 +119,15 @@ async function getTracks(ext) {
     if (!url) return jsonify({ list: [] });
     const middleUrl = getCorrectPicUrl(url);
     try {
-        // ★★★ 关键修复：确保使用正确的API地址 ★★★
         const apiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(middleUrl)}`;
-        // ★★★ 关键修复：确保使用 await 等待异步结果 ★★★
         const response = await $fetch.get(apiUrl);
         const result = JSON.parse(response.data);
         if (result.success && result.real_url) {
             let panName = '网盘链接';
-            if (result.real_url.includes('quark')) panName = '夸克网盘';
-            else if (result.real_url.includes('baidu')) panName = '百度网盘';
-            else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
+            if (result.real_url.includes('quark')) panName = '夸克网盘'; else if (result.real_url.includes('baidu')) panName = '百度网盘'; else if (result.real_url.includes('aliyundrive')) panName = '阿里云盘';
             return jsonify({ list: [{ title: '解析成功', tracks: [{ name: panName, pan: result.real_url, ext: {} }] }] });
-        } else {
-            throw new Error(result.error || 'API error');
-        }
-    } catch (e) {
-        log(`[详情页解析失败] ${e.message}`);
-        return jsonify({ list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }] });
-    }
+        } else { throw new Error(result.error || 'API error'); }
+    } catch (e) { return jsonify({ list: [{ title: '自动解析失败', tracks: [{ name: '请手动打开', pan: middleUrl, ext: {} }] }] }); }
 }
 
 // --- 兼容接口 ---
@@ -235,4 +137,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V4.1 (WebSocket轮询修复版 - 真正完整版) ====');
+log('==== 插件加载完成 V3.1 (纯分页 & 解锁版) ====');
