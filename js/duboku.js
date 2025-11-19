@@ -1,15 +1,16 @@
 /**
- * 找盘资源前端插件 - V-Final-V2.6 (渐进式加载最终版)
+ * 找盘资源前端插件 - V-Final-V2.6 (即时加载修复版)
  * 核心功能：
  *  1. 实现分阶段渐进式加载，首次搜索极速响应。
  *  2. 前端驱动，按需请求夸克等后续资源。
  *  3. 后端API优先，Puppeteer仅做兜底，性能与稳定性兼顾。
+ *  4. ★★★ 修复了获取到 stage2 数据后，需要再次翻页才能显示的逻辑问题。★★★
  */
 
 // --- 配置区 ---
 const API_ENDPOINT = "http://192.168.10.102:3004/api/get_real_url"; // <-- 请务必修改为您的后端服务器地址
 const SITE_URL = "https://v2pan.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64   ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
@@ -21,19 +22,57 @@ let searchSession = {}; // 用于存储当前搜索会话的状态
 let cardsCache = {}; // 首页缓存
 
 // --- 辅助函数 ---
-function log(msg ) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
+function log(msg  ) { const logMsg = `[找盘] ${msg}`; try { $log(logMsg); } catch (_) { if (DEBUG) console.log(logMsg); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
-function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http' )) return path; return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`; }
+function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.startsWith('http'  )) return path; return `${SITE_URL}${path.startsWith('/') ? '' : '/'}${path}`; }
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V-Final-V2.5 (渐进式加载最终版) ====");
+    log("==== 插件初始化 V-Final-V2.6 (即时加载修复版) ====");
     const CUSTOM_CATEGORIES = [ { name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } } ];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
 // ★★★★★【首页分页】★★★★★
+async function getCards(ext) {
+    ext = argsify(ext);
+    const { id: categoryName, page = 1 } = ext;
+    const url = SITE_URL;
+    try {
+        const cacheKey = `category_${categoryName}`;
+        let allCards = cardsCache[cacheKey];
+        if (!allCards) {
+            const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA } });
+            const $ = cheerio.load(data);
+            allCards = [];
+            const categorySpan = $(`span.fs-5.fw-bold:contains('${categoryName}')`);
+            if (categorySpan.length === 0) return jsonify({ list: [] });
+            let rowDiv = categorySpan.closest('div.d-flex').parent().next('div.row');
+            if (rowDiv.length === 0) rowDiv = categorySpan.closest('div.d-flex').next('div.row');
+            if (rowDiv.length === 0) return jsonify({ list: [] });
+            rowDiv.find('a.col-4').each((_, item) => {
+                const linkElement = $(item);
+                allCards.push({
+                    vod_id: linkElement.attr('href') || "",
+                    vod_name: linkElement.find('h2').text().trim() || "",
+                    vod_pic: getCorrectPicUrl(linkElement.find('img.lozad').attr('data-src')),
+                    vod_remarks: linkElement.find('.fs-9.text-gray-600').text().trim() || "",
+                    ext: { url: linkElement.attr('href') || "" }
+                });
+            });
+            cardsCache[cacheKey] = allCards;
+        }
+        const startIdx = (page - 1) * PAGE_SIZE;
+        const endIdx = startIdx + PAGE_SIZE;
+        const pageCards = allCards.slice(startIdx, endIdx);
+        return jsonify({ list: pageCards });
+    } catch (e) {
+        return jsonify({ list: [] });
+    }
+}
+
+// ★★★★★【搜索 - 渐进式加载总控制器 - 最终修复版】★★★★★
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -41,11 +80,11 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
+    // 如果是新的搜索词 (page=1)，或关键词变化，则重置会话
     if (page === 1 || !searchSession.keyword || searchSession.keyword !== keyword) {
         log(`[Search] 新的搜索开始，关键词: "${keyword}"`);
         searchSession = {
             keyword: keyword,
-            stage: 1,
             stage1Results: [],
             stage2Results: [],
             stage1Loaded: false,
@@ -53,8 +92,10 @@ async function search(ext) {
         };
     }
 
+    log(`[Search] 当前会话: page=${page}`);
     const baseUrl = API_ENDPOINT.substring(0, API_ENDPOINT.indexOf('/api/'));
 
+    // --- 阶段 1: 加载高优先级资源 (仅在未加载时执行) ---
     if (!searchSession.stage1Loaded) {
         log(`[Search] 请求阶段1 (高优) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=1`;
@@ -71,12 +112,12 @@ async function search(ext) {
         searchSession.stage1Loaded = true;
     }
 
-    // ★★★★★【核心修改开始】★★★★★
-    // 将合并与分页的逻辑提前，并进行整合
+    // ★★★★★【核心逻辑修复】★★★★★
+    // 无论何时，都先基于已有的 stage1 数据计算分页情况
     let combinedList = [...searchSession.stage1Results];
     let stage1PageCount = Math.ceil(combinedList.length / SEARCH_PAGE_SIZE) || 1;
 
-    // 当需要加载更多页，并且 stage2 尚未加载时，触发加载
+    // 当用户请求的页码超出了 stage1 能提供的范围，且 stage2 尚未加载时，触发加载
     if (page > stage1PageCount && !searchSession.stage2Loaded) {
         log(`[Search] 翻页触发，请求阶段2 (夸克) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=2`;
@@ -93,7 +134,7 @@ async function search(ext) {
         searchSession.stage2Loaded = true;
     }
     
-    // 无论何时，都使用当前所有已加载的数据进行合并
+    // 关键修复：在每次函数执行的最后，都使用当前所有已加载的数据进行合并
     combinedList = [...searchSession.stage1Results, ...searchSession.stage2Results];
     
     const totalCount = combinedList.length;
@@ -105,13 +146,14 @@ async function search(ext) {
     
     const hasMore = page < totalPageCount;
 
-    log(`[Search] 返回 ${pageList.length} 条结果, 总页数: ${totalPageCount}, 是否有更多: ${hasMore}`);
+    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, 总页数: ${totalPageCount}, 是否有更多: ${hasMore}`);
     return jsonify({
         list: pageList,
         page: page,
         pagecount: totalPageCount,
         hasmore: hasMore
     });
+    // ★★★★★【核心逻辑修复结束】★★★★★
 }
 
 // ★★★★★【详情页】★★★★★
@@ -145,4 +187,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V-Final-V2.5 (渐进式加载最终版) ====');
+log('==== 插件加载完成 V-Final-V2.6 (即时加载修复版) ====');
