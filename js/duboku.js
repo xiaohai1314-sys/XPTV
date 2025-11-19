@@ -1,14 +1,9 @@
 /**
- * 找盘资源前端插件 - V-Final-V2.1 (修复版)
+ * 找盘资源前端插件 - V-Final-V2.4 (精确筛选版)
  * 核心功能：
  *  1. 调用后端 /api/search 实现高性能、智能分页搜索。
  *  2. 实现精确分页控制 (hasmore, pagecount) 和分页锁 (SEARCH_END)。
  *  3. 调用后端 /api/get_real_url 实现高效链接解析。
- * 
- * V2.1 修复内容:
- *  - [修复] 搜索结果右上角角标能正确显示网盘类型 (如: 阿里, 115)。
- *  - [修复] 搜索结果海报能正确加载，不再是空白占位符。
- *  - [修复] 强化了后端搜索的兜底逻辑，确保在遇到反爬虫时能稳定抓取夸克等网盘资源。
  */
 
 // --- 配置区 ---
@@ -33,7 +28,7 @@ function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.start
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V-Final-V2.1 (修复版) ====");
+    log("==== 插件初始化 V-Final-V2.4 (精确筛选版) ====");
     const CUSTOM_CATEGORIES = [ { name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } } ];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
@@ -159,4 +154,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V-Final-V2.1 (修复版) ====');
+log('==== 插件加载完成 V-Final-V2.4 (精确筛选版) ====');
