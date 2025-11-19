@@ -1,11 +1,11 @@
 /**
- * Nullbr 影视库前端插件 - V92.0 (列表优先版)
+ * Nullbr 影视库前端插件 - V91.4 (基于抓包证据的终极修复版)
  *
  * 变更日志:
- * - V92.0 (2025-11-19):
- *   - [回归原点] 彻底回滚到V91.0的稳定状态，确保Tabs分类和列表100%能正常显示。
- *   - [隔离问题] 暂时移除了所有为解决“0kb”问题而做的修改。
- *   - 我们的首要目标是先恢复基本功能，再此基础上解决播放问题。
+ * - V91.4 (2025-11-19):
+ *   - [终极修复] 根据用户提供的精确抓包证据，修正了 getPlayinfo 函数中的 headers。
+ *   - [精确伪造] 将 Referer 和 Origin 都精确指向了 'https://vip.vipuuuvip.com/' 。
+ *   - 这是基于确凿证据的最后一次修复，旨在彻底解决“0kb”播放失败问题。
  *
  * 作者: Manus
  * 日期: 2025-11-19
@@ -15,7 +15,7 @@ var API_BASE_URL = 'http://192.168.1.7:3003';
 var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 
 function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V92.0] ' + msg); }
+function log(msg) { console.log('[Nullbr V91.4] ' + msg); }
 
 var CATEGORIES = [
     { name: '热门电影', ext: { id: 'hot_movie' } },
@@ -31,7 +31,7 @@ async function init(ext) {
     END_LOCK = {};
     return jsonify({});
 }
-async function getConfig() { return jsonify({ ver: 92.0, title: 'Nullbr影视库 (V92)', site: API_BASE_URL, tabs: CATEGORIES }); }
+async function getConfig() { return jsonify({ ver: 91.4, title: 'Nullbr影视库 (V91.4)', site: API_BASE_URL, tabs: CATEGORIES }); }
 async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
 async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
 
@@ -77,7 +77,7 @@ async function search(ext) {
 }
 
 // =======================================================================
-// --- 详情与播放核心 (回滚到V91.0的稳定状态) ---
+// --- 详情与播放核心 ---
 // =======================================================================
 
 async function getTracks(ext) {
@@ -101,19 +101,58 @@ async function detail(ext) {
     return jsonify({ list: [] });
 }
 
-// ★★★【回滚】★★★
-// 暂时不实现 getPlayinfo，等待列表问题解决
-// async function getPlayinfo(ext) { ... }
+// ★★★【终极修复 - 基于你的抓包证据】★★★
+async function getPlayinfo(ext) {
+    log('[getPlayinfo] 收到播放解析请求, ext: ' + JSON.stringify(ext));
+    try {
+        var parsedExt = parseDetailExt(ext);
+        var playUrl = parsedExt.url;
 
-// ★★★【回滚】★★★
-// play 函数恢复到最原始、最简单的状态
+        if (!playUrl) {
+            throw new Error("无法从ext中解析出url");
+        }
+
+        // 定义一个完全匹配抓包证据的请求头
+        const headers = {
+            'Origin': 'https://vip.vipuuuvip.com',
+            'Referer': 'https://vip.vipuuuvip.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+        };
+
+        if (playUrl.endsWith('.m3u8')) {
+            log('[getPlayinfo] 检测到是直接的M3U8链接，附加请求头后直接播放。');
+            return jsonify({ 
+                urls: [playUrl],
+                headers: [headers]
+            });
+        }
+
+        log('[getPlayinfo] 请求后端二级解析接口: ' + playUrl);
+        var data = await fetchData(playUrl);
+        
+        log('[getPlayinfo] 成功获取后端解析后的数据，附加请求头后透传给App。');
+        return jsonify({
+            ...data,
+            headers: [headers]
+        });
+
+    } catch (err) {
+        log('[getPlayinfo] 播放解析失败: ' + err.message);
+        return jsonify({ msg: '播放解析失败: ' + err.message });
+    }
+}
+
 async function play(flag, id, flags) {
-    log('[play] 请求播放, id: ' + id);
-    return jsonify({ parse: 0, url: id });
+    log('[play] 请求播放, flag: ' + flag + ', id: ' + id);
+    // 保持V91.3的结构，触发 getPlayinfo
+    return jsonify({
+        parse: 2,
+        url: id,
+    });
 }
 
 // =======================================================================
-// --- 辅助函数区 (与V91.0一字不差) ---
+// --- 辅助函数区 (与V91.3一字不差) ---
 // =======================================================================
 
 function parseExt(ext) {
