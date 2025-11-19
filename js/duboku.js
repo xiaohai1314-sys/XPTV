@@ -4,7 +4,7 @@
  *  1. 实现分阶段渐进式加载，首次搜索极速响应。
  *  2. 前端驱动，按需请求夸克等后续资源。
  *  3. 后端API优先，Puppeteer仅做兜底，性能与稳定性兼顾。
- *  4. ★★★ 修复了获取到 stage2 数据后，需要再次翻页才能显示的逻辑问题。★★★
+ *  4. 修复了获取到 stage2 数据后，需要再次翻页才能显示的逻辑问题。
  */
 
 // --- 配置区 ---
@@ -34,7 +34,7 @@ async function getConfig() {
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
 
-// ★★★★★【首页分页】★★★★★
+// 【首页分页】
 async function getCards(ext) {
     ext = argsify(ext);
     const { id: categoryName, page = 1 } = ext;
@@ -72,7 +72,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【搜索 - 渐进式加载总控制器 - 最终修复版】★★★★★
+// 【搜索 - 渐进式加载总控制器 - 最终修复版】
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -80,7 +80,6 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // 如果是新的搜索词 (page=1)，或关键词变化，则重置会话
     if (page === 1 || !searchSession.keyword || searchSession.keyword !== keyword) {
         log(`[Search] 新的搜索开始，关键词: "${keyword}"`);
         searchSession = {
@@ -95,7 +94,6 @@ async function search(ext) {
     log(`[Search] 当前会话: page=${page}`);
     const baseUrl = API_ENDPOINT.substring(0, API_ENDPOINT.indexOf('/api/'));
 
-    // --- 阶段 1: 加载高优先级资源 (仅在未加载时执行) ---
     if (!searchSession.stage1Loaded) {
         log(`[Search] 请求阶段1 (高优) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=1`;
@@ -112,12 +110,9 @@ async function search(ext) {
         searchSession.stage1Loaded = true;
     }
 
-    // ★★★★★【核心逻辑修复】★★★★★
-    // 无论何时，都先基于已有的 stage1 数据计算分页情况
     let combinedList = [...searchSession.stage1Results];
     let stage1PageCount = Math.ceil(combinedList.length / SEARCH_PAGE_SIZE) || 1;
 
-    // 当用户请求的页码超出了 stage1 能提供的范围，且 stage2 尚未加载时，触发加载
     if (page > stage1PageCount && !searchSession.stage2Loaded) {
         log(`[Search] 翻页触发，请求阶段2 (夸克) 数据...`);
         const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=2`;
@@ -134,7 +129,6 @@ async function search(ext) {
         searchSession.stage2Loaded = true;
     }
     
-    // 关键修复：在每次函数执行的最后，都使用当前所有已加载的数据进行合并
     combinedList = [...searchSession.stage1Results, ...searchSession.stage2Results];
     
     const totalCount = combinedList.length;
@@ -153,10 +147,9 @@ async function search(ext) {
         pagecount: totalPageCount,
         hasmore: hasMore
     });
-    // ★★★★★【核心逻辑修复结束】★★★★★
 }
 
-// ★★★★★【详情页】★★★★★
+// 【详情页】
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
