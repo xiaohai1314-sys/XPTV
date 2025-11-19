@@ -1,20 +1,19 @@
 /**
- * 找盘资源前端插件 - V-Final-V2.7 (空结果修复终极版)
+ * 找盘资源前端插件 - V-Final-V2.8 (硬编码强制加载版 - 测试专用)
  * 核心功能：
- *  1. 修复了当 STAGE 1 结果为空或过少时，无法触发 STAGE 2 加载的致命逻辑错误。
- *  2. 修复了获取到 stage2 数据后，需要再次翻页才能显示的逻辑问题。
- *  3. 实现分阶段渐进式加载，前端驱动，按需请求后续资源。
+ *  1. 【测试核心】在首次搜索时，无视任何逻辑，强制请求 STAGE 1 和 STAGE 2。
+ *  2. 旨在验证前端脚本是否被正确更新，以及 STAGE 2 是否能被成功触发。
  */
 
 // --- 配置区 ---
-const API_ENDPOINT = "http://192.168.10.102:3004/api/get_real_url"; // <-- 请务必修改为您的后端服务器地址
+const API_ENDPOINT = "http://192.168.10.102:3004/api/get_real_url";
 const SITE_URL = "https://v2pan.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64   ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://v2pan.com/favicon.ico";
 const DEBUG = true;
-const PAGE_SIZE = 12; // 首页分页大小
-const SEARCH_PAGE_SIZE = 30; // 搜索结果分页大小
+const PAGE_SIZE = 12;
+const SEARCH_PAGE_SIZE = 30;
 
 // --- 全局状态 ---
 let searchSession = {};
@@ -28,7 +27,7 @@ function getCorrectPicUrl(path) { if (!path) return FALLBACK_PIC; if (path.start
 
 // --- 插件入口函数 ---
 async function getConfig() {
-    log("==== 插件初始化 V-Final-V2.7 (空结果修复终极版) ====");
+    log("==== 插件初始化 V-Final-V2.8 (硬编码强制加载版) ====");
     const CUSTOM_CATEGORIES = [ { name: '电影', ext: { id: '电影' } }, { name: '电视剧', ext: { id: '电视剧' } }, { name: '动漫', ext: { id: '动漫' } } ];
     return jsonify({ ver: 1, title: '找盘', site: SITE_URL, cookie: '', tabs: CUSTOM_CATEGORIES });
 }
@@ -63,7 +62,7 @@ async function getCards(ext) {
     } catch (e) { return jsonify({ list: [] }); }
 }
 
-// 【搜索 - 渐进式加载总控制器 - 最终完美版】
+// 【搜索 - 测试专用版】
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || '';
@@ -71,47 +70,44 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    if (page === 1 || !searchSession.keyword || searchSession.keyword !== keyword) {
-        log(`[Search] 新的搜索开始，关键词: "${keyword}"`);
-        searchSession = { keyword: keyword, stage1Results: [], stage2Results: [], stage1Loaded: false, stage2Loaded: false };
+    if (page === 1) {
+        log(`[Search] 新的强制搜索开始，关键词: "${keyword}"`);
+        searchSession = { keyword: keyword, allResults: [], loaded: false };
     }
 
-    log(`[Search] 当前会话: page=${page}`);
     const baseUrl = API_ENDPOINT.substring(0, API_ENDPOINT.indexOf('/api/'));
 
-    if (!searchSession.stage1Loaded) {
-        log(`[Search] 请求阶段1 (高优) 数据...`);
-        const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=1`;
+    if (!searchSession.loaded) {
+        log(`[Search] 硬编码触发：强制请求 STAGE 1...`);
+        const searchApiUrl1 = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=1`;
+        let stage1List = [];
         try {
-            const { data } = await $fetch.get(searchApiUrl);
+            const { data } = await $fetch.get(searchApiUrl1);
             const result = JSON.parse(data);
             if (result.success && Array.isArray(result.list)) {
-                searchSession.stage1Results = result.list;
-                log(`[Search] 阶段1成功获取 ${result.list.length} 条数据`);
+                stage1List = result.list;
+                log(`[Search] STAGE 1 成功获取 ${stage1List.length} 条数据`);
             }
-        } catch (e) { log(`[Search] ❌ 阶段1请求失败: ${e.message}`); }
-        searchSession.stage1Loaded = true;
-    }
+        } catch (e) { log(`[Search] ❌ STAGE 1 请求失败: ${e.message}`); }
 
-    // ★★★★★【核心逻辑修复】★★★★★
-    const stage1PageCount = Math.ceil(searchSession.stage1Results.length / SEARCH_PAGE_SIZE) || 1;
-    const shouldLoadStage2 = (page > stage1PageCount) || (searchSession.stage1Results.length === 0 && page === 1);
-
-    if (shouldLoadStage2 && !searchSession.stage2Loaded) {
-        log(`[Search] 条件满足，请求阶段2 (夸克) 数据... (原因: ${page > stage1PageCount ? '翻页触发' : '阶段1无结果'})`);
-        const searchApiUrl = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=2`;
+        log(`[Search] 硬编码触发：强制请求 STAGE 2...`);
+        const searchApiUrl2 = `${baseUrl}/api/search?keyword=${encodeURIComponent(keyword)}&stage=2`;
+        let stage2List = [];
         try {
-            const { data } = await $fetch.get(searchApiUrl);
+            const { data } = await $fetch.get(searchApiUrl2);
             const result = JSON.parse(data);
             if (result.success && Array.isArray(result.list)) {
-                searchSession.stage2Results = result.list;
-                log(`[Search] 阶段2成功获取 ${result.list.length} 条数据`);
+                stage2List = result.list;
+                log(`[Search] STAGE 2 成功获取 ${stage2List.length} 条数据`);
             }
-        } catch (e) { log(`[Search] ❌ 阶段2请求失败: ${e.message}`); }
-        searchSession.stage2Loaded = true;
+        } catch (e) { log(`[Search] ❌ STAGE 2 请求失败: ${e.message}`); }
+
+        searchSession.allResults = [...stage1List, ...stage2List];
+        searchSession.loaded = true;
+        log(`[Search] 所有阶段加载完毕，总共 ${searchSession.allResults.length} 条数据`);
     }
     
-    const combinedList = [...searchSession.stage1Results, ...searchSession.stage2Results];
+    const combinedList = searchSession.allResults;
     const totalCount = combinedList.length;
     const totalPageCount = Math.ceil(totalCount / SEARCH_PAGE_SIZE) || 1;
     const startIndex = (page - 1) * SEARCH_PAGE_SIZE;
@@ -119,7 +115,7 @@ async function search(ext) {
     const pageList = combinedList.slice(startIndex, endIndex);
     const hasMore = page < totalPageCount;
 
-    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页, 总页数: ${totalPageCount}, 是否有更多: ${hasMore}`);
+    log(`[Search] 返回 ${pageList.length} 条结果给第 ${page} 页`);
     return jsonify({ list: pageList, page: page, pagecount: totalPageCount, hasmore: hasMore });
 }
 
@@ -148,4 +144,4 @@ async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id :
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
 
-log('==== 插件加载完成 V-Final-V2.7 (空结果修复终极版) ====');
+log('==== 插件加载完成 V-Final-V2.8 (硬编码强制加载版) ====');
