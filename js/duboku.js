@@ -1,10 +1,9 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v9.9 (API 兼容性最终修复版)
+ * 海绵小站前端插件 - 移植增强版 v10.0 (最终版)
  *
  * 更新说明:
- * - 核心修复：移除了所有对不存在的 `$utils.toast`, `$utils.toastError`, `$utils.toastSuccess` 函数的调用。
- * - 兼容性修正：改用一个更通用、更可能存在的 `toast()` 函数来显示提示信息，并用 try-catch 包裹，确保即使 toast 函数不存在也不会导致程序崩溃。
- * - 目标：在所有环境下都能稳定运行，并成功实现 AI 自动回帖和解析。
+ * - 终极修复：修正了对 $fetch 成功响应的解析方式。直接使用响应对象本身，而不是访问其 .data 属性，以匹配此 App 的插件环境。
+ * - 目标：完美实现 AI 自动回帖、解析、渲染，一步到位，不再需要刷新。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -18,18 +17,15 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v9.9] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.9] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v10.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v10.0] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// ★★★ 兼容性修正：创建一个安全的 toast 函数 ★★★
 function safeToast(message, duration = 3000) {
     try {
-        // 优先尝试最可能存在的简单 toast 函数
         toast(message, duration);
     } catch (e) {
-        // 如果 toast 不存在，就什么也不做，但至少保证程序不崩溃
         log(`Toast function not available. Message: ${message}`);
     }
 }
@@ -121,7 +117,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (V9.9 - API 兼容性最终修复版) ===================
+// =================== getTracks (V10.0 - 最终版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -149,7 +145,8 @@ async function getTracks(ext) {
         try {
           safeToast("🤖 AI识别验证码中，请耐心等待...", 20000); 
           
-          const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+          // ★★★ 终极修正：直接使用响应对象，不再访问 .data ★★★
+          const response = await $fetch.post(YOUR_API_ENDPOINT, {
               threadUrl: detailUrl,
               cookie: COOKIE,
               apiKey: SILICONFLOW_API_KEY
@@ -158,12 +155,12 @@ async function getTracks(ext) {
               timeout: 30000 
           });
 
-          if (apiResponse.data && apiResponse.data.success) {
+          if (response && response.success) {
               log("后端API处理成功，直接渲染返回的链接列表。");
               safeToast("✅ AI回帖并解析成功！", 3000);
-              return jsonify(apiResponse.data);
+              return jsonify(response);
           } else {
-              const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
+              const errorMessage = response ? response.message : "未知后端错误";
               log(`后端API返回失败: ${errorMessage}`);
               safeToast(`❌ 后端处理失败: ${errorMessage}`, 5000);
               return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
