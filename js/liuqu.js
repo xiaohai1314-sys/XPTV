@@ -1,10 +1,10 @@
 /**
- * 呆瓜瓜资源插件 - V1.3 (文本提取修正版)
+ * 呆瓜瓜资源插件 - V1.4 (去重修正版)
  *
  * 版本说明:
- * - 【V1.3 核心】根据用户提供的元素截图，修正了 getTracks 函数的链接提取逻辑。
- * - 【文本提取】新的提取逻辑使用正则表达式，能够直接从页面的文本内容中抓取网盘链接，即使链接不是<a>标签（例如在<span>或<p>标签内），也能成功提取。
- * - 【功能保留】完整保留了 V1.2 版本中的“一步到位”自动回帖刷新功能，以及正确的 Cookie 和分类配置。
+ * - 【V1.4 核心】解决了因同一链接在HTML中出现多次，导致脚本重复提取资源的问题。
+ * - 【去重逻辑】在提取链接后，增加了一步去重操作，确保即使页面源码中有多个相同的链接，最终也只显示一个。
+ * - 【功能保留】完整保留了 V1.3 版本中强大的文本提取能力和“一步到位”的自动回帖刷新功能。
  */
 
 // --- 配置区 ---
@@ -20,9 +20,9 @@ const COOKIE = 'bbs_sid=94d4dc9a9bd5839a61588451d8064302; Hm_lvt_2c2cd308748eb90
 // --- 核心辅助函数 ---
 function log(msg  ) {
     try {
-        $log(`[呆瓜瓜资源 V1.3] ${msg}`);
+        $log(`[呆瓜瓜资源 V1.4] ${msg}`);
     } catch (_) {
-        console.log(`[呆瓜瓜资源 V1.3] ${msg}`);
+        console.log(`[呆瓜瓜资源 V1.4] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -71,7 +71,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V1.3)");
+    log("插件初始化 (V1.4)");
     const CUSTOM_CATEGORIES = [
         { name: '电影/剧集区', ext: { id: 'forum-9.htm' } },
         { name: '动漫区', ext: { id: 'forum-12.htm' } },
@@ -118,7 +118,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V1.3 核心修正：使用正则表达式从文本中提取链接】★★★★★
+// ★★★★★【V1.4 核心修正：增加链接去重逻辑】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -149,10 +149,9 @@ async function getTracks(ext) {
         }
 
         const mainMessage = $('.message[isfirst="1"]');
-        const contentHtml = mainMessage.html(); // 获取容器内的全部HTML内容
-        const links = [];
+        const contentHtml = mainMessage.html();
+        let links = [];
         
-        // 使用正则表达式匹配所有夸克网盘链接
         if (contentHtml) {
             const regex = /https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/g;
             let match;
@@ -161,7 +160,10 @@ async function getTracks(ext) {
             }
         }
 
-        const tracks = links.map((link, index) => ({
+        // 【核心去重逻辑】使用 Set 进行去重，然后再转回数组
+        const uniqueLinks = [...new Set(links)];
+
+        const tracks = uniqueLinks.map((link, index) => ({
             name: `夸克网盘 ${index + 1}`,
             pan: link,
             ext: {},
@@ -216,7 +218,7 @@ async function search(ext) {
 
     if (page <= searchCache.page) {
         log(`请求页码 ${page} 已在缓存中，直接返回。`);
-        const pageSize = 20; // 假设每页20条
+        const pageSize = 20;
         return jsonify({ list: searchCache.results.slice((page - 1) * pageSize, page * pageSize) });
     }
 
@@ -290,6 +292,6 @@ async function category(tid, pg) {
     return getCards({ id: id, page: pg });
 }
 async function detail(id) { return getTracks({ url: id }); }
-async function play(flag, id) { return jsonify({ url:id }); }
+async function play(flag, id) { return jsonify({ url: id }); }
 
-log('呆瓜瓜资源插件加载完成 (V1.3)');
+log('呆瓜瓜资源插件加载完成 (V1.4)');
