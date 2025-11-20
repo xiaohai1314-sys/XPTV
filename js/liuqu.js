@@ -1,15 +1,15 @@
 /**
- * 呆瓜瓜资源插件 - V1.0 (一步到位版)
+ * 呆瓜瓜资源插件 - V1.3 (文本提取修正版)
  *
  * 版本说明:
- * - 【V1.0 核心】基于用户为 daiguaji.com 提供的脚本为底版。
- * - 【唯一修正】仅对 `getTracks` 函数进行外科手术式修改，植入“一步到位”的自动刷新逻辑，解决详情页需要手动刷新的问题。
- * - 【原封不动】脚本中新的 SITE_URL (daiguaji.com)、新的 Cookie、新的分类、以及强大的搜索逻辑等所有特性，均被完整保留。
+ * - 【V1.3 核心】根据用户提供的元素截图，修正了 getTracks 函数的链接提取逻辑。
+ * - 【文本提取】新的提取逻辑使用正则表达式，能够直接从页面的文本内容中抓取网盘链接，即使链接不是<a>标签（例如在<span>或<p>标签内），也能成功提取。
+ * - 【功能保留】完整保留了 V1.2 版本中的“一步到位”自动回帖刷新功能，以及正确的 Cookie 和分类配置。
  */
 
 // --- 配置区 ---
 const SITE_URL = "https://www.daiguaji.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.daiguaji.com/view/img/favicon.png";
 
@@ -18,21 +18,18 @@ const COOKIE = 'bbs_sid=94d4dc9a9bd5839a61588451d8064302; Hm_lvt_2c2cd308748eb90
 // ★★★★★★★★★★★★★★★★★★★★★
 
 // --- 核心辅助函数 ---
-function log(msg) {
+function log(msg  ) {
     try {
-        $log(`[呆瓜瓜资源 V1.0] ${msg}`);
+        $log(`[呆瓜瓜资源 V1.3] ${msg}`);
     } catch (_) {
-        console.log(`[呆瓜瓜资源 V1.0] ${msg}`);
+        console.log(`[呆瓜瓜资源 V1.3] ${msg}`);
     }
 }
-
 function argsify(ext) {
     if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } }
     return ext || {};
 }
-
 function jsonify(data) { return JSON.stringify(data); }
-
 function getRandomReply() {
     const replies = ["感谢分享，资源太棒了", "找了好久，太谢谢了", "非常棒的资源！！！", "不错的帖子点赞！", "感谢楼主，下载来看看"];
     return replies[Math.floor(Math.random() * replies.length)];
@@ -40,12 +37,9 @@ function getRandomReply() {
 
 async function performReply(threadId) {
     log(`正在尝试为帖子 ${threadId} 自动回帖...`);
-
     const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
     const message = getRandomReply();
-
     const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
-
     try {
         const { data } = await $fetch.post(replyUrl, formData, {
             headers: {
@@ -57,7 +51,7 @@ async function performReply(threadId) {
                 'Referer': `${SITE_URL}/thread-${threadId}.htm`
             }
         });
-
+        
         if (data && data.includes(message)) {
             log(`回帖成功, 内容: "${message}"`);
             return true;
@@ -66,6 +60,7 @@ async function performReply(threadId) {
             $utils.toastError("回帖失败：服务器返回异常", 3000);
             return false;
         }
+
     } catch (e) {
         log(`回帖请求异常: ${e.message}`);
         $utils.toastError("回帖异常，请检查网络或Cookie", 3000);
@@ -74,15 +69,14 @@ async function performReply(threadId) {
 }
 
 // --- XPTV App 插件入口函数 ---
-async function getConfig() {
-    log("插件初始化 (V1.0)");
 
+async function getConfig() {
+    log("插件初始化 (V1.3)");
     const CUSTOM_CATEGORIES = [
         { name: '电影/剧集区', ext: { id: 'forum-9.htm' } },
         { name: '动漫区', ext: { id: 'forum-12.htm' } },
         { name: '音频区', ext: { id: 'forum-15.htm' } },
     ];
-
     return jsonify({
         ver: 1,
         title: '呆瓜瓜资源',
@@ -94,7 +88,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
-    if (path.startsWith('http')) return path;
+    if (path.startsWith('http'  )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
     return `${SITE_URL}/${cleanPath}`;
 }
@@ -102,15 +96,11 @@ function getCorrectPicUrl(path) {
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
-
     const url = `${SITE_URL}/${id.replace('.htm', '')}-${page}.htm`;
-
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
         const $ = cheerio.load(data);
-
         const cards = [];
-
         $("li.media.thread").each((_, item) => {
             const linkElement = $(item).find('.style3_subject a');
             cards.push({
@@ -121,7 +111,6 @@ async function getCards(ext) {
                 ext: { url: linkElement.attr('href') || "" }
             });
         });
-
         return jsonify({ list: cards });
     } catch (e) {
         log(`获取分类列表异常: ${e.message}`);
@@ -129,34 +118,29 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V1.0 唯一修正点】★★★★★
+// ★★★★★【V1.3 核心修正：使用正则表达式从文本中提取链接】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
-
     if (!url) return jsonify({ list: [] });
 
     const detailUrl = `${SITE_URL}/${url}`;
     log(`开始处理详情页: ${detailUrl}`);
 
     try {
-        // 1. 第一次加载页面
         let { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
         let $ = cheerio.load(data);
 
         const isContentHidden = $('.message[isfirst="1"]').text().includes("回复");
-
+        
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
             const threadId = url.match(/thread-(\d+)/)[1];
             const replySuccess = await performReply(threadId);
 
-            // 2. 检查回帖是否成功
             if (replySuccess) {
                 log("回帖成功，重新加载页面以获取解锁内容...");
-                // 3. 【关键步骤】重新获取页面内容
                 const refreshResponse = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
-                // 4. 使用新获取的内容更新 cheerio 对象
                 $ = cheerio.load(refreshResponse.data);
             } else {
                 log("回帖失败，终止操作。");
@@ -164,14 +148,18 @@ async function getTracks(ext) {
             }
         }
 
-        // 5. 使用最新的页面内容进行解析
         const mainMessage = $('.message[isfirst="1"]');
+        const contentHtml = mainMessage.html(); // 获取容器内的全部HTML内容
         const links = [];
-
-        // 根据你的原脚本 —— 只解析夸克网盘
-        mainMessage.find('a[href*="pan.quark.cn"]').each((_, element) => {
-            links.push($(element).attr('href'));
-        });
+        
+        // 使用正则表达式匹配所有夸克网盘链接
+        if (contentHtml) {
+            const regex = /https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/g;
+            let match;
+            while ((match = regex.exec(contentHtml )) !== null) {
+                links.push(match[0]);
+            }
+        }
 
         const tracks = links.map((link, index) => ({
             name: `夸克网盘 ${index + 1}`,
@@ -189,7 +177,6 @@ async function getTracks(ext) {
         }
 
         return jsonify({ list: [{ title: '云盘', tracks }] });
-
     } catch (e) {
         log(`getTracks函数出现致命错误: ${e.message}`);
         return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
@@ -236,14 +223,12 @@ async function search(ext) {
     log(`正在搜索: "${text}", 请求第 ${page} 页...`);
 
     const encodedKeyword = encodeURIComponent(text);
-
     let url;
     if (page === 1) {
         url = `${SITE_URL}/search-${encodedKeyword}-1.htm`;
     } else {
         url = `${SITE_URL}/search-${encodedKeyword}-1-${page}.htm`;
     }
-
     log(`构建的请求URL: ${url}`);
 
     try {
@@ -252,20 +237,17 @@ async function search(ext) {
 
         if (searchCache.pagecount === Infinity) {
             let maxPage = 1;
-
             $('ul.pagination a.page-link').each((_, elem) => {
                 const pageNum = parseInt($(elem).text().trim());
                 if (!isNaN(pageNum) && pageNum > maxPage) {
                     maxPage = pageNum;
                 }
             });
-
             searchCache.pagecount = maxPage;
             log(`侦察到总页数: ${searchCache.pagecount}`);
         }
 
         const cards = [];
-
         $("li.media.thread").each((_, item) => {
             const linkElement = $(item).find('.style3_subject a');
             cards.push({
@@ -288,7 +270,6 @@ async function search(ext) {
         searchCache.total = searchCache.results.length;
 
         log(`第 ${page} 页搜索成功，新增 ${cards.length} 条，当前缓存总数 ${searchCache.total}`);
-
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -299,18 +280,16 @@ async function search(ext) {
 
 // --- 兼容旧版 XPTV App 接口 ---
 async function init() { return getConfig(); }
-
 async function home() {
     const c = await getConfig();
     const config = JSON.parse(c);
     return jsonify({ class: config.tabs, filters: {} });
 }
-
 async function category(tid, pg) {
     const id = typeof tid === 'object' ? tid.id : tid;
     return getCards({ id: id, page: pg });
 }
-
 async function detail(id) { return getTracks({ url: id }); }
+async function play(flag, id) { return jsonify({ url:id }); }
 
-async function play(flag, id) { return jsonify({ url: id }); }
+log('呆瓜瓜资源插件加载完成 (V1.3)');
