@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.4 (终极静态占位版)
+// 描述: “趣乐兔”搜索插件 - V1.6 (终极静态入口版)
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.10.105:3005/search";
@@ -11,7 +11,7 @@ const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
 function log(msg ) {
-    if (DEBUG) console.log(`[趣乐兔插件 V1.4] ${msg}`);
+    if (DEBUG) console.log(`[趣乐兔插件 V1.6] ${msg}`);
 }
 
 function argsify(ext) {
@@ -25,7 +25,7 @@ function jsonify(obj) {
 // ================== 插件初始化 ==================
 async function getConfig() {
     return jsonify({
-        ver: 1.4,
+        ver: 1.6,
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
@@ -127,16 +127,16 @@ async function getTracks(ext) {
 // ================== 兼容函数 ==================
 async function init() { return getConfig(); }
 
-// ★★★★★【V1.4 终极修正：在 home() 中直接返回空列表】★★★★★
+// ★★★★★【V1.6 终极修正：在 home() 中直接返回完整静态结构】★★★★★
 async function home() {
     const cfg = await getConfig();
     const tabs = JSON.parse(cfg).tabs;
     
-    // 直接在 home() 的响应中包含一个空的 list
-    // App 看到 list 已存在，就不会再去调用 category()，从而避免了所有问题
+    // 直接在 home() 的响应中包含 class 和一个空的 list
+    // App 看到 list 已存在，就不会再去调用 category()，从而避免所有问题
     return jsonify({ 
         class: tabs, 
-        list: [] // 关键：直接提供一个空列表
+        list: [] // 关键：直接提供一个空列表，让App认为首页加载已完成
     });
 }
 
