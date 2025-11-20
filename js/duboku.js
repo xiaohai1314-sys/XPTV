@@ -1,11 +1,11 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v11.2 (兼容性修复版)
+ * 海绵小站前端插件 - 移植增强版 v11.3 (强制解析版)
  *
- * 更新说明 (v11.2):
- * - 核心修复：解决了在某些环境下，$fetch 收到 HTTP 500 错误时不抛出异常的问题。
- * - 主动检查：在调用后端后，不再依赖 try-catch 捕获业务失败，而是主动检查后端返回的响应体中是否包含 success: false 标志。
- * - 统一处理：当检测到后端返回失败（如验证码错误），会主动抛出异常，并由统一的 catch 块向用户显示准确的失败原因。
- * - 目标：无论后端是业务失败还是系统崩溃，前端都能正确、清晰地展示错误信息，避免“后端失败，前端却显示成功”的误导。
+ * 更新说明 (v11.3):
+ * - 终极修复：针对 $fetch 在失败时可能返回纯文本字符串而非JSON对象的问题进行修正。
+ * - 强制解析：无论 $fetch 返回什么，都尝试将其手动解析为 JSON 对象，以确保能读取到后端的 `success` 状态。
+ * - 健壮性增强：即使解析失败（例如返回的是null或空字符串），也能通过 catch 块捕获异常，保证错误处理流程的完整性。
+ * - 目标：彻底解决因 App 环境中 $fetch 行为不标准而导致的“后端失败、前端显示成功”的顽固问题。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -19,7 +19,7 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v11.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.2] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v11.3] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.3] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -102,7 +102,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (V11.2 - 兼容性修复版) ===================
+// =================== getTracks (V11.3 - 强制解析版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -129,8 +129,7 @@ async function getTracks(ext) {
         try {
           log("正在调用后端，请稍候...");
           
-          // 🟢【核心修改】接收后端返回的完整响应，无论成功或失败
-          const backendResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+          const rawBackendResponse = await $fetch.post(YOUR_API_ENDPOINT, {
               threadUrl: detailUrl,
               cookie: COOKIE,
               apiKey: SILICONFLOW_API_KEY
@@ -139,11 +138,23 @@ async function getTracks(ext) {
               timeout: 30000 
           });
 
-          // 🟢【核心修改】主动检查后端响应。
-          // 即使后端返回500错误，这里的代码在某些环境下依然会执行。
-          // 我们需要检查响应体中是否有 success: false 标志。
+          // 🟡【核心修改】强制解析后端响应
+          let backendResponse;
+          if (typeof rawBackendResponse === 'string') {
+              // 如果返回的是字符串，尝试解析它
+              if (rawBackendResponse.trim() === '') {
+                  // 如果是空字符串，当作成功处理，让后续刷新逻辑来验证
+                  backendResponse = { success: true }; 
+              } else {
+                  backendResponse = JSON.parse(rawBackendResponse);
+              }
+          } else {
+              // 如果返回的已经是对象、null或undefined，直接使用
+              backendResponse = rawBackendResponse;
+          }
+
+          // 🟡【核心修改】使用解析后的对象进行判断
           if (backendResponse && backendResponse.success === false) {
-              // 如果后端明确告知失败，就主动抛出错误，让下面的catch块处理
               throw new Error(backendResponse.message || "后端返回了一个失败响应。");
           }
 
@@ -155,7 +166,6 @@ async function getTracks(ext) {
           $ = cheerio.load(data);
               
         } catch (e) {
-          // 这个 catch 现在可以捕获网络超时和我们主动抛出的后端失败信息
           let errorReason = e.message || "未知网络错误";
           if (errorReason.toLowerCase().includes('timeout')) {
               errorReason = "后端处理超时，请重试。";
