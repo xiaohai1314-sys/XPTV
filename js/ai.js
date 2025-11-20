@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.8 (分类锁恢复最终版)
+// 描述: “趣乐兔”搜索插件 - V1.9 (像素级模仿最终版)
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.10.105:3005/search";
@@ -11,7 +11,7 @@ const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
 function log(msg ) {
-    if (DEBUG) console.log(`[趣乐兔插件 V1.8] ${msg}`);
+    if (DEBUG) console.log(`[趣乐兔插件 V1.9] ${msg}`);
 }
 
 function argsify(ext) {
@@ -25,7 +25,7 @@ function jsonify(obj) {
 // ================== 插件初始化 ==================
 async function getConfig() {
     return jsonify({
-        ver: 1.8,
+        ver: 1.9,
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
@@ -34,8 +34,19 @@ async function getConfig() {
     });
 }
 
-// ★★★★★【V1.8 核心修正：恢复您的“分类锁”逻辑】★★★★★
-let SEARCH_END = {};   // 记录某个关键词是否已经确定只有一页
+// ★★★★★【V1.9 核心修正：完全模仿“天逸搜”的函数结构】★★★★★
+
+// 1. 增加一个与“天逸搜”一模一样的、空的 getCards 函数
+async function getCards(ext) {
+  ext = argsify(ext);
+  let cards = [];
+  return jsonify({
+    list: cards,
+  });
+}
+
+// 2. 恢复您的“分类锁”逻辑
+let SEARCH_END = {};
 
 // ================== 核心：搜索（恢复了分类锁的完好逻辑） ==================
 async function search(ext) {
@@ -45,8 +56,7 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // 【分类锁】如果以前已经判定该关键词只有 1 页，则永远不让翻页
-    if (SEARCH_END[keyword] && page > 1) { // 修正：只在请求第二页及以后时才拦截
+    if (SEARCH_END[keyword] && page > 1) {
         log(`[search] 关键词 "${keyword}" 已锁定为单页，拒绝翻页`);
         return jsonify({ list: [] });
     }
@@ -66,7 +76,7 @@ async function search(ext) {
         }
 
         const list = resp.data.list;
-        const pageSize = 20; // 假设每页20条
+        const pageSize = 20;
 
         const cards = list.map(item => ({
             vod_id: item.url,
@@ -76,21 +86,18 @@ async function search(ext) {
             ext: { pan_url: item.url }
         }));
 
-        // 【分类锁】如果当前页返回的结果数小于每页期望数，说明没有下一页了
         if (list.length < pageSize) {
             SEARCH_END[keyword] = true;
             log(`[search] 关键词 "${keyword}" 已被锁定为最后一页`);
         }
-
-        const hasMore = !SEARCH_END[keyword];
-
-        log(`[search] 当前页数量 = ${list.length}, hasMore = ${hasMore}`);
-
+        
+        // 注意：根据您原脚本的逻辑，这里不应该返回 hasmore，而是让App自己判断
+        // 我们严格遵循您原脚本的返回结构
         return jsonify({
             list: cards,
             page: page,
-            pagecount: hasMore ? page + 1 : page, // 动态计算总页数
-            total: cards.length // 当前返回的数量
+            pagecount: SEARCH_END[keyword] ? page : page + 1,
+            total: cards.length
         });
 
     } catch (e) {
@@ -100,14 +107,6 @@ async function search(ext) {
 }
 
 // ================== 详情页与兼容函数 (保持不变) ==================
-
-async function getCards(ext) {
-  ext = argsify(ext);
-  let cards = [];
-  return jsonify({
-    list: cards,
-  });
-}
 
 async function getTracks(ext) {
     ext = argsify(ext);
