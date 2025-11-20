@@ -1,18 +1,17 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - 完整版（精准分页 + 统一海报 + 稳定兼容 + 分页锁）
+// 描述: “趣乐兔”搜索插件 - V1.1 (转圈修复版)
 
 // ================== 配置区 ==================
-const API_ENDPOINT = "http://192.168.10.105:3005/search";
+const API_ENDPOINT = "http://192.168.1.7:3005/search";
 const SITE_URL = "https://pan.funletu.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
 
-// ★★★ 使用你指定的海报图片 ★★★
 const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
-function log(msg) {
-    if (DEBUG) console.log(`[趣乐兔插件] ${msg}`);
+function log(msg ) {
+    if (DEBUG) console.log(`[趣乐兔插件 V1.1] ${msg}`);
 }
 
 function argsify(ext) {
@@ -26,7 +25,7 @@ function jsonify(obj) {
 // ================== 插件初始化 ==================
 async function getConfig() {
     return jsonify({
-        ver: 1.0,
+        ver: 1.1,
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
@@ -36,7 +35,7 @@ async function getConfig() {
 }
 
 // ================== 分页锁记录 ==================
-let SEARCH_END = {};   // 记录某个关键词是否已经确定只有一页
+let SEARCH_END = {};
 
 // ================== 核心：搜索（精准分页版 + 分页锁） ==================
 async function search(ext) {
@@ -46,7 +45,6 @@ async function search(ext) {
 
     if (!keyword) return jsonify({ list: [] });
 
-    // 如果以前已经判定该关键词只有 1 页，则永远不让翻页
     if (SEARCH_END[keyword]) {
         log(`[search] 关键词 "${keyword}" 已锁定为单页`);
         return jsonify({
@@ -75,18 +73,16 @@ async function search(ext) {
         const list = resp.data.list;
         const pageSize = 20;
 
-        // ======= 格式化 UI 卡片 =======
         const cards = list.map(item => ({
             vod_id: item.url,
             vod_name: item.title,
-            vod_pic: POSTER_DEFAULT,       // ★ 统一海报
+            vod_pic: POSTER_DEFAULT,
             vod_remarks: item.size || "",
             ext: { pan_url: item.url }
         }));
 
-        // ======= 分页锁判定 =======
         if (list.length < pageSize) {
-            SEARCH_END[keyword] = true;  // 当前页不足 → 说明只有1页
+            SEARCH_END[keyword] = true;
             log(`[search] 关键词 "${keyword}" 仅有一页，已锁定`);
         }
 
@@ -137,8 +133,15 @@ async function home() {
     return jsonify({ class: tabs, filters: {} });
 }
 
+// ★★★★★【V1.1 核心修正：修复无限转圈问题】★★★★★
 async function category() {
-    return jsonify({ list: [] });
+    // 返回一个明确的、没有更多页的空列表，告诉App不要再翻页了
+    return jsonify({
+        list: [],
+        page: 1,
+        pagecount: 1,
+        total: 0
+    });
 }
 
 async function detail(id) {
