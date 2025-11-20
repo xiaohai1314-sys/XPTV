@@ -1,9 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v10.0 (最终版)
+ * 海绵小站前端插件 - 移植增强版 v10.2 (迎合刷新机制最终版)
  *
  * 更新说明:
- * - 终极修复：修正了对 $fetch 成功响应的解析方式。直接使用响应对象本身，而不是访问其 .data 属性，以匹配此 App 的插件环境。
- * - 目标：完美实现 AI 自动回帖、解析、渲染，一步到位，不再需要刷新。
+ * - 终极修复：调整了与后端的交互逻辑。后端现在只负责回帖并返回成功状态。
+ * - 流程重构：前端在收到后端的成功信号后，会立即重新获取一次详情页，然后在本地完成链接的解析和返回。
+ * - 目标：彻底解决“成功后仍需手动刷新”的问题，实现真正的一步到位。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -17,7 +18,7 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v10.0] ${msg}`); } catch (_) { console.log(`[海绵小站 v10.0] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v10.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v10.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -117,7 +118,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (V10.0 - 最终版) ===================
+// =================== getTracks (V10.2 - 迎合刷新机制最终版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -145,8 +146,7 @@ async function getTracks(ext) {
         try {
           safeToast("🤖 AI识别验证码中，请耐心等待...", 20000); 
           
-          // ★★★ 终极修正：直接使用响应对象，不再访问 .data ★★★
-          const response = await $fetch.post(YOUR_API_ENDPOINT, {
+          const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
               threadUrl: detailUrl,
               cookie: COOKIE,
               apiKey: SILICONFLOW_API_KEY
@@ -155,12 +155,19 @@ async function getTracks(ext) {
               timeout: 30000 
           });
 
-          if (response && response.success) {
-              log("后端API处理成功，直接渲染返回的链接列表。");
-              safeToast("✅ AI回帖并解析成功！", 3000);
-              return jsonify(response);
+          const responseData = apiResponse.data || apiResponse;
+
+          if (responseData && responseData.success) {
+              log("后端回帖成功！前端将重新获取页面进行解析...");
+              safeToast("✅ AI回帖成功，正在解析...", 3000);
+              
+              // ★★★ 终极修正：重新获取页面，而不是直接使用后端返回的数据 ★★★
+              const refreshResponse = await fetchWithCookie(detailUrl);
+              data = refreshResponse.data; // 使用新获取的、已解锁的页面数据
+              $ = cheerio.load(data); // 重新加载到 cheerio
+              
           } else {
-              const errorMessage = response ? response.message : "未知后端错误";
+              const errorMessage = responseData ? responseData.message : "未知后端错误";
               log(`后端API返回失败: ${errorMessage}`);
               safeToast(`❌ 后端处理失败: ${errorMessage}`, 5000);
               return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
@@ -193,7 +200,8 @@ async function getTracks(ext) {
       }
     }
 
-    log("无需回帖或本地回帖已成功，直接解析页面。");
+    // --- 统一的出口：所有成功路径最终都会在这里进行解析 ---
+    log("页面已解锁，开始在前端进行最终解析...");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
 
@@ -243,11 +251,14 @@ async function getTracks(ext) {
       tracks.push({ name: "网盘", pan: finalPan, ext: { pwd: record.code || '' } });
     });
 
-    if (tracks.length === 0) tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
+    if (tracks.length === 0) {
+        log("在最终的页面解析中未能找到链接。");
+        tracks.push({ name: "回帖成功但未找到有效资源", pan: '', ext: {} });
+    }
     return jsonify({ list: [{ title: '云盘', tracks }] });
 
   } catch (e) {
-    log(`getTracks错误: ${e.message}`);
+    log(`getTracks最外层捕获到错误: ${e.message}`);
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
   }
 }
