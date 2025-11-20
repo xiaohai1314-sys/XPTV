@@ -1,10 +1,11 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v10.2 (迎合刷新机制最终版)
+ * 海绵小站前端插件 - 移植增强版 v11.1 (绝对信任最终版)
  *
  * 更新说明:
- * - 终极修复：调整了与后端的交互逻辑。后端现在只负责回帖并返回成功状态。
- * - 流程重构：前端在收到后端的成功信号后，会立即重新获取一次详情页，然后在本地完成链接的解析和返回。
- * - 目标：彻底解决“成功后仍需手动刷新”的问题，实现真正的一步到位。
+ * - 终极修复：彻底放弃对 $fetch 响应内容的判断，以 try-catch 作为唯一的成功/失败依据。
+ * - 信任后端：只要 $fetch 调用不抛出异常，就无条件认为后端已成功回帖。
+ * - 逻辑保留：在“成功”后，立即刷新页面并由前端完成解析，以适配 App 的渲染机制。
+ * - 目标：与经过验证的 V4.0 后端完美配合，实现一步到位。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -18,22 +19,13 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v10.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v10.2] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v11.1] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.1] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-function safeToast(message, duration = 3000) {
-    try {
-        toast(message, duration);
-    } catch (e) {
-        log(`Toast function not available. Message: ${message}`);
-    }
-}
-
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-    safeToast("请先在插件脚本中配置Cookie");
     throw new Error("Cookie not configured.");
   }
   const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
@@ -54,16 +46,8 @@ async function reply(url) {
   const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
   try {
     const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
-    if (data.includes("您尚未登录")) {
-      log("回帖失败：Cookie已失效或不正确。");
-      safeToast("Cookie已失效，请重新获取");
-      return false;
-    }
-    if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) {
-        log("回帖失败：服务器返回拒绝信息。");
-        safeToast("回帖被拒绝，可能是操作太快或内容重复");
-        return false;
-    }
+    if (data.includes("您尚未登录")) { log("回帖失败：Cookie已失效或不正确。"); return false; }
+    if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) { log("回帖失败：服务器返回拒绝信息。"); return false; }
     log("回帖请求已发送！");
     return true;
   } catch (e) {
@@ -118,7 +102,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (V10.2 - 迎合刷新机制最终版) ===================
+// =================== getTracks (V11.1 - 绝对信任最终版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -139,14 +123,13 @@ async function getTracks(ext) {
         log("内容被隐藏，检测到验证码，调用本地后端API处理...");
         
         if (!YOUR_API_ENDPOINT || YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
-            safeToast("请先在插件脚本中配置您电脑的后端IP地址和API Key！", 5000);
             return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 前端插件未配置后端IP", pan: '', ext: {} }] }] });
         }
         
         try {
-          safeToast("🤖 AI识别验证码中，请耐心等待...", 20000); 
+          log("正在调用后端，请稍候...");
           
-          const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+          await $fetch.post(YOUR_API_ENDPOINT, {
               threadUrl: detailUrl,
               cookie: COOKIE,
               apiKey: SILICONFLOW_API_KEY
@@ -155,30 +138,19 @@ async function getTracks(ext) {
               timeout: 30000 
           });
 
-          const responseData = apiResponse.data || apiResponse;
-
-          if (responseData && responseData.success) {
-              log("后端回帖成功！前端将重新获取页面进行解析...");
-              safeToast("✅ AI回帖成功，正在解析...", 3000);
+          // ★★★ 终极修正：不再检查返回值，只要没进catch就认为成功 ★★★
+          log("后端调用完成（无异常），假定回帖成功。前端将重新获取页面进行解析...");
+          
+          const refreshResponse = await fetchWithCookie(detailUrl);
+          data = refreshResponse.data;
+          $ = cheerio.load(data);
               
-              // ★★★ 终极修正：重新获取页面，而不是直接使用后端返回的数据 ★★★
-              const refreshResponse = await fetchWithCookie(detailUrl);
-              data = refreshResponse.data; // 使用新获取的、已解锁的页面数据
-              $ = cheerio.load(data); // 重新加载到 cheerio
-              
-          } else {
-              const errorMessage = responseData ? responseData.message : "未知后端错误";
-              log(`后端API返回失败: ${errorMessage}`);
-              safeToast(`❌ 后端处理失败: ${errorMessage}`, 5000);
-              return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
-          }
         } catch (e) {
           let errorReason = e.message || "未知网络错误";
           if (errorReason.toLowerCase().includes('timeout')) {
               errorReason = "后端处理超时，请重试。";
           }
           log(`调用后端API时捕获到错误: ${errorReason}`);
-          safeToast(`❌ 调用后端失败: ${errorReason}`, 5000);
           return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端失败: ${errorReason}`, pan: '', ext: {} }] }] });
         }
 
@@ -200,7 +172,6 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 统一的出口：所有成功路径最终都会在这里进行解析 ---
     log("页面已解锁，开始在前端进行最终解析...");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
