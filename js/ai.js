@@ -2,7 +2,7 @@
 // 描述: “趣乐兔”搜索插件 - V2.0 (严谨模仿“天逸搜”结构版)
 
 // ================== 配置区 ==================
-const API_ENDPOINT = "http://192.168.10.105:3005/search";
+const API_ENDPOINT = "http://192.168.1.7:3005/search";
 const SITE_URL = "https://pan.funletu.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
