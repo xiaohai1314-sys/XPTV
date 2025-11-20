@@ -1,10 +1,10 @@
 /**
- * 夸父资源前端插件 - V5.3 最终完美版
+ * 夸父资源前端插件 - V5.4 一步到位版
  *
  * 版本说明:
- * - 【V5.3 核心】基于 V5.2 版本，只对 `performReply` 函数进行了一次外科手术式的修正。
- * - 【完美回帖】彻底废除了 `performReply` 中错误的 `JSON.parse` 逻辑，改为使用最可靠的HTML内容匹配来判断回帖是否成功，彻底解决了“红色HTML代码”的丑陋错误。
- * - 【保留所有胜利果实】V5.2 中已完美解决的搜索逻辑（缓存机制+正确URL）、您最满意的提示语、最新的有效Cookie等所有来之不易的成果，均被完整保留，未动分毫。
+ * - 【V5.4 核心】修正了 getTracks 函数中的异步逻辑。在后台自动回帖成功后，会立即重新加载页面以获取解锁后的内容，实现“一步到位”的解析，无需用户手动刷新。
+ * - 【逻辑修正】确保只有在回帖成功后才执行页面重载，如果回帖失败则直接提示用户。
+ * - 【保留所有优点】完整保留 V5.3 版本中完美的回帖引擎、强大的搜索缓存机制和所有您满意的配置。
  */
 
 // --- 配置区 ---
@@ -20,9 +20,9 @@ const COOKIE = 'bbs_sid=kdk76a7etiao2uc1deru2c8q9c; Hm_lvt_2c2cd308748eb9097e250
 // --- 核心辅助函数 ---
 function log(msg ) {
     try {
-        $log(`[夸父资源 最终完美版] ${msg}`);
+        <LaTex>$log(`[夸父资源 V5.4] $</LaTex>{msg}`);
     } catch (_) {
-        console.log(`[夸父资源 最终完美版] ${msg}`);
+        console.log(`[夸父资源 V5.4] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -35,10 +35,9 @@ function getRandomReply() {
     return replies[Math.floor(Math.random() * replies.length)];
 }
 
-// ★★★★★【V5.3 核心修正：最终完美回帖引擎】★★★★★
 async function performReply(threadId) {
     log(`正在尝试为帖子 ${threadId} 自动回帖...`);
-    const replyUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
+    const replyUrl = `<LaTex>${SITE_URL}/post-create-$</LaTex>{threadId}-1.htm`;
     const message = getRandomReply();
     const formData = `doctype=1&return_html=1&quotepid=0&message=${encodeURIComponent(message)}&quick_reply_message=0`;
     try {
@@ -49,11 +48,10 @@ async function performReply(threadId) {
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
                 'Origin': SITE_URL,
-                'Referer': `${SITE_URL}/thread-${threadId}.htm`
+                'Referer': `<LaTex>${SITE_URL}/thread-$</LaTex>{threadId}.htm`
             }
         });
         
-        // 核心修正：不再使用错误的JSON.parse，而是直接判断返回的HTML中是否包含我们发送的内容
         if (data && data.includes(message)) {
             log(`回帖成功, 内容: "${message}"`);
             return true;
@@ -69,12 +67,11 @@ async function performReply(threadId) {
         return false;
     }
 }
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.3 最终完美版)");
+    log("插件初始化 (V5.4 一步到位版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-1.htm' } },
         { name: '剧集区', ext: { id: 'forum-2.htm' } },
@@ -96,13 +93,13 @@ function getCorrectPicUrl(path) {
     if (!path) return FALLBACK_PIC;
     if (path.startsWith('http' )) return path;
     const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-    return `${SITE_URL}/${cleanPath}`;
+    return `<LaTex>${SITE_URL}/$</LaTex>{cleanPath}`;
 }
 
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
-    const url = `${SITE_URL}/${id.replace('.htm', '')}-${page}.htm`;
+    const url = `<LaTex>${SITE_URL}/$</LaTex>{id.replace('.htm', '')}-${page}.htm`;
     try {
         const { data } = await $fetch.get(url, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
         const $ = cheerio.load(data);
@@ -124,25 +121,41 @@ async function getCards(ext) {
     }
 }
 
+// ★★★★★【V5.4 核心修正】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
     if (!url) return jsonify({ list: [] });
 
-    const detailUrl = `${SITE_URL}/${url}`;
+    const detailUrl = `<LaTex>${SITE_URL}/$</LaTex>{url}`;
     log(`开始处理详情页: ${detailUrl}`);
 
     try {
-        const { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
+        // 1. 第一次加载页面
+        let { data } = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
         let $ = cheerio.load(data);
 
         const isContentHidden = $('.message[isfirst="1"]').text().includes("回复");
+        
         if (isContentHidden) {
             log("内容被隐藏，启动回帖流程...");
             const threadId = url.match(/thread-(\d+)/)[1];
-            await performReply(threadId);
+            const replySuccess = await performReply(threadId);
+
+            // 2. 检查回帖是否成功
+            if (replySuccess) {
+                log("回帖成功，重新加载页面以获取解锁内容...");
+                // 3. 【关键步骤】重新获取页面内容
+                const refreshResponse = await $fetch.get(detailUrl, { headers: { 'User-Agent': UA, 'Cookie': COOKIE } });
+                // 4. 使用新获取的内容更新 cheerio 对象
+                $ = cheerio.load(refreshResponse.data);
+            } else {
+                log("回帖失败，终止操作。");
+                return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 自动回帖失败，请检查Cookie或网络", pan: '', ext: {} }] }] });
+            }
         }
 
+        // 5. 使用最新的页面内容（可能是旧的，也可能是刷新后的）进行解析
         const mainMessage = $('.message[isfirst="1"]');
         const links = [];
         mainMessage.find('a[href*="pan.quark.cn"]').each((_, element) => {
@@ -157,9 +170,12 @@ async function getTracks(ext) {
 
         if (tracks.length === 0) {
             log("未找到有效资源链接。");
+            // 这里的逻辑也需要调整，因为如果回帖成功，就不应该再显示“请刷新”
             if (isContentHidden) {
-                tracks.push({ name: "内容已隐藏，后台自动回帖，请稍后刷新本页", pan: '', ext: {} });
+                // 如果最初是隐藏的，但现在依然找不到链接，说明回帖后页面上也没有资源
+                tracks.push({ name: "回帖成功，但页面上未发现有效链接", pan: '', ext: {} });
             } else {
+                // 如果最初就没隐藏，但找不到链接
                 tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
             }
         }
@@ -171,7 +187,6 @@ async function getTracks(ext) {
     }
 }
 
-// ★★★★★【V5.1/V5.2 胜利果实：最强搜索逻辑】★★★★★
 let searchCache = {
     keyword: '',
     page: 0,
@@ -199,7 +214,7 @@ async function search(ext) {
     }
 
     if (page > searchCache.pagecount) {
-        log(`请求页码 ${page} 超出总页数 ${searchCache.pagecount}，搜索终止。`);
+        log(`请求页码 <LaTex>${page} 超出总页数 $</LaTex>{searchCache.pagecount}，搜索终止。`);
         return jsonify({ list: [] });
     }
 
@@ -209,14 +224,14 @@ async function search(ext) {
         return jsonify({ list: searchCache.results.slice((page - 1) * pageSize, page * pageSize) });
     }
 
-    log(`正在搜索: "${text}", 请求第 ${page} 页...`);
+    log(`正在搜索: "<LaTex>${text}", 请求第 $</LaTex>{page} 页...`);
 
     const encodedKeyword = encodeURIComponent(text);
     let url;
     if (page === 1) {
-        url = `${SITE_URL}/search-${encodedKeyword}-1.htm`;
+        url = `<LaTex>${SITE_URL}/search-$</LaTex>{encodedKeyword}-1.htm`;
     } else {
-        url = `${SITE_URL}/search-${encodedKeyword}-1-${page}.htm`;
+        url = `<LaTex>${SITE_URL}/search-$</LaTex>{encodedKeyword}-1-${page}.htm`;
     }
     log(`构建的请求URL: ${url}`);
 
@@ -249,7 +264,7 @@ async function search(ext) {
         });
 
         if (cards.length === 0 && page > 1) {
-            log(`第 ${page} 页没有返回结果，强制设置总页数为 ${page - 1}`);
+            log(`第 <LaTex>${page} 页没有返回结果，强制设置总页数为 $</LaTex>{page - 1}`);
             searchCache.pagecount = page - 1;
             return jsonify({ list: [] });
         }
@@ -258,7 +273,7 @@ async function search(ext) {
         searchCache.page = page;
         searchCache.total = searchCache.results.length;
 
-        log(`第 ${page} 页搜索成功，新增 ${cards.length} 条，当前缓存总数 ${searchCache.total}`);
+        log(`第 <LaTex>${page} 页搜索成功，新增 $</LaTex>{cards.length} 条，当前缓存总数 ${searchCache.total}`);
         return jsonify({ list: cards });
 
     } catch (e) {
@@ -266,7 +281,6 @@ async function search(ext) {
         return jsonify({ list: [] });
     }
 }
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 // --- 兼容旧版 XPTV App 接口 ---
 async function init() { return getConfig(); }
@@ -281,5 +295,3 @@ async function category(tid, pg) {
 }
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
-
-log('夸父资源插件加载完成 (V5.3 最终完美版)');
