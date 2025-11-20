@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.2 (永久占位修复版)
+// 描述: “趣乐兔”搜索插件 - V1.4 (终极静态占位版)
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.10.105:3005/search";
@@ -11,7 +11,7 @@ const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
 function log(msg ) {
-    if (DEBUG) console.log(`[趣乐兔插件 V1.2] ${msg}`);
+    if (DEBUG) console.log(`[趣乐兔插件 V1.4] ${msg}`);
 }
 
 function argsify(ext) {
@@ -25,7 +25,7 @@ function jsonify(obj) {
 // ================== 插件初始化 ==================
 async function getConfig() {
     return jsonify({
-        ver: 1.2,
+        ver: 1.4,
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
@@ -127,18 +127,22 @@ async function getTracks(ext) {
 // ================== 兼容函数 ==================
 async function init() { return getConfig(); }
 
+// ★★★★★【V1.4 终极修正：在 home() 中直接返回空列表】★★★★★
 async function home() {
     const cfg = await getConfig();
     const tabs = JSON.parse(cfg).tabs;
-    return jsonify({ class: tabs, filters: {} });
+    
+    // 直接在 home() 的响应中包含一个空的 list
+    // App 看到 list 已存在，就不会再去调用 category()，从而避免了所有问题
+    return jsonify({ 
+        class: tabs, 
+        list: [] // 关键：直接提供一个空列表
+    });
 }
 
-// ★★★★★【V1.2 核心修正：让分类页永久占位，不转圈、不消失】★★★★★
+// category 函数现在根本不会被调用，但我们依然保留最简单的形式以防万一
 async function category() {
-    // 创建一个永远不会结束的 Promise，让函数永久挂起
-    // 这会使App停留在当前分类页面，tabs不会消失，也不会转圈
-    await new Promise(() => {});
-    return jsonify({ list: [] }); // 这行代码永远不会被执行
+    return jsonify({ list: [] });
 }
 
 async function detail(id) {
