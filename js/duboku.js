@@ -1,144 +1,333 @@
 /**
- * Nullbr 影视库前端插件 - V93.0 (强制解析修复版)
+ * 海绵小站前端插件 - 移植增强版 v9.8 (超时与体验优化最终版)
  *
- * 变更日志:
- * - V93.0 (2025-11-20):
- *   - [核心修复] 重新启用 getPlayinfo 函数，解决因 play 函数可能未被正确调用或参数传递错误导致后端无日志的问题。
- *   - [逻辑变更] getTracks 返回的播放地址不再直接交给App播放，而是作为一个“信标”传递给 getPlayinfo。
- *   - [强制解析] getPlayinfo 函数会亲自请求后端的 m3u8_proxy 接口，确保请求被发出，后端能收到日志。
- *   - 此版本旨在强制打通前端到后端代理的播放请求链路。
- *
- * 作者: Manus
- * 日期: 2025-11-20
+ * 更新说明:
+ * - 核心修复：为调用后端API的 $fetch 请求增加了 30 秒的超时时间，解决因后端处理时间过长导致前端错误判断为失败的问题。
+ * - 体验优化：在调用后端期间，为用户提供更明确的等待提示；优化了错误捕获逻辑，能区分超时错误和其他网络错误。
+ * - 目标：实现从点击到显示链接的一步到位，无需手动刷新。
  */
 
-var API_BASE_URL = 'http://192.168.10.103:3003';
-var TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+const SITE_URL = "https://www.haimianxz.com";
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const cheerio = createCheerio();
+const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
-function jsonify(data ) { return JSON.stringify(data); }
-function log(msg) { console.log('[Nullbr V93.0] ' + msg); }
+// ★★★★★【用户配置区】★★★★★
+const COOKIE = "bbs_sid=ssi4qit28fqdoksi651al5p196;bbs_token=EnvXd9CmLAoiJHlhbE8IB6nVuOX6_2FqDf2vPXemf8Ao7c7MJH;";
+// 请将下面的YOUR_COMPUTER_IP:3000替换为您电脑的IP地址和端口（例如: http://192.168.10.103:3000/process-thread ）
+const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread"; 
+const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // 替换为您的 API Key
+// ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-var CATEGORIES = [
-    { name: '热门电影', ext: { id: 'hot_movie' } },
-    { name: '热门剧集', ext: { id: 'hot_series' } },
-    { name: '高分电影', ext: { id: 'top_movie' } },
-    { name: '高分剧集', ext: { id: 'top_series' } },
-];
+function log(msg ) { try { $log(`[海绵小站 v9.8] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.8] ${msg}`); } }
+function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
+function jsonify(data) { return JSON.stringify(data); }
+function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-var END_LOCK = {};
+async function fetchWithCookie(url, options = {}) {
+  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
+    $utils.toastError("请先在插件脚本中配置Cookie", 3000);
+    throw new Error("Cookie not configured.");
+  }
+  const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
+  const finalOptions = { ...options, headers };
+  if (options.method === 'POST') {
+    return $fetch.post(url, options.body, finalOptions);
+  }
+  return $fetch.get(url, finalOptions);
+}
 
-// --- 入口与配置函数 ---
-async function init(ext) { END_LOCK = {}; return jsonify({}); }
-async function getConfig() { return jsonify({ ver: 93.0, title: 'Nullbr影视库 (V93)', site: API_BASE_URL, tabs: CATEGORIES }); }
-async function home() { return jsonify({ class: CATEGORIES, filters: {} }); }
-async function category(tid, pg, filter, ext) { return jsonify({ list: [] }); }
+async function reply(url) {
+  log("尝试使用Cookie自动回帖...");
+  const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
+  const threadIdMatch = url.match(/thread-(\d+)/);
+  if (!threadIdMatch) return false;
+  const threadId = threadIdMatch[1];
+  const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
+  const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
+  try {
+    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
+    if (data.includes("您尚未登录")) {
+      log("回帖失败：Cookie已失效或不正确。");
+      $utils.toastError("Cookie已失效，请重新获取", 3000);
+      return false;
+    }
+    if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) {
+        log("回帖失败：服务器返回拒绝信息。");
+        $utils.toastError("回帖被拒绝，可能是操作太快或内容重复", 3000);
+        return false;
+    }
+    log("回帖请求已发送！");
+    return true;
+  } catch (e) {
+    log(`回帖请求异常: ${e.message}`);
+    return false;
+  }
+}
 
-// =======================================================================
-// --- 列表与搜索 (保持稳定) ---
-// =======================================================================
+async function getConfig() {
+  return jsonify({
+    ver: 1,
+    title: '海绵小站',
+    site: SITE_URL,
+    tabs: [
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
+    ],
+  });
+}
+
+function getCorrectPicUrl(path) {
+  if (!path) return FALLBACK_PIC;
+  if (path.startsWith('http' )) return path;
+  const cleanPath = path.startsWith('./') ? path.substring(2) : path;
+  return `${SITE_URL}/${cleanPath}`;
+}
+
 async function getCards(ext) {
-    var parsed = parseExt(ext);
-    var id = parsed.id;
-    var page = parsed.page;
-    var lockKey = 'cat_' + id;
-    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
-    if (page === 1) { delete END_LOCK[lockKey]; }
-    var url = API_BASE_URL + '/api/list?id=' + id + '&page=' + page;
-    try {
-        var data = await fetchData(url);
-        var cards = formatCards(data.items);
-        var pageSize = 30;
-        if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
-        var hasMore = !END_LOCK[lockKey];
-        return jsonify({ list: cards, page: data.page, pagecount: hasMore ? data.page + 1 : data.page });
-    } catch (err) { return handleError(err); }
-}
-
-async function search(ext) {
-    var parsed = parseExt(ext);
-    var keyword = parsed.text;
-    var page = parsed.page;
-    if (!keyword) return jsonify({ list: [] });
-    var lockKey = 'search_' + keyword;
-    if (END_LOCK[lockKey] && page > 1) { return jsonify({ list: [], page: page, pagecount: page }); }
-    if (page === 1) { delete END_LOCK[lockKey]; }
-    var url = API_BASE_URL + '/api/search?keyword=' + encodeURIComponent(keyword) + '&page=' + page;
-    try {
-        var data = await fetchData(url);
-        var cards = formatCards(data.items);
-        var pageSize = 30;
-        if (data.items.length < pageSize) { END_LOCK[lockKey] = true; }
-        var hasMore = !END_LOCK[lockKey];
-        return jsonify({ list: cards, page: data.page, pagecount: hasMore ? data.page + 1 : data.page });
-    } catch (err) { return handleError(err); }
-}
-
-// =======================================================================
-// --- 详情与播放核心 (V93.0 修复版) ---
-// =======================================================================
-
-async function getTracks(ext) {
-    log('[getTracks] 请求后端详情接口...');
-    try {
-        var parsedExt = parseDetailExt(ext);
-        var detailUrl = parsedExt.detail_url;
-        if (!detailUrl) throw new Error("无法从ext中解析出detail_url");
-        log('[getTracks] 请求地址: ' + detailUrl);
-        var data = await fetchData(detailUrl);
-        log('[getTracks] 成功获取后端加工后的数据，透传给App。');
-        return jsonify(data);
-    } catch (err) {
-        log('[getTracks] 发生致命错误: ' + err.message);
-        return jsonify({ list: [{ title: "错误", tracks: [{ name: "加载失败: " + err.message, pan: "" }] }] });
-    }
-}
-
-async function detail(ext) {
-    log('[detail] 此函数已被废弃，不应被调用。');
+  ext = argsify(ext);
+  const { page = 1, id } = ext;
+  const url = `${SITE_URL}/${id}-${page}.htm`;
+  try {
+    const { data } = await fetchWithCookie(url);
+    const $ = cheerio.load(data);
+    const cards = [];
+    $("ul.threadlist > li.media.thread").each((_, item) => {
+      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
+      cards.push({
+        vod_id: $(item).find(".subject a")?.attr("href") || "",
+        vod_name: $(item).find(".subject a")?.text().trim() || "",
+        vod_pic: getCorrectPicUrl(picPath),
+        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
+      });
+    });
+    return jsonify({ list: cards });
+  } catch (e) {
     return jsonify({ list: [] });
+  }
 }
 
-// ★★★【核心修复】★★★
-// 重新启用 getPlayinfo，并让它来请求 m3u8_proxy
-async function getPlayinfo(ext) {
-    try {
-        var parsed = parseDetailExt(ext);
-        var m3u8ProxyUrl = parsed.url;
-        if (!m3u8ProxyUrl) {
-            throw new Error("无法从ext中获取到 m3u8_proxy 的地址");
-        }
-        log('[getPlayinfo] 截获到播放请求, 准备请求后端的M3U8代理: ' + m3u8ProxyUrl);
+// =================================================================================
+// =================== getTracks (V9.8 - 超时与体验优化最终版) ===================
+// =================================================================================
+async function getTracks(ext) {
+  ext = argsify(ext);
+  const { url } = ext;
+  if (!url) return jsonify({ list: [] });
+
+  const detailUrl = `${SITE_URL}/${url}`;
+  log(`开始处理详情页: ${detailUrl}`);
+
+  try {
+    let { data } = await fetchWithCookie(detailUrl);
+    let $ = cheerio.load(data);
+
+    if ($("div.alert.alert-warning").text().includes("回复后")) {
+      const needsCaptcha = $('input[name="vcode"]').length > 0;
+
+      if (needsCaptcha) {
+        log("内容被隐藏，检测到验证码，调用本地后端API处理...");
         
-        // 直接将 m3u8_proxy 的地址返回给播放器
-        // 这一步将强制App去请求我们的后端，后端应该会出现日志了！
-        return jsonify({
-            url: m3u8ProxyUrl
-        });
+        if (!YOUR_API_ENDPOINT || YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
+            $utils.toastError("请先在插件脚本中配置您电脑的后端IP地址和API Key！", 5000);
+            return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 前端插件未配置后端IP", pan: '', ext: {} }] }] });
+        }
+        
+        try {
+          // ★★★ 优化用户提示 ★★★
+          $utils.toast("🤖 AI识别验证码中，请耐心等待...", 20000); 
+          
+          // ★★★ 核心修复：增加超时设置 (30000毫秒 = 30秒) ★★★
+          const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+              threadUrl: detailUrl,
+              cookie: COOKIE,
+              apiKey: SILICONFLOW_API_KEY
+          }, { 
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 30000 
+          });
 
-    } catch (err) {
-        log('[getPlayinfo] 错误: ' + err.message);
-        // 出错时返回一个无效地址，避免App崩溃
-        return jsonify({ url: 'http://error.com/play.m3u8' } );
+          if (apiResponse.data && apiResponse.data.success) {
+              log("后端API处理成功，直接渲染返回的链接列表。");
+              $utils.toastSuccess("✅ AI回帖并解析成功！", 3000);
+              return jsonify(apiResponse.data);
+          } else {
+              const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
+              log(`后端API返回失败: ${errorMessage}`);
+              $utils.toastError(`❌ 后端处理失败: ${errorMessage}`, 5000);
+              return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
+          }
+        } catch (e) {
+          // ★★★ 优化错误提示，区分超时和其他错误 ★★★
+          let errorReason = e.message || "未知网络错误";
+          if (errorReason.toLowerCase().includes('timeout')) {
+              errorReason = "后端处理超时，请重试。";
+          }
+          log(`调用后端API时捕获到错误: ${errorReason}`);
+          $utils.toastError(`❌ 调用后端失败: ${errorReason}`, 5000);
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端失败: ${errorReason}`, pan: '', ext: {} }] }] });
+        }
+
+      } else {
+        // ... (无验证码的本地回帖逻辑保持不变) ...
+        log("内容被隐藏，未检测到验证码，使用本地回帖...");
+        const replied = await reply(detailUrl);
+        if (replied) {
+          for (let i = 0; i < 3; i++) {
+            await $utils.sleep(1500);
+            const retryResponse = await fetchWithCookie(detailUrl);
+            data = retryResponse.data;
+            if (!data.includes("回复后")) { log(`第 ${i + 1} 次刷新后成功解锁资源`); break; }
+            else { log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`); }
+          }
+          $ = cheerio.load(data);
+        } else {
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ Cookie无效或回帖失败，无法获取资源", pan: '', ext: {} }] }] });
+        }
+      }
     }
+
+    // --- 如果无需回帖，或本地回帖成功，则执行原始的提取逻辑 ---
+    log("无需回帖或本地回帖已成功，直接解析页面。");
+    const mainMessage = $(".message[isfirst='1']");
+    if (!mainMessage.length) return jsonify({ list: [] });
+
+    const linkNodes = mainMessage.find("a[href*='cloud.189.cn'], a[href*='pan.quark.cn']");
+    const resultsMap = new Map();
+
+    const numMap = {'零':'0','〇':'0','一':'1','壹':'1','依':'1','二':'2','贰':'2','三':'3','叁':'3','四':'4','肆':'4','五':'5','伍':'5','吴':'5','吾':'5','无':'5','武':'5','悟':'5','舞':'5','物':'5','乌':'5','屋':'5','唔':'5','雾':'5','勿':'5','误':'5','污':'5','务':'5','午':'5','捂':'5','戊':'5','毋':'5','邬':'5','兀':'5','六':'6','陆':'6','七':'7','柒':'7','八':'8','捌':'8','九':'9','玖':'9','久':'9','酒':'9','Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5','Ⅵ':'6','Ⅶ':'7','Ⅷ':'8','Ⅸ':'9','①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10','０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9'};
+    const charMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
+
+    function purify(raw) {
+      const isSpecialCase = /\(/.test(raw) && /\[/.test(raw); 
+      if (isSpecialCase) {
+          let specialCode = '';
+          const regex = /\(([^)]+)\)|\[([^\]]+)\]|\{([^}]+)\}|\<([^>]+)\>/g;
+          const matches = raw.matchAll(regex);
+          for (const match of matches) {
+              const char = match[1] || match[2] || match[3] || match[4];
+              if (char) {
+                  specialCode += char;
+              }
+          }
+          if (specialCode.length > 0) {
+              return specialCode.toLowerCase();
+          }
+      }
+      const codeMatch = raw.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/);
+      const extracted = codeMatch ? codeMatch[1].trim() : raw.trim();
+      let converted = '';
+      for (const c of extracted) {
+        converted += numMap[c] || charMap[c] || c;
+      }
+      const finalMatch = converted.match(/^[a-zA-Z0-9]+/);
+      return finalMatch ? finalMatch[0].toLowerCase() : null;
+    }
+
+    linkNodes.each((_, node) => {
+      const link = $(node).attr("href");
+      let code = null;
+      let el = $(node).closest("p, div, h3");
+      if (!el.length) el = $(node);
+
+      const searchEls = [el];
+      let next = el.next();
+      for (let i = 0; i < 3 && next.length; i++) {
+        searchEls.push(next);
+        next = next.next();
+      }
+
+      for (const e of searchEls) {
+        const text = e.text().trim();
+        if (text.match(/(?:访问码|提取码|密码)/)) {
+          const found = purify(text);
+          if (found) { code = found; break; }
+        }
+        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) {
+          const found = purify(text);
+          if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
+        }
+      }
+
+      const existing = resultsMap.get(link);
+      if (!existing || (!existing.code && code)) {
+        resultsMap.set(link, { link, code });
+      }
+    });
+
+    const tracks = [];
+    resultsMap.forEach(record => {
+      const finalPan = record.code ? `${record.link}（访问码：${record.code}）` : record.link;
+      tracks.push({ name: "网盘", pan: finalPan, ext: { pwd: record.code || '' } });
+    });
+
+    if (tracks.length === 0) tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
+    return jsonify({ list: [{ title: '云盘', tracks }] });
+
+  } catch (e) {
+    log(`getTracks错误: ${e.message}`);
+    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
+  }
 }
 
-// play 函数现在变成了一个简单的信使，它只负责把播放线路的信息（包含 ext.url）传递给 getPlayinfo
-async function play(flag, id, flags) {
-    log('[play] 收到播放指令, flag: ' + flag + ', id: ' + id);
-    // id 此时是 JSON 字符串, 如 '{"url":"http://.../m3u8_proxy?..."}'
-    // 我们把它直接传递给 getPlayinfo 去处理
-    return jsonify({
-        parse: 1,  // 告诉App需要进一步解析
-        jx: '1',   // 启动解析
-        url: id    // 把包含 m3u8_proxy 地址的 JSON 字符串传递过去
-    } );
+const searchCache = {};
+async function search(ext) {
+  ext = argsify(ext);
+  const text = ext.text || '';
+  const page = ext.page || 1;
+  if (!text) return jsonify({ list: [] });
+  if (searchCache.keyword !== text) {
+    searchCache.keyword = text;
+    searchCache.data = [];
+    searchCache.pagecount = 0;
+    searchCache.total = 0;
+  }
+  if (searchCache.data && searchCache.data[page - 1]) {
+    return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
+  }
+  if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
+    return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
+  }
+  const url = page === 1
+    ? `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`
+    : `${SITE_URL}/search-${encodeURIComponent(text)}-1-0-${page}.htm`;
+  try {
+    const { data } = await fetchWithCookie(url);
+    const $ = cheerio.load(data);
+    const cards = [];
+    $("ul.threadlist > li.media.thread").each((_, item) => {
+      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
+      cards.push({
+        vod_id: $(item).find(".subject a")?.attr("href") || "",
+        vod_name: $(item).find(".subject a")?.text().trim() || "",
+        vod_pic: getCorrectPicUrl(picPath),
+        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
+        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
+      });
+    });
+    let pagecount = 0;
+    $('ul.pagination a.page-link').each((_, link) => {
+      const p = parseInt($(link).text().trim());
+      if (!isNaN(p)) pagecount = Math.max(pagecount, p);
+    });
+    const total = cards.length;
+    if (!searchCache.data) searchCache.data = [];
+    searchCache.data[page - 1] = cards;
+    searchCache.pagecount = pagecount;
+    searchCache.total = total;
+    return jsonify({ list: cards, pagecount, total });
+  } catch (e) {
+    log(`search错误: ${e.message}`);
+    return jsonify({ list: [], pagecount: 0, total: 0 });
+  }
 }
 
-// =======================================================================
-// --- 辅助函数区 (保持稳定) ---
-// =======================================================================
-function parseExt(ext) { try { var extObj = typeof ext === 'string' ? JSON.parse(ext) : ext; var nestedExt = extObj.ext || extObj || {}; var id = nestedExt.id || (extObj.class && extObj.class.length > 0 ? extObj.class[0].ext.id : CATEGORIES[0].ext.id); var page = nestedExt.pg || nestedExt.page || 1; var text = nestedExt.text || ""; return { id: id, page: page, text: text }; } catch (e) { return { id: CATEGORIES[0].ext.id, page: 1, text: "" }; } }
-function parseDetailExt(ext) { try { if (typeof ext === 'string') { ext = JSON.parse(ext); } if (ext && ext.ext) { return ext.ext; } if (ext) { return ext; } return {}; } catch (e) { return {}; } }
-async function fetchData(url) { var response = await $fetch.get(url); var data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data; if (!data) throw new Error("后端未返回有效数据"); return data; }
-function formatCards(items) { if (!items || !Array.isArray(items)) return []; return items.map(function(item) { var picUrl = item.poster ? TMDB_IMAGE_BASE_URL + item.poster : ""; return { vod_id: item.media_type + '_' + item.tmdbid, vod_name: item.title || '未命名', vod_pic: picUrl, vod_remarks: item.overview || (item.release_date ? item.release_date.substring(0, 4) : ''), ext: item.ext }; }); }
-function handleError(err) { log('请求失败: ' + err.message); return jsonify({ list: [] }); }
+async function init() { return getConfig(); }
+async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
+async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
+async function detail(id) { return getTracks({ url: id }); }
+async function play(vod_id, vod_name, ext) { return jsonify({ url: ext.url, name: vod_name, play: ext.url }); }
+async function test(ext) { return getConfig(); }
