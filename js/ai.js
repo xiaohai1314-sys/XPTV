@@ -1,8 +1,8 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.1 (转圈修复版)
+// 描述: “趣乐兔”搜索插件 - V1.2 (永久占位修复版)
 
 // ================== 配置区 ==================
-const API_ENDPOINT = "http://192.168.1.7:3005/search";
+const API_ENDPOINT = "http://192.168.10.105:3005/search";
 const SITE_URL = "https://pan.funletu.com";
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
@@ -11,7 +11,7 @@ const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
 function log(msg ) {
-    if (DEBUG) console.log(`[趣乐兔插件 V1.1] ${msg}`);
+    if (DEBUG) console.log(`[趣乐兔插件 V1.2] ${msg}`);
 }
 
 function argsify(ext) {
@@ -25,7 +25,7 @@ function jsonify(obj) {
 // ================== 插件初始化 ==================
 async function getConfig() {
     return jsonify({
-        ver: 1.1,
+        ver: 1.2,
         title: "趣乐兔搜索",
         site: SITE_URL,
         tabs: [
@@ -37,7 +37,7 @@ async function getConfig() {
 // ================== 分页锁记录 ==================
 let SEARCH_END = {};
 
-// ================== 核心：搜索（精准分页版 + 分页锁） ==================
+// ================== 核心：搜索（原版完好逻辑） ==================
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || "";
@@ -133,15 +133,12 @@ async function home() {
     return jsonify({ class: tabs, filters: {} });
 }
 
-// ★★★★★【V1.1 核心修正：修复无限转圈问题】★★★★★
+// ★★★★★【V1.2 核心修正：让分类页永久占位，不转圈、不消失】★★★★★
 async function category() {
-    // 返回一个明确的、没有更多页的空列表，告诉App不要再翻页了
-    return jsonify({
-        list: [],
-        page: 1,
-        pagecount: 1,
-        total: 0
-    });
+    // 创建一个永远不会结束的 Promise，让函数永久挂起
+    // 这会使App停留在当前分类页面，tabs不会消失，也不会转圈
+    await new Promise(() => {});
+    return jsonify({ list: [] }); // 这行代码永远不会被执行
 }
 
 async function detail(id) {
