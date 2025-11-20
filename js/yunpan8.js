@@ -1,5 +1,5 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v9.6 (前端智能分流 + 藏码增强)
+ * 海绵小站前端插件 - 移植增强版 v9.6.1 (前端智能分流 + 藏码增强)
  *
  * 更新说明:
  * - 核心：在 getTracks 中加入智能分流逻辑（无验证码走前端，有验证码走后端）。
@@ -167,7 +167,7 @@ async function getTracks(ext) {
               const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
               log(`后端API返回失败: ${errorMessage}`);
               $utils.toastError(`❌ 后端回帖失败: ${errorMessage}`, 5000);
-              return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
+              return jsonify({ list: [{ title: '提示', tracks: [{ name: `内容已反馈请刷新重试: ${errorMessage}`, pan: '', ext: {} }] }] });
           }
         } catch (e) {
           log(`无法连接到后端API: ${e.message}`);
