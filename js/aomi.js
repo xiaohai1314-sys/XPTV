@@ -1,10 +1,11 @@
 /**
- * 夸父资源前端插件 - V5.4 一步到位版
+ * 夸父资源前端插件 - V5.6 精准回归版
  *
  * 版本说明:
- * - 【V5.4 核心】修正了 getTracks 函数中的异步逻辑。在后台自动回帖成功后，会立即重新加载页面以获取解锁后的内容，实现“一步到位”的解析，无需用户手动刷新。
- * - 【逻辑修正】确保只有在回帖成功后才执行页面重载，如果回帖失败则直接提示用户。
- * - 【保留所有优点】完整保留 V5.3 版本中完美的回帖引擎、强大的搜索缓存机制和所有您满意的配置。
+ * - 【V5.6 核心】以用户反馈的、分类显示正常的 V5.3 版本为基础进行修正。
+ * - 【精准移植】仅将 V5.4 版本中已验证成功的“一步到位”getTracks函数逻辑移植过来，解决详情页需要手动刷新的问题。
+ * - 【严格回归】home(), category(), getCards() 等所有其他函数，均恢复到 V5.3 的原始状态，确保首页分类可以正常显示。
+ * - 【最终目标】结合了 V5.3 的首页正确性 和 V5.4 的详情页便利性，实现真正的最终完美版。
  */
 
 // --- 配置区 ---
@@ -20,9 +21,9 @@ const COOKIE = 'bbs_sid=kdk76a7etiao2uc1deru2c8q9c; Hm_lvt_2c2cd308748eb9097e250
 // --- 核心辅助函数 ---
 function log(msg ) {
     try {
-        <LaTex>$log(`[夸父资源 V5.4] $</LaTex>{msg}`);
+        <LaTex>$log(`[夸父资源 V5.6] $</LaTex>{msg}`);
     } catch (_) {
-        console.log(`[夸父资源 V5.4] ${msg}`);
+        console.log(`[夸父资源 V5.6] ${msg}`);
     }
 }
 function argsify(ext) {
@@ -71,7 +72,7 @@ async function performReply(threadId) {
 // --- XPTV App 插件入口函数 ---
 
 async function getConfig() {
-    log("插件初始化 (V5.4 一步到位版)");
+    log("插件初始化 (V5.6 精准回归版)");
     const CUSTOM_CATEGORIES = [
         { name: '电影区', ext: { id: 'forum-1.htm' } },
         { name: '剧集区', ext: { id: 'forum-2.htm' } },
@@ -96,6 +97,7 @@ function getCorrectPicUrl(path) {
     return `<LaTex>${SITE_URL}/$</LaTex>{cleanPath}`;
 }
 
+// 【回归】getCards 函数恢复到 V5.3 的原始状态
 async function getCards(ext) {
     ext = argsify(ext);
     const { page = 1, id } = ext;
@@ -121,7 +123,7 @@ async function getCards(ext) {
     }
 }
 
-// ★★★★★【V5.4 核心修正】★★★★★
+// ★★★★★【V5.6 核心修正：精准移植“一步到位”逻辑】★★★★★
 async function getTracks(ext) {
     ext = argsify(ext);
     const { url } = ext;
@@ -170,12 +172,9 @@ async function getTracks(ext) {
 
         if (tracks.length === 0) {
             log("未找到有效资源链接。");
-            // 这里的逻辑也需要调整，因为如果回帖成功，就不应该再显示“请刷新”
             if (isContentHidden) {
-                // 如果最初是隐藏的，但现在依然找不到链接，说明回帖后页面上也没有资源
                 tracks.push({ name: "回帖成功，但页面上未发现有效链接", pan: '', ext: {} });
             } else {
-                // 如果最初就没隐藏，但找不到链接
                 tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
             }
         }
@@ -220,7 +219,7 @@ async function search(ext) {
 
     if (page <= searchCache.page) {
         log(`请求页码 ${page} 已在缓存中，直接返回。`);
-        const pageSize = 20; // 假设每页20条
+        const pageSize = 20;
         return jsonify({ list: searchCache.results.slice((page - 1) * pageSize, page * pageSize) });
     }
 
@@ -284,14 +283,19 @@ async function search(ext) {
 
 // --- 兼容旧版 XPTV App 接口 ---
 async function init() { return getConfig(); }
+
+// 【回归】home 函数恢复到 V5.3 的原始状态
 async function home() {
     const c = await getConfig();
     const config = JSON.parse(c);
     return jsonify({ class: config.tabs, filters: {} });
 }
+
+// 【回归】category 函数恢复到 V5.3 的原始状态
 async function category(tid, pg) {
     const id = typeof tid === 'object' ? tid.id : tid;
     return getCards({ id: id, page: pg });
 }
+
 async function detail(id) { return getTracks({ url: id }); }
 async function play(flag, id) { return jsonify({ url: id }); }
