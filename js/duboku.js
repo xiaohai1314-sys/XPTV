@@ -1,303 +1,385 @@
-/**
- * 海绵小站前端插件 - 移植增强版 v11.5 (精准打击版)
+/*
+ * =================================================================
+ * 脚本名称: 雷鲸资源站脚本 - v33 修正版（支持访问码拼接 + 去重增强）
  *
- * 更新说明 (v11.5):
- * - 最终修复：根据 v11.4 调试信息，确认了 $fetch 在失败时返回一个特殊的嵌套对象 {status: 500, data: "{\"success\":false,...}"}。
- * - 精准解析：代码现在会精确地检查返回对象中的 `status` 字段，如果为 500，则会取出 `data` 字段的字符串并将其解析为内层JSON，从而获取真正的失败信息。
- * - 逻辑固化：错误处理逻辑已完全适配当前环境的 $fetch 行为，彻底解决所有“后端失败、前端显示成功”的问题。
- * - 清理调试：移除了 v11.4 中的调试代码，恢复正常、清晰的错误提示。
+ * 更新说明:
+ * - 修复无法识别带中文括号访问码的链接。
+ * - 自动拼接格式「链接（访问码：xxxx）」。
+ * - 增强去重机制：即使带括号/访问码的重复链接也只保留一条。
+ * - 分类结构、精准匹配、<a>提取部分保持原样。
+ * =================================================================
  */
 
-const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const cheerio = createCheerio();
-const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
+const BACKEND_URL = 'http://192.168.1.7:3001';
 
-// ★★★★★【用户配置区】★★★★★
-const COOKIE = "bbs_sid=ssi4qit28fqdoksi651al5p196;bbs_token=EnvXd9CmLAoiJHlhbE8IB6nVuOX6_2FqDf2vPXemf8Ao7c7MJH;";
-const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread"; 
-const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
-// ★★★★★★★★★★★★★★★★★★★★★★★★★
-
-function log(msg  ) { try { $log(`[海绵小站 v11.5] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.5] ${msg}`); } }
-function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
-function jsonify(data) { return JSON.stringify(data); }
-function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-    throw new Error("Cookie not configured.");
-  }
-  const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
-  const finalOptions = { ...options, headers };
-  if (options.method === 'POST') {
-    return $fetch.post(url, options.body, finalOptions);
-  }
-  return $fetch.get(url, finalOptions);
-}
-
-async function reply(url) {
-  log("尝试使用Cookie自动回帖...");
-  const replies = ["资源很好,感谢分享!", "太棒了,感谢楼主分享!", "不错的帖子,支持一下!", "终于等到你,还好我没放弃!"];
-  const threadIdMatch = url.match(/thread-(\d+)/);
-  if (!threadIdMatch) return false;
-  const threadId = threadIdMatch[1];
-  const postUrl = `${SITE_URL}/post-create-${threadId}-1.htm`;
-  const postData = { doctype: 1, return_html: 1, message: getRandomText(replies), quotepid: 0, quick_reply_message: 0 };
-  try {
-    const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
-    if (data.includes("您尚未登录")) { log("回帖失败：Cookie已失效或不正确。"); return false; }
-    if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) { log("回帖失败：服务器返回拒绝信息。"); return false; }
-    log("回帖请求已发送！");
-    return true;
-  } catch (e) {
-    log(`回帖请求异常: ${e.message}`);
-    return false;
-  }
-}
+const appConfig = {
+  ver: 33,
+  title: '雷鲸',
+  site: 'https://www.leijing.xyz',
+  tabs: [
+    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
+    { name: '电影', ext: { id: '?tagId=42204681950354' } },
+    { name: '动漫', ext: { id: '?tagId=42204792950357' } },
+    { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
+    { name: '综艺', ext: { id: '?tagId=42210356650363' } },
+    { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
+  ],
+};
 
 async function getConfig() {
-  return jsonify({
-    ver: 1,
-    title: '海绵小站',
-    site: SITE_URL,
-    tabs: [
-      { name: '电影', ext: { id: 'forum-1' } },
-      { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } },
-      { name: '综艺', ext: { id: 'forum-5' } },
-    ],
-  });
+  return jsonify(appConfig);
 }
 
-function getCorrectPicUrl(path) {
-  if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http'  )) return path;
-  const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-  return `${SITE_URL}/${cleanPath}`;
+function getHtmlFromResponse(response) {
+  if (typeof response === 'string') return response;
+  if (response && typeof response.data === 'string') return response.data;
+  console.error("收到了非预期的响应格式:", response);
+  return ''; 
 }
 
+// getCards 函数
 async function getCards(ext) {
   ext = argsify(ext);
-  const { page = 1, id } = ext;
-  const url = `${SITE_URL}/${id}-${page}.htm`;
-  try {
-    const { data } = await fetchWithCookie(url);
-    const $ = cheerio.load(data);
-    const cards = [];
-    $("ul.threadlist > li.media.thread").each((_, item) => {
-      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-      cards.push({
-        vod_id: $(item).find(".subject a")?.attr("href") || "",
-        vod_name: $(item).find(".subject a")?.text().trim() || "",
-        vod_pic: getCorrectPicUrl(picPath),
-        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
-        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
-      });
+  let cards = [];
+  let { page = 1, id } = ext;
+  
+  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  const htmlData = getHtmlFromResponse(response);
+
+  const $ = cheerio.load(htmlData);
+  $('.topicItem').each((_, each) => {
+    if ($(each).find('.cms-lock-solid').length > 0) return;
+    const href = $(each).find('h2 a').attr('href');
+    const title = $(each).find('h2 a').text();
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
+    if (/content/.test(r) && !/cloud/.test(r)) return;
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: dramaName,
+      vod_pic: '',
+      vod_remarks: '',
+      ext: { url: `${appConfig.site}/${href}` },
     });
-    return jsonify({ list: cards });
-  } catch (e) {
-    return jsonify({ list: [] });
-  }
+  });
+  return jsonify({ list: cards });
 }
 
-// =================================================================================
-// =================== getTracks (V11.5 - 精准打击版) ===================
-// =================================================================================
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
+}
+
+function getProtocolAgnosticUrl(rawUrl) {
+  if (!rawUrl) return null;
+  // 🔹 去除访问码部分后提取核心 cloud.189.cn 链接
+  const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
+  const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
+  return match ? match[0] : null;
+}
+
+// getTracks 函数
 async function getTracks(ext) {
   ext = argsify(ext);
-  const { url } = ext;
-  if (!url) return jsonify({ list: [] });
-
-  const detailUrl = `${SITE_URL}/${url}`;
-  log(`开始处理详情页: ${detailUrl}`);
+  const tracks = [];
+  const uniqueLinks = new Set();
 
   try {
-    let { data } = await fetchWithCookie(detailUrl);
-    let $ = cheerio.load(data);
+    const requestUrl = ext.url;
+    const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+    const htmlData = getHtmlFromResponse(response);
+    const $ = cheerio.load(htmlData);
 
-    if ($("div.alert.alert-warning").text().includes("回复后")) {
-      const needsCaptcha = $('input[name="vcode"]').length > 0;
+    const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+    const bodyText = $('body').text();
 
-      if (needsCaptcha) {
-        log("内容被隐藏，检测到验证码，调用本地后端API处理...");
-        
-        if (!YOUR_API_ENDPOINT || YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
-            return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 前端插件未配置后端IP", pan: '', ext: {} }] }] });
-        }
-        
-        try {
-          log("正在调用后端，请稍候...");
-          
-          const backendResponse = await $fetch.post(YOUR_API_ENDPOINT, {
-              threadUrl: detailUrl,
-              cookie: COOKIE,
-              apiKey: SILICONFLOW_API_KEY
-          }, { 
-              headers: { 'Content-Type': 'application/json' },
-              timeout: 30000 
-          });
-
-          // ✅【最终修复】精准处理当前环境的$fetch失败响应
-          if (backendResponse && backendResponse.status === 500 && typeof backendResponse.data === 'string') {
-              log("检测到$fetch失败响应特征 (status: 500, data: string)");
-              const innerResponse = JSON.parse(backendResponse.data);
-              if (innerResponse.success === false) {
-                  throw new Error(innerResponse.message || "后端返回了一个失败响应。");
-              }
-          }
-
-          // ★★★ 只有在没有检测到失败特征时，才认为成功 ★★★
-          log("后端调用完成（未检测到失败特征），假定回帖成功。前端将重新获取页面进行解析...");
-          
-          const refreshResponse = await fetchWithCookie(detailUrl);
-          data = refreshResponse.data;
-          $ = cheerio.load(data);
-              
-        } catch (e) {
-          let errorReason = e.message || "未知网络错误";
-          if (errorReason.toLowerCase().includes('timeout')) {
-              errorReason = "后端处理超时，请重试。";
-          }
-          log(`调用后端API时捕获到错误: ${errorReason}`);
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端失败: ${errorReason}`, pan: '', ext: {} }] }] });
-        }
-
-      } else {
-        log("内容被隐藏，未检测到验证码，使用本地回帖...");
-        const replied = await reply(detailUrl);
-        if (replied) {
-          for (let i = 0; i < 3; i++) {
-            await $utils.sleep(1500);
-            const retryResponse = await fetchWithCookie(detailUrl);
-            data = retryResponse.data;
-            if (!data.includes("回复后")) { log(`第 ${i + 1} 次刷新后成功解锁资源`); break; }
-            else { log(`第 ${i + 1} 次刷新仍未解锁，继续尝试...`); }
-          }
-          $ = cheerio.load(data);
-        } else {
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ Cookie无效或回帖失败，无法获取资源", pan: '', ext: {} }] }] });
-        }
-      }
+    // 第一部分：精准匹配（保持原样）
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    let match;
+    while ((match = precisePattern.exec(bodyText)) !== null) {
+      let panUrl = match[0].replace('http://', 'https://');
+      let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
 
-    log("页面已解锁，开始在前端进行最终解析...");
-    const mainMessage = $(".message[isfirst='1']");
-    if (!mainMessage.length) return jsonify({ list: [] });
-
-    const linkNodes = mainMessage.find("a[href*='cloud.189.cn'], a[href*='pan.quark.cn']");
-    const resultsMap = new Map();
-    
-    const numMap = {'零':'0','〇':'0','一':'1','壹':'1','依':'1','二':'2','贰':'2','三':'3','叁':'3','四':'4','肆':'4','五':'5','伍':'5','吴':'5','吾':'5','无':'5','武':'5','悟':'5','舞':'5','物':'5','乌':'5','屋':'5','唔':'5','雾':'5','勿':'5','误':'5','污':'5','务':'5','午':'5','捂':'5','戊':'5','毋':'5','邬':'5','兀':'5','六':'6','陆':'6','七':'7','柒':'7','八':'8','捌':'8','九':'9','玖':'9','久':'9','酒':'9','Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5','Ⅵ':'6','Ⅶ':'7','Ⅷ':'8','Ⅸ':'9','①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10','０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9'};
-    const charMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
-
-    function purify(raw) {
-      const isSpecialCase = /\(/.test(raw) && /\[/.test(raw); 
-      if (isSpecialCase) {
-          let specialCode = '';
-          const regex = /\(([^)]+)\)|\[([^\]]+)\]|\{([^}]+)\}|\<([^>]+)\>/g;
-          const matches = raw.matchAll(regex);
-          for (const match of matches) { const char = match[1] || match[2] || match[3] || match[4]; if (char) specialCode += char; }
-          if (specialCode.length > 0) return specialCode.toLowerCase();
-      }
-      const codeMatch = raw.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/);
-      const extracted = codeMatch ? codeMatch[1].trim() : raw.trim();
-      let converted = '';
-      for (const c of extracted) { converted += numMap[c] || charMap[c] || c; }
-      const finalMatch = converted.match(/^[a-zA-Z0-9]+/);
-      return finalMatch ? finalMatch[0].toLowerCase() : null;
-    }
-
-    linkNodes.each((_, node) => {
-      const link = $(node).attr("href");
-      let code = null;
-      let el = $(node).closest("p, div, h3");
-      if (!el.length) el = $(node);
-      const searchEls = [el];
-      let next = el.next();
-      for (let i = 0; i < 3 && next.length; i++) { searchEls.push(next); next = next.next(); }
-      for (const e of searchEls) {
-        const text = e.text().trim();
-        if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } }
-        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
-      }
-      const existing = resultsMap.get(link);
-      if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); }
-    });
-    
-    const tracks = [];
-    resultsMap.forEach(record => {
-      const finalPan = record.code ? `${record.link}（访问码：${record.code}）` : record.link;
-      tracks.push({ name: "网盘", pan: finalPan, ext: { pwd: record.code || '' } });
+    // 第二部分：<a> 标签提取（保持原样）
+    $('a[href*="cloud.189.cn"]').each((_, el) => {
+      const $el = $(el);
+      let href = $el.attr('href');
+      if (!href) return;
+      let agnosticUrl = getProtocolAgnosticUrl(href);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
+      href = href.replace('http://', 'https://');
+      let trackName = $el.text().trim() || pageTitle;
+      tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
 
-    if (tracks.length === 0) {
-        log("在最终的页面解析中未能找到链接。");
-        tracks.push({ name: "回帖成功但未找到有效资源", pan: '', ext: {} });
+    // 第三部分：裸文本提取（修正版 + 去重增强）
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
+    while ((match = urlPattern.exec(bodyText)) !== null) {
+      let panUrl = match[0].replace('http://', 'https://');
+
+      // ✅ 提取访问码
+      let accessCode = '';
+      const codeMatch = bodyText.slice(match.index, match.index + 100)
+        .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
+      if (codeMatch) accessCode = codeMatch[1];
+
+      // ✅ 去除尾部多余符号
+      panUrl = panUrl.trim().replace(/[）\)]+$/, '');
+
+      // ✅ 拼接访问码
+      if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
+
+      // ✅ 去重前清理访问码部分
+      const agnosticUrl = getProtocolAgnosticUrl(panUrl);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+
+      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     }
-    return jsonify({ list: [{ title: '云盘', tracks }] });
+
+    return tracks.length
+      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+      : jsonify({ list: [] });
 
   } catch (e) {
-    log(`getTracks最外层捕获到错误: ${e.message}`);
-    return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
+    console.error('获取详情页失败:', e);
+    return jsonify({
+      list: [{
+        title: '错误',
+        tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
+      }]
+    });
   }
 }
 
-const searchCache = {};
+// search 函数
 async function search(ext) {
   ext = argsify(ext);
-  const text = ext.text || '';
-  const page = ext.page || 1;
-  if (!text) return jsonify({ list: [] });
-  if (searchCache.keyword !== text) {
-    searchCache.keyword = text;
-    searchCache.data = [];
-    searchCache.pagecount = 0;
-    searchCache.total = 0;
-  }
-  if (searchCache.data && searchCache.data[page - 1]) {
-    return jsonify({ list: searchCache.data[page - 1], pagecount: searchCache.pagecount, total: searchCache.total });
-  }
-  if (searchCache.pagecount > 0 && page > searchCache.pagecount) {
-    return jsonify({ list: [], pagecount: searchCache.pagecount, total: searchCache.total });
-  }
-  const url = page === 1
-    ? `${SITE_URL}/search.htm?keyword=${encodeURIComponent(text)}`
-    : `${SITE_URL}/search-${encodeURIComponent(text)}-1-0-${page}.htm`;
+  let cards = [];
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
+
+  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+  const response = await $fetch.get(requestUrl);
+  const htmlData = getHtmlFromResponse(response);
+  const $ = cheerio.load(htmlData);
+
+  $('.topicItem').each((_, el) => {
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text();
+    const tag = $(el).find('.tag').text();
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
+}/*
+ * =================================================================
+ * 脚本名称: 雷鲸资源站脚本 - v33 修正版（支持访问码拼接 + 去重增强）
+ *
+ * 更新说明:
+ * - 修复无法识别带中文括号访问码的链接。
+ * - 自动拼接格式「链接（访问码：xxxx）」。
+ * - 增强去重机制：即使带括号/访问码的重复链接也只保留一条。
+ * - 分类结构、精准匹配、<a>提取部分保持原样。
+ * =================================================================
+ */
+
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const cheerio = createCheerio();
+const BACKEND_URL = 'http://192.168.1.3:3001';
+
+const appConfig = {
+  ver: 33,
+  title: '雷鲸',
+  site: 'https://www.leijing.xyz',
+  tabs: [
+    { name: '剧集', ext: { id: '?tagId=42204684250355' } },
+    { name: '电影', ext: { id: '?tagId=42204681950354' } },
+    { name: '动漫', ext: { id: '?tagId=42204792950357' } },
+    { name: '纪录片', ext: { id: '?tagId=42204697150356' } },
+    { name: '综艺', ext: { id: '?tagId=42210356650363' } },
+    { name: '影视原盘', ext: { id: '?tagId=42212287587456' } },
+  ],
+};
+
+async function getConfig() {
+  return jsonify(appConfig);
+}
+
+function getHtmlFromResponse(response) {
+  if (typeof response === 'string') return response;
+  if (response && typeof response.data === 'string') return response.data;
+  console.error("收到了非预期的响应格式:", response);
+  return ''; 
+}
+
+// getCards 函数
+async function getCards(ext) {
+  ext = argsify(ext);
+  let cards = [];
+  let { page = 1, id } = ext;
+  
+  const requestUrl = `${appConfig.site}/${id}&page=${page}`;
+  const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+  const htmlData = getHtmlFromResponse(response);
+
+  const $ = cheerio.load(htmlData);
+  $('.topicItem').each((_, each) => {
+    if ($(each).find('.cms-lock-solid').length > 0) return;
+    const href = $(each).find('h2 a').attr('href');
+    const title = $(each).find('h2 a').text();
+    const regex = /(?:【.*?】)?(?:（.*?）)?([^\s.（]+(?:\s+[^\s.（]+)*)/;
+    const match = title.match(regex);
+    const dramaName = match ? match[1] : title;
+    const r = $(each).find('.summary').text();
+    const tag = $(each).find('.tag').text();
+    if (/content/.test(r) && !/cloud/.test(r)) return;
+    if (/软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: dramaName,
+      vod_pic: '',
+      vod_remarks: '',
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
+}
+
+async function getPlayinfo(ext) {
+  return jsonify({ urls: [] });
+}
+
+function getProtocolAgnosticUrl(rawUrl) {
+  if (!rawUrl) return null;
+  // 🔹 去除访问码部分后提取核心 cloud.189.cn 链接
+  const cleaned = rawUrl.replace(/（访问码[:：\uff1a][a-zA-Z0-9]{4,6}）/g, '');
+  const match = cleaned.match(/cloud\.189\.cn\/[a-zA-Z0-9\/?=]+/);
+  return match ? match[0] : null;
+}
+
+// getTracks 函数
+async function getTracks(ext) {
+  ext = argsify(ext);
+  const tracks = [];
+  const uniqueLinks = new Set();
+
   try {
-    const { data } = await fetchWithCookie(url);
-    const $ = cheerio.load(data);
-    const cards = [];
-    $("ul.threadlist > li.media.thread").each((_, item) => {
-      const picPath = $(item).find("a:first-child > img.avatar-3")?.attr("src");
-      cards.push({
-        vod_id: $(item).find(".subject a")?.attr("href") || "",
-        vod_name: $(item).find(".subject a")?.text().trim() || "",
-        vod_pic: getCorrectPicUrl(picPath),
-        vod_remarks: $(item).find(".d-flex.justify-content-between.small .text-grey:last-child")?.text().trim() || "",
-        ext: { url: $(item).find(".subject a")?.attr("href") || "" }
-      });
+    const requestUrl = ext.url;
+    const response = await $fetch.get(requestUrl, { headers: { 'User-Agent': UA } });
+    const htmlData = getHtmlFromResponse(response);
+    const $ = cheerio.load(htmlData);
+
+    const pageTitle = $('.topicBox .title').text().trim() || "网盘资源";
+    const bodyText = $('body').text();
+
+    // 第一部分：精准匹配（保持原样）
+    const precisePattern = /(https?:\/\/cloud\.189\.cn\/(?:t\/[a-zA-Z0-9]+|web\/share\?code=[a-zA-Z0-9]+  ))\s*[\(（\uff08]访问码[:：\uff1a]([a-zA-Z0-9]{4,6})[\)）\uff09]/g;
+    let match;
+    while ((match = precisePattern.exec(bodyText)) !== null) {
+      let panUrl = match[0].replace('http://', 'https://');
+      let agnosticUrl = getProtocolAgnosticUrl(panUrl);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
+    }
+
+    // 第二部分：<a> 标签提取（保持原样）
+    $('a[href*="cloud.189.cn"]').each((_, el) => {
+      const $el = $(el);
+      let href = $el.attr('href');
+      if (!href) return;
+      let agnosticUrl = getProtocolAgnosticUrl(href);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) return;
+      href = href.replace('http://', 'https://');
+      let trackName = $el.text().trim() || pageTitle;
+      tracks.push({ name: trackName, pan: href, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
     });
-    let pagecount = 0;
-    $('ul.pagination a.page-link').each((_, link) => {
-      const p = parseInt($(link).text().trim());
-      if (!isNaN(p)) pagecount = Math.max(pagecount, p);
-    });
-    const total = cards.length;
-    if (!searchCache.data) searchCache.data = [];
-    searchCache.data[page - 1] = cards;
-    searchCache.pagecount = pagecount;
-    searchCache.total = total;
-    return jsonify({ list: cards, pagecount, total });
+
+    // 第三部分：裸文本提取（修正版 + 去重增强）
+    const urlPattern = /https?:\/\/cloud\.189\.cn\/[^\s"'<>）)]+/g;
+    while ((match = urlPattern.exec(bodyText)) !== null) {
+      let panUrl = match[0].replace('http://', 'https://');
+
+      // ✅ 提取访问码
+      let accessCode = '';
+      const codeMatch = bodyText.slice(match.index, match.index + 100)
+        .match(/（访问码[:：\uff1a]([a-zA-Z0-9]{4,6})）/);
+      if (codeMatch) accessCode = codeMatch[1];
+
+      // ✅ 去除尾部多余符号
+      panUrl = panUrl.trim().replace(/[）\)]+$/, '');
+
+      // ✅ 拼接访问码
+      if (accessCode) panUrl = `${panUrl}（访问码：${accessCode}）`;
+
+      // ✅ 去重前清理访问码部分
+      const agnosticUrl = getProtocolAgnosticUrl(panUrl);
+      if (agnosticUrl && uniqueLinks.has(agnosticUrl)) continue;
+
+      tracks.push({ name: pageTitle, pan: panUrl, ext: { accessCode: '' } });
+      if (agnosticUrl) uniqueLinks.add(agnosticUrl);
+    }
+
+    return tracks.length
+      ? jsonify({ list: [{ title: '天翼云盘', tracks }] })
+      : jsonify({ list: [] });
+
   } catch (e) {
-    log(`search错误: ${e.message}`);
-    return jsonify({ list: [], pagecount: 0, total: 0 });
+    console.error('获取详情页失败:', e);
+    return jsonify({
+      list: [{
+        title: '错误',
+        tracks: [{ name: '加载失败', pan: 'about:blank', ext: { accessCode: '' } }]
+      }]
+    });
   }
 }
 
-async function init() { return getConfig(); }
-async function home() { const c = await getConfig(); const config = JSON.parse(c); return jsonify({ class: config.tabs, filters: {} }); }
-async function category(tid, pg) { const id = typeof tid === 'object' ? tid.id : tid; return getCards({ id: id, page: pg }); }
-async function detail(id) { return getTracks({ url: id }); }
-async function play(vod_id, vod_name, ext) { return jsonify({ url: ext.url, name: vod_name, play: ext.url }); }
-async function test(ext) { return getConfig(); }
+// search 函数
+async function search(ext) {
+  ext = argsify(ext);
+  let cards = [];
+  let text = encodeURIComponent(ext.text);
+  let page = ext.page || 1;
+
+  const requestUrl = `${BACKEND_URL}/search?text=${text}&page=${page}`;
+  const response = await $fetch.get(requestUrl);
+  const htmlData = getHtmlFromResponse(response);
+  const $ = cheerio.load(htmlData);
+
+  $('.topicItem').each((_, el) => {
+    const a = $(el).find('h2 a');
+    const href = a.attr('href');
+    const title = a.text();
+    const tag = $(el).find('.tag').text();
+    if (!href || /软件|游戏|书籍|图片|公告|音乐|课程/.test(tag)) return;
+    cards.push({
+      vod_id: href,
+      vod_name: title,
+      vod_pic: '',
+      vod_remarks: tag,
+      ext: { url: `${appConfig.site}/${href}` },
+    });
+  });
+  return jsonify({ list: cards });
+}
