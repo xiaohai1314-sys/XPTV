@@ -1,5 +1,5 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.9 (修正分类加载问题)
+// 描述: “趣乐兔”搜索插件 - V2.0 (严谨模仿“天逸搜”结构版)
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.10.105:3005/search";
@@ -9,9 +9,9 @@ const DEBUG = true;
 
 const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
-// ================== 工具方法 ==================
-function log(msg  ) {
-    if (DEBUG) console.log(`[趣乐兔插件 V1.9] ${msg}`);
+// ================== 工具方法 (保持不变 ) ==================
+function log(msg ) {
+    if (DEBUG) console.log(`[趣乐兔插件 V2.0] ${msg}`);
 }
 
 function argsify(ext) {
@@ -22,24 +22,28 @@ function jsonify(obj) {
     return JSON.stringify(obj);
 }
 
-// ================== 插件初始化 (已修正) ==================
+// ================== 插件初始化 (★ 严谨模仿“天逸搜” ★) ==================
+// 1. 定义一个与“天逸搜”结构完全相同的 appConfig 对象
+const appConfig = {
+  ver: 2.0, // 版本号可自定义
+  title: "趣乐兔", // 插件主标题
+  site: SITE_URL,
+  tabs: [{
+    name: '只有搜索功能', // 分类名，与“天逸搜”完全一致
+    ext: {
+      url: '/' // 扩展参数，与“天逸搜”完全一致
+    },
+  }]
+};
+
+// 2. getConfig 函数仅返回这个预定义的 appConfig 对象
 async function getConfig() {
-    return jsonify({
-        ver: 1.9,
-        title: "趣乐兔", // ★ 修正点 1: 插件主标题，将在插件列表中显示
-        site: SITE_URL,
-        tabs: [
-            { 
-              name: "趣乐兔", // ★ 修正点 2: 分类名与主标题一致，确保入口正确
-              ext: { url: '/' } 
-            } 
-        ]
-    });
+  return jsonify(appConfig);
 }
 
-// ================== 兼容性与核心函数 (保持原样) ==================
+// ================== 核心函数 (部分模仿，部分保留) ==================
 
-// 空的 getCards 函数，用于满足App的加载机制
+// 3. getCards 函数，与“天逸搜”的实现完全一致，返回空列表
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -51,7 +55,7 @@ async function getCards(ext) {
 // 您的“分类锁”逻辑，保持不变
 let SEARCH_END = {};
 
-// 核心搜索函数，保持不变
+// 核心搜索函数 search，保持您原有的逻辑不变
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || "";
@@ -107,7 +111,8 @@ async function search(ext) {
     }
 }
 
-// 详情页与兼容函数，保持不变
+// ================== 详情页与兼容函数 (保持不变) ==================
+
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = ext.pan_url || ext.id;
