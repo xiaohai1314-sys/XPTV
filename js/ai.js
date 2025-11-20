@@ -1,16 +1,16 @@
 // 文件名: plugin_funletu.js
-// 描述: “趣乐兔”搜索插件 - V1.9 (像素级模仿最终版)
+// 描述: “趣乐兔”搜索插件 - V1.9 (修正分类加载问题)
 
 // ================== 配置区 ==================
 const API_ENDPOINT = "http://192.168.10.105:3005/search";
 const SITE_URL = "https://pan.funletu.com";
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64  ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const DEBUG = true;
 
 const POSTER_DEFAULT = "https://img.icons8.com/ios-filled/500/film-reel.png";
 
 // ================== 工具方法 ==================
-function log(msg ) {
+function log(msg  ) {
     if (DEBUG) console.log(`[趣乐兔插件 V1.9] ${msg}`);
 }
 
@@ -22,21 +22,24 @@ function jsonify(obj) {
     return JSON.stringify(obj);
 }
 
-// ================== 插件初始化 ==================
+// ================== 插件初始化 (已修正) ==================
 async function getConfig() {
     return jsonify({
         ver: 1.9,
-        title: "趣乐兔搜索",
+        title: "趣乐兔", // ★ 修正点 1: 插件主标题，将在插件列表中显示
         site: SITE_URL,
         tabs: [
-            { name: "仅搜索功能", ext: { url: '/' } }
+            { 
+              name: "趣乐兔", // ★ 修正点 2: 分类名与主标题一致，确保入口正确
+              ext: { url: '/' } 
+            } 
         ]
     });
 }
 
-// ★★★★★【V1.9 核心修正：完全模仿“天逸搜”的函数结构】★★★★★
+// ================== 兼容性与核心函数 (保持原样) ==================
 
-// 1. 增加一个与“天逸搜”一模一样的、空的 getCards 函数
+// 空的 getCards 函数，用于满足App的加载机制
 async function getCards(ext) {
   ext = argsify(ext);
   let cards = [];
@@ -45,10 +48,10 @@ async function getCards(ext) {
   });
 }
 
-// 2. 恢复您的“分类锁”逻辑
+// 您的“分类锁”逻辑，保持不变
 let SEARCH_END = {};
 
-// ================== 核心：搜索（恢复了分类锁的完好逻辑） ==================
+// 核心搜索函数，保持不变
 async function search(ext) {
     ext = argsify(ext);
     const keyword = ext.text || "";
@@ -91,8 +94,6 @@ async function search(ext) {
             log(`[search] 关键词 "${keyword}" 已被锁定为最后一页`);
         }
         
-        // 注意：根据您原脚本的逻辑，这里不应该返回 hasmore，而是让App自己判断
-        // 我们严格遵循您原脚本的返回结构
         return jsonify({
             list: cards,
             page: page,
@@ -106,8 +107,7 @@ async function search(ext) {
     }
 }
 
-// ================== 详情页与兼容函数 (保持不变) ==================
-
+// 详情页与兼容函数，保持不变
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = ext.pan_url || ext.id;
