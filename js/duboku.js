@@ -1,10 +1,10 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v9.8 (超时与体验优化最终版)
+ * 海绵小站前端插件 - 移植增强版 v9.9 (API 兼容性最终修复版)
  *
  * 更新说明:
- * - 核心修复：为调用后端API的 $fetch 请求增加了 30 秒的超时时间，解决因后端处理时间过长导致前端错误判断为失败的问题。
- * - 体验优化：在调用后端期间，为用户提供更明确的等待提示；优化了错误捕获逻辑，能区分超时错误和其他网络错误。
- * - 目标：实现从点击到显示链接的一步到位，无需手动刷新。
+ * - 核心修复：移除了所有对不存在的 `$utils.toast`, `$utils.toastError`, `$utils.toastSuccess` 函数的调用。
+ * - 兼容性修正：改用一个更通用、更可能存在的 `toast()` 函数来显示提示信息，并用 try-catch 包裹，确保即使 toast 函数不存在也不会导致程序崩溃。
+ * - 目标：在所有环境下都能稳定运行，并成功实现 AI 自动回帖和解析。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
@@ -14,19 +14,29 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
 const COOKIE = "bbs_sid=ssi4qit28fqdoksi651al5p196;bbs_token=EnvXd9CmLAoiJHlhbE8IB6nVuOX6_2FqDf2vPXemf8Ao7c7MJH;";
-// 请将下面的YOUR_COMPUTER_IP:3000替换为您电脑的IP地址和端口（例如: http://192.168.10.103:3000/process-thread ）
 const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread"; 
-const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio"; // 替换为您的 API Key
+const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v9.8] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.8] ${msg}`); } }
+function log(msg ) { try { $log(`[海绵小站 v9.9] ${msg}`); } catch (_) { console.log(`[海绵小站 v9.9] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+// ★★★ 兼容性修正：创建一个安全的 toast 函数 ★★★
+function safeToast(message, duration = 3000) {
+    try {
+        // 优先尝试最可能存在的简单 toast 函数
+        toast(message, duration);
+    } catch (e) {
+        // 如果 toast 不存在，就什么也不做，但至少保证程序不崩溃
+        log(`Toast function not available. Message: ${message}`);
+    }
+}
+
 async function fetchWithCookie(url, options = {}) {
   if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
-    $utils.toastError("请先在插件脚本中配置Cookie", 3000);
+    safeToast("请先在插件脚本中配置Cookie");
     throw new Error("Cookie not configured.");
   }
   const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
@@ -49,12 +59,12 @@ async function reply(url) {
     const { data } = await fetchWithCookie(postUrl, { method: 'POST', body: postData, headers: { 'Referer': url } });
     if (data.includes("您尚未登录")) {
       log("回帖失败：Cookie已失效或不正确。");
-      $utils.toastError("Cookie已失效，请重新获取", 3000);
+      safeToast("Cookie已失效，请重新获取");
       return false;
     }
     if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) {
         log("回帖失败：服务器返回拒绝信息。");
-        $utils.toastError("回帖被拒绝，可能是操作太快或内容重复", 3000);
+        safeToast("回帖被拒绝，可能是操作太快或内容重复");
         return false;
     }
     log("回帖请求已发送！");
@@ -111,7 +121,7 @@ async function getCards(ext) {
 }
 
 // =================================================================================
-// =================== getTracks (V9.8 - 超时与体验优化最终版) ===================
+// =================== getTracks (V9.9 - API 兼容性最终修复版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -132,15 +142,13 @@ async function getTracks(ext) {
         log("内容被隐藏，检测到验证码，调用本地后端API处理...");
         
         if (!YOUR_API_ENDPOINT || YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
-            $utils.toastError("请先在插件脚本中配置您电脑的后端IP地址和API Key！", 5000);
+            safeToast("请先在插件脚本中配置您电脑的后端IP地址和API Key！", 5000);
             return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 前端插件未配置后端IP", pan: '', ext: {} }] }] });
         }
         
         try {
-          // ★★★ 优化用户提示 ★★★
-          $utils.toast("🤖 AI识别验证码中，请耐心等待...", 20000); 
+          safeToast("🤖 AI识别验证码中，请耐心等待...", 20000); 
           
-          // ★★★ 核心修复：增加超时设置 (30000毫秒 = 30秒) ★★★
           const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
               threadUrl: detailUrl,
               cookie: COOKIE,
@@ -152,27 +160,25 @@ async function getTracks(ext) {
 
           if (apiResponse.data && apiResponse.data.success) {
               log("后端API处理成功，直接渲染返回的链接列表。");
-              $utils.toastSuccess("✅ AI回帖并解析成功！", 3000);
+              safeToast("✅ AI回帖并解析成功！", 3000);
               return jsonify(apiResponse.data);
           } else {
               const errorMessage = apiResponse.data ? apiResponse.data.message : "未知后端错误";
               log(`后端API返回失败: ${errorMessage}`);
-              $utils.toastError(`❌ 后端处理失败: ${errorMessage}`, 5000);
+              safeToast(`❌ 后端处理失败: ${errorMessage}`, 5000);
               return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
           }
         } catch (e) {
-          // ★★★ 优化错误提示，区分超时和其他错误 ★★★
           let errorReason = e.message || "未知网络错误";
           if (errorReason.toLowerCase().includes('timeout')) {
               errorReason = "后端处理超时，请重试。";
           }
           log(`调用后端API时捕获到错误: ${errorReason}`);
-          $utils.toastError(`❌ 调用后端失败: ${errorReason}`, 5000);
+          safeToast(`❌ 调用后端失败: ${errorReason}`, 5000);
           return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端失败: ${errorReason}`, pan: '', ext: {} }] }] });
         }
 
       } else {
-        // ... (无验证码的本地回帖逻辑保持不变) ...
         log("内容被隐藏，未检测到验证码，使用本地回帖...");
         const replied = await reply(detailUrl);
         if (replied) {
@@ -190,7 +196,6 @@ async function getTracks(ext) {
       }
     }
 
-    // --- 如果无需回帖，或本地回帖成功，则执行原始的提取逻辑 ---
     log("无需回帖或本地回帖已成功，直接解析页面。");
     const mainMessage = $(".message[isfirst='1']");
     if (!mainMessage.length) return jsonify({ list: [] });
@@ -207,22 +212,13 @@ async function getTracks(ext) {
           let specialCode = '';
           const regex = /\(([^)]+)\)|\[([^\]]+)\]|\{([^}]+)\}|\<([^>]+)\>/g;
           const matches = raw.matchAll(regex);
-          for (const match of matches) {
-              const char = match[1] || match[2] || match[3] || match[4];
-              if (char) {
-                  specialCode += char;
-              }
-          }
-          if (specialCode.length > 0) {
-              return specialCode.toLowerCase();
-          }
+          for (const match of matches) { const char = match[1] || match[2] || match[3] || match[4]; if (char) specialCode += char; }
+          if (specialCode.length > 0) return specialCode.toLowerCase();
       }
       const codeMatch = raw.match(/(?:访问码|提取码|密码)\s*[:：\s]*([\s\S]+)/);
       const extracted = codeMatch ? codeMatch[1].trim() : raw.trim();
       let converted = '';
-      for (const c of extracted) {
-        converted += numMap[c] || charMap[c] || c;
-      }
+      for (const c of extracted) { converted += numMap[c] || charMap[c] || c; }
       const finalMatch = converted.match(/^[a-zA-Z0-9]+/);
       return finalMatch ? finalMatch[0].toLowerCase() : null;
     }
@@ -232,30 +228,16 @@ async function getTracks(ext) {
       let code = null;
       let el = $(node).closest("p, div, h3");
       if (!el.length) el = $(node);
-
       const searchEls = [el];
       let next = el.next();
-      for (let i = 0; i < 3 && next.length; i++) {
-        searchEls.push(next);
-        next = next.next();
-      }
-
+      for (let i = 0; i < 3 && next.length; i++) { searchEls.push(next); next = next.next(); }
       for (const e of searchEls) {
         const text = e.text().trim();
-        if (text.match(/(?:访问码|提取码|密码)/)) {
-          const found = purify(text);
-          if (found) { code = found; break; }
-        }
-        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) {
-          const found = purify(text);
-          if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; }
-        }
+        if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } }
+        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
       }
-
       const existing = resultsMap.get(link);
-      if (!existing || (!existing.code && code)) {
-        resultsMap.set(link, { link, code });
-      }
+      if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); }
     });
 
     const tracks = [];
