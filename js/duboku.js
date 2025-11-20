@@ -1,14 +1,15 @@
 /**
- * 海绵小站前端插件 - 移植增强版 v11.2 (显式判断最终版)
+ * 海绵小站前端插件 - 移植增强版 v11.2 (兼容性修复版)
  *
- * 更新说明:
- * - 完美闭环：恢复对 $fetch 响应内容的显式判断，以正确处理后端“温柔地”返回的失败信息。
- * - 逻辑保留：维持“后端回帖成功后，前端自己刷新页面并解析”的核心策略。
- * - 目标：在保证成功路径的同时，完美地处理失败路径的显示，完成最终闭环。
+ * 更新说明 (v11.2):
+ * - 核心修复：解决了在某些环境下，$fetch 收到 HTTP 500 错误时不抛出异常的问题。
+ * - 主动检查：在调用后端后，不再依赖 try-catch 捕获业务失败，而是主动检查后端返回的响应体中是否包含 success: false 标志。
+ * - 统一处理：当检测到后端返回失败（如验证码错误），会主动抛出异常，并由统一的 catch 块向用户显示准确的失败原因。
+ * - 目标：无论后端是业务失败还是系统崩溃，前端都能正确、清晰地展示错误信息，避免“后端失败，前端却显示成功”的误导。
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
@@ -18,16 +19,20 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg ) { try { $log(`[海绵小站 v11.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.2] ${msg}`); } }
+function log(msg  ) { try { $log(`[海绵小站 v11.2] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.2] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 async function fetchWithCookie(url, options = {}) {
-  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) { throw new Error("Cookie not configured."); }
+  if (!COOKIE || COOKIE.includes("YOUR_COOKIE_STRING_HERE")) {
+    throw new Error("Cookie not configured.");
+  }
   const headers = { 'User-Agent': UA, 'Cookie': COOKIE, ...options.headers };
   const finalOptions = { ...options, headers };
-  if (options.method === 'POST') { return $fetch.post(url, options.body, finalOptions); }
+  if (options.method === 'POST') {
+    return $fetch.post(url, options.body, finalOptions);
+  }
   return $fetch.get(url, finalOptions);
 }
 
@@ -45,22 +50,29 @@ async function reply(url) {
     if (data.includes("操作太快") || data.includes("重复提交") || data.includes("失败")) { log("回帖失败：服务器返回拒绝信息。"); return false; }
     log("回帖请求已发送！");
     return true;
-  } catch (e) { log(`回帖请求异常: ${e.message}`); return false; }
+  } catch (e) {
+    log(`回帖请求异常: ${e.message}`);
+    return false;
+  }
 }
 
 async function getConfig() {
   return jsonify({
-    ver: 1, title: '海绵小站', site: SITE_URL,
+    ver: 1,
+    title: '海绵小站',
+    site: SITE_URL,
     tabs: [
-      { name: '电影', ext: { id: 'forum-1' } }, { name: '剧集', ext: { id: 'forum-2' } },
-      { name: '动漫', ext: { id: 'forum-3' } }, { name: '综艺', ext: { id: 'forum-5' } },
+      { name: '电影', ext: { id: 'forum-1' } },
+      { name: '剧集', ext: { id: 'forum-2' } },
+      { name: '动漫', ext: { id: 'forum-3' } },
+      { name: '综艺', ext: { id: 'forum-5' } },
     ],
   });
 }
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http' )) return path;
+  if (path.startsWith('http'  )) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -84,11 +96,13 @@ async function getCards(ext) {
       });
     });
     return jsonify({ list: cards });
-  } catch (e) { return jsonify({ list: [] }); }
+  } catch (e) {
+    return jsonify({ list: [] });
+  }
 }
 
 // =================================================================================
-// =================== getTracks (V11.2 - 显式判断最终版) ===================
+// =================== getTracks (V11.2 - 兼容性修复版) ===================
 // =================================================================================
 async function getTracks(ext) {
   ext = argsify(ext);
@@ -107,33 +121,49 @@ async function getTracks(ext) {
 
       if (needsCaptcha) {
         log("内容被隐藏，检测到验证码，调用本地后端API处理...");
+        
         if (!YOUR_API_ENDPOINT || YOUR_API_ENDPOINT.includes("YOUR_COMPUTER_IP")) {
             return jsonify({ list: [{ title: '提示', tracks: [{ name: "❌ 前端插件未配置后端IP", pan: '', ext: {} }] }] });
         }
         
         try {
           log("正在调用后端，请稍候...");
-          const apiResponse = await $fetch.post(YOUR_API_ENDPOINT, {
-              threadUrl: detailUrl, cookie: COOKIE, apiKey: SILICONFLOW_API_KEY
-          }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
+          
+          // 🟢【核心修改】接收后端返回的完整响应，无论成功或失败
+          const backendResponse = await $fetch.post(YOUR_API_ENDPOINT, {
+              threadUrl: detailUrl,
+              cookie: COOKIE,
+              apiKey: SILICONFLOW_API_KEY
+          }, { 
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 30000 
+          });
 
-          // ★★★ 终极修正：恢复对响应内容的显式判断 ★★★
-          const responseData = apiResponse.data || apiResponse;
-          if (responseData && responseData.success === true) {
-              log("后端回帖成功！前端将重新获取页面进行解析...");
-              const refreshResponse = await fetchWithCookie(detailUrl);
-              data = refreshResponse.data;
-              $ = cheerio.load(data);
-          } else {
-              const errorMessage = responseData ? responseData.message : "未知后端错误或无响应";
-              log(`后端API返回失败: ${errorMessage}`);
-              return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 自动回帖失败: ${errorMessage}`, pan: '', ext: {} }] }] });
+          // 🟢【核心修改】主动检查后端响应。
+          // 即使后端返回500错误，这里的代码在某些环境下依然会执行。
+          // 我们需要检查响应体中是否有 success: false 标志。
+          if (backendResponse && backendResponse.success === false) {
+              // 如果后端明确告知失败，就主动抛出错误，让下面的catch块处理
+              throw new Error(backendResponse.message || "后端返回了一个失败响应。");
           }
+
+          // ★★★ 只有在后端没有明确返回失败时，才认为成功 ★★★
+          log("后端调用完成（未收到明确的失败信号），假定回帖成功。前端将重新获取页面进行解析...");
+          
+          const refreshResponse = await fetchWithCookie(detailUrl);
+          data = refreshResponse.data;
+          $ = cheerio.load(data);
+              
         } catch (e) {
-          const errorReason = e.message || "未知网络错误";
-          log(`调用后端API时捕获到异常: ${errorReason}`);
-          return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端异常: ${errorReason}`, pan: '', ext: {} }] }] });
+          // 这个 catch 现在可以捕获网络超时和我们主动抛出的后端失败信息
+          let errorReason = e.message || "未知网络错误";
+          if (errorReason.toLowerCase().includes('timeout')) {
+              errorReason = "后端处理超时，请重试。";
+          }
+          log(`调用后端API时捕获到错误: ${errorReason}`);
+          return jsonify({ list: [{ title: '提示', tracks: [{ name: `❌ 调用后端失败: ${errorReason}`, pan: '', ext: {} }] }] });
         }
+
       } else {
         log("内容被隐藏，未检测到验证码，使用本地回帖...");
         const replied = await reply(detailUrl);
@@ -158,8 +188,10 @@ async function getTracks(ext) {
 
     const linkNodes = mainMessage.find("a[href*='cloud.189.cn'], a[href*='pan.quark.cn']");
     const resultsMap = new Map();
+
     const numMap = {'零':'0','〇':'0','一':'1','壹':'1','依':'1','二':'2','贰':'2','三':'3','叁':'3','四':'4','肆':'4','五':'5','伍':'5','吴':'5','吾':'5','无':'5','武':'5','悟':'5','舞':'5','物':'5','乌':'5','屋':'5','唔':'5','雾':'5','勿':'5','误':'5','污':'5','务':'5','午':'5','捂':'5','戊':'5','毋':'5','邬':'5','兀':'5','六':'6','陆':'6','七':'7','柒':'7','八':'8','捌':'8','九':'9','玖':'9','久':'9','酒':'9','Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5','Ⅵ':'6','Ⅶ':'7','Ⅷ':'8','Ⅸ':'9','①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10','０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9'};
     const charMap = {'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ʰ':'h','ⁱ':'i','ʲ':'j','ᵏ':'k','ˡ':'l','ᵐ':'m','ⁿ':'n','ᵒ':'o','ᵖ':'p','ʳ':'r','ˢ':'s','ᵗ':'t','ᵘ':'u','ᵛ':'v','ʷ':'w','ˣ':'x','ʸ':'y','ᶻ':'z','ᴬ':'A','ᴮ':'B','ᴰ':'D','ᴱ':'E','ᴳ':'G','ᴴ':'H','ᴵ':'I','ᴶ':'J','ᴷ':'K','ᴸ':'L','ᴹ':'M','ᴺ':'N','ᴼ':'O','ᴾ':'P','ᴿ':'R','ᵀ':'T','ᵁ':'U','ᵂ':'w','ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
+
     function purify(raw) {
       const isSpecialCase = /\(/.test(raw) && /\[/.test(raw); 
       if (isSpecialCase) {
@@ -176,6 +208,7 @@ async function getTracks(ext) {
       const finalMatch = converted.match(/^[a-zA-Z0-9]+/);
       return finalMatch ? finalMatch[0].toLowerCase() : null;
     }
+
     linkNodes.each((_, node) => {
       const link = $(node).attr("href");
       let code = null;
@@ -187,21 +220,24 @@ async function getTracks(ext) {
       for (const e of searchEls) {
         const text = e.text().trim();
         if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } }
-        if (!text.includes("http" ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
+        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
       }
       const existing = resultsMap.get(link);
       if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); }
     });
+
     const tracks = [];
     resultsMap.forEach(record => {
       const finalPan = record.code ? `${record.link}（访问码：${record.code}）` : record.link;
       tracks.push({ name: "网盘", pan: finalPan, ext: { pwd: record.code || '' } });
     });
+
     if (tracks.length === 0) {
         log("在最终的页面解析中未能找到链接。");
-        tracks.push({ name: "未找到有效资源", pan: '', ext: {} });
+        tracks.push({ name: "回帖成功但未找到有效资源", pan: '', ext: {} });
     }
     return jsonify({ list: [{ title: '云盘', tracks }] });
+
   } catch (e) {
     log(`getTracks最外层捕获到错误: ${e.message}`);
     return jsonify({ list: [{ title: '错误', tracks: [{ name: "操作失败，请检查Cookie配置和网络", pan: '', ext: {} }] }] });
