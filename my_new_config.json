@@ -1,0 +1,24 @@
+{
+  "name": "我的全新配置",
+  "author": "xiaohai1314-sys",
+  "version": "1.0.0",
+  "spider": "https://raw.githubusercontent.com/xiaohai1314-sys/XPTV/main/js/seedhub.js",
+  "sites": [
+    {
+      "key": "SeedHub_New",
+      "name": "我的新站点",
+      "type": 3,
+      "api": "csp_SeedHub",
+      "searchable": 1,
+      "changeable": 1,
+      "ext": {
+        "config": "/api/seedhub/config",
+        "cards": "/api/seedhub/cards",
+        "tracks": "/api/seedhub/tracks",
+        "search": "/api/seedhub/search",
+        "playinfo": "/api/seedhub/playinfo"
+      }
+    }
+  ],
+  "parses": []
+}
