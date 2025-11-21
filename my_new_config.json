@@ -1,24 +1,35 @@
-{
-  "name": "我的全新配置",
-  "author": "xiaohai1314-sys",
-  "version": "1.0.0",
-  "spider": "https://raw.githubusercontent.com/xiaohai1314-sys/XPTV/main/js/seedhub.js",
-  "sites": [
-    {
-      "key": "SeedHub_New",
-      "name": "我的新站点",
-      "type": 3,
-      "api": "csp_SeedHub",
-      "searchable": 1,
-      "changeable": 1,
-      "ext": {
-        "config": "/api/seedhub/config",
-        "cards": "/api/seedhub/cards",
-        "tracks": "/api/seedhub/tracks",
-        "search": "/api/seedhub/search",
-        "playinfo": "/api/seedhub/playinfo"
-      }
-    }
-  ],
-  "parses": []
-}
+// 这个文件是专门为 miraplay 播放器制作的包装器
+
+globalThis.websiteBundle = function() {
+  // 下面的 `return` 后面跟着一个由反引号(`)包裹的巨大字符串
+  // 这个字符串的内容就是一个标准的 JSON 配置文件
+  return `
+    ({
+      "name": "小海的专属源",
+      "author": "xiaohai1314-sys",
+      "version": "1.0.1",
+      
+      // 【核心】这里的 "spider" 字段必须指向您刚刚完成的 seedhub.js 文件的 Raw URL
+      "spider": "https://raw.githubusercontent.com/xiaohai1314-sys/XPTV/main/js/seedhub.js",
+      
+      "sites": [
+        {
+          "key": "SeedHub",
+          "name": "SeedHub - 影视",
+          "type": 3,
+          "api": "csp_SeedHub",
+          "searchable": 1,
+          "changeable": 1,
+          "ext": {
+            "config": "/api/seedhub/config",
+            "cards": "/api/seedhub/cards",
+            "tracks": "/api/seedhub/tracks",
+            "search": "/api/seedhub/search",
+            "playinfo": "/api/seedhub/playinfo"
+          }
+        }
+      ],
+      "parses": []
+    } )
+  `;
+};
