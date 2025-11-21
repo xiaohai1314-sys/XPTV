@@ -9,7 +9,8 @@
  */
 
 const SITE_URL = "https://www.haimianxz.com";
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X  ) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+// ★★★ UA已修改为电脑端 ★★★
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64 ) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 const cheerio = createCheerio();
 const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
@@ -19,7 +20,7 @@ const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread";
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
-function log(msg  ) { try { $log(`[海绵小站 v11.5] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.5] ${msg}`); } }
+function log(msg   ) { try { $log(`[海绵小站 v11.5] ${msg}`); } catch (_) { console.log(`[海绵小站 v11.5] ${msg}`); } }
 function argsify(ext) { if (typeof ext === 'string') { try { return JSON.parse(ext); } catch (e) { return {}; } } return ext || {}; }
 function jsonify(data) { return JSON.stringify(data); }
 function getRandomText(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -72,7 +73,7 @@ async function getConfig() {
 
 function getCorrectPicUrl(path) {
   if (!path) return FALLBACK_PIC;
-  if (path.startsWith('http'  )) return path;
+  if (path.startsWith('http'   )) return path;
   const cleanPath = path.startsWith('./') ? path.substring(2) : path;
   return `${SITE_URL}/${cleanPath}`;
 }
@@ -219,7 +220,7 @@ async function getTracks(ext) {
       for (const e of searchEls) {
         const text = e.text().trim();
         if (text.match(/(?:访问码|提取码|密码)/)) { const found = purify(text); if (found) { code = found; break; } }
-        if (!text.includes("http"  ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
+        if (!text.includes("http"   ) && !text.includes("/") && !text.includes(":")) { const found = purify(text); if (found && /^[a-z0-9]{4,8}$/i.test(found)) { code = found; break; } }
       }
       const existing = resultsMap.get(link);
       if (!existing || (!existing.code && code)) { resultsMap.set(link, { link, code }); }
