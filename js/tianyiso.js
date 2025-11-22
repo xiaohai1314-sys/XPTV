@@ -114,7 +114,6 @@ async function getTracks(ext) {
     
     const $ = cheerio.load(detailHtml);
     
-    // 【✅ 已修改】 - 适配新的资源列表选择器，并保留您的命名逻辑
     const resourceGroups = [];
     const groupTabs = $('#downlist .hl-tabs-btn-down');
 
@@ -136,6 +135,17 @@ async function getTracks(ext) {
             const originalTitle = linkElement.find('em.filename').text().trim();
             
             if (finalPanUrl && originalTitle) {
+                // --- 【⭐ 新增的链接清理逻辑】 ---
+                let cleanedUrl = finalPanUrl;
+                
+                // 第一步：将 115cdn.com 转换成 115.com
+                cleanedUrl = cleanedUrl.replace('115cdn.com', '115.com');
+                
+                // 第二步：移除尾部所有非字母和非数字的特殊符号
+                // 正则表达式 /[^a-zA-Z0-9]+$/ 匹配链接末尾连续的非字母数字字符
+                cleanedUrl = cleanedUrl.replace(/[^a-zA-Z0-9]+$/, '');
+                // --- 【清理逻辑结束】 ---
+
                 // --- 【✅ 完全保留】您强大的自定义命名逻辑 ---
                 let newName = originalTitle;
                 const specMatch = originalTitle.match(/(合集|次时代|\d+部|\d{4}p|4K|2160p|1080p|HDR|DV|杜比|高码|内封|特效|字幕|原盘|REMUX|[\d\.]+G[B]?)/ig);
@@ -150,7 +160,7 @@ async function getTracks(ext) {
 
                 tracks.push({
                     name: newName,
-                    pan: finalPanUrl,
+                    pan: cleanedUrl, // <-- 使用清理后的链接
                 });
             }
         });
