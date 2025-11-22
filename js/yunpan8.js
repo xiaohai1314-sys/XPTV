@@ -16,7 +16,7 @@ const FALLBACK_PIC = "https://www.haimianxz.com/view/img/logo.png";
 
 // ★★★★★【用户配置区】★★★★★
 const COOKIE = "bbs_sid=ssi4qit28fqdoksi651al5p196;bbs_token=EnvXd9CmLAoiJHlhbE8IB6nVuOX6_2FqDf2vPXemf8Ao7c7MJH;";
-const YOUR_API_ENDPOINT = "http://192.168.10.103:3000/process-thread"; 
+const YOUR_API_ENDPOINT = "http://192.168.1.3:3000/process-thread"; 
 const SILICONFLOW_API_KEY = "sk-hidsowdpkargkafrjdyxxshyanrbcvxjsakfzvpatipydeio";
 // ★★★★★★★★★★★★★★★★★★★★★★★★★
 
